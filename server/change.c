@@ -243,7 +243,7 @@ static inline void insert_change( struct dir *dir )
     sigset_t sigset;
 
     sigemptyset( &sigset );
-    sigaddset( &sigset, SIGIO );
+//    sigaddset( &sigset, SIGIO );
     sigprocmask( SIG_BLOCK, &sigset, NULL );
     list_add_head( &change_list, &dir->entry );
     sigprocmask( SIG_UNBLOCK, &sigset, NULL );
@@ -255,7 +255,7 @@ static inline void remove_change( struct dir *dir )
     sigset_t sigset;
 
     sigemptyset( &sigset );
-    sigaddset( &sigset, SIGIO );
+//    sigaddset( &sigset, SIGIO );
     sigprocmask( SIG_BLOCK, &sigset, NULL );
     list_remove( &dir->entry );
     sigprocmask( SIG_UNBLOCK, &sigset, NULL );

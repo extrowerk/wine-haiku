@@ -554,7 +554,7 @@ static HRESULT parse_metadata_header(ASSEMBLY *assembly, DWORD *hdrsz)
     ULONG rva;
 
     rva = assembly->corhdr->MetaData.VirtualAddress;
-    ptr = ImageRvaToVa(assembly->nthdr, assembly->data, rva, NULL);
+    ptr = NULL;//ImageRvaToVa(assembly->nthdr, assembly->data, rva, NULL);
     if (!ptr)
         return E_FAIL;
 
@@ -593,7 +593,7 @@ static HRESULT parse_clr_metadata(ASSEMBLY *assembly)
         return hr;
 
     rva = assembly->corhdr->MetaData.VirtualAddress;
-    ptr = ImageRvaToVa(assembly->nthdr, assembly->data, rva + hdrsz, NULL);
+    ptr = NULL;//ImageRvaToVa(assembly->nthdr, assembly->data, rva + hdrsz, NULL);
     if (!ptr)
         return E_FAIL;
 
@@ -626,8 +626,8 @@ static HRESULT parse_clr_metadata(ASSEMBLY *assembly)
 static HRESULT parse_pe_header(ASSEMBLY *assembly)
 {
     IMAGE_DATA_DIRECTORY *datadirs;
-
-    assembly->nthdr = ImageNtHeader(assembly->data);
+return E_FAIL;
+    assembly->nthdr = NULL;//ImageNtHeader(assembly->data);
     if (!assembly->nthdr)
         return E_FAIL;
 
@@ -653,8 +653,8 @@ static HRESULT parse_pe_header(ASSEMBLY *assembly)
         return E_FAIL;
     }
 
-    assembly->corhdr = ImageRvaToVa(assembly->nthdr, assembly->data,
-        datadirs[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress, NULL);
+    assembly->corhdr = NULL;//ImageRvaToVa(assembly->nthdr, assembly->data,
+        //datadirs[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress, NULL);
     if (!assembly->corhdr)
         return E_FAIL;
 

@@ -631,7 +631,7 @@ AC_CHECK_HEADERS([sys/thr.h],,,
 #include <ucontext.h>
 #endif])
 
-AC_CHECK_HEADERS([pthread_np.h],,,
+AC_CHECK_HEADERS([_np.h],,,
 [#ifdef HAVE_PTHREAD_H
 #include <pthread.h>
 #endif])
@@ -859,7 +859,7 @@ dnl **** Check for pthread ****
 
 if test "$ac_cv_header_pthread_h" = "yes"
 then
-    AC_CHECK_LIB(pthread,pthread_create,[AC_SUBST(LIBPTHREAD,"-lpthread")])
+    AC_CHECK_LIB(root,pthread_create,[AC_SUBST(LIBPTHREAD,"-lroot")])
 fi
 WINE_ERROR_WITH(pthread,[test "x$LIBPTHREAD" = "x"],[pthread ${notice_platform}development files not found.
 Wine cannot support threads without libpthread.])
@@ -1031,11 +1031,11 @@ This probably prevents linking to OpenGL. Try deleting the file and restarting c
 	                            else
 	                                opengl_msg="No OpenGL library found on this system."
 	                            fi],
-				    $X_LIBS $XLIB -lm $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib)],
-			     $X_LIBS $XLIB -lm $X_EXTRA_LIBS)
+                                    $X_LIBS $XLIB  $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib)],
+                             $X_LIBS $XLIB  $X_EXTRA_LIBS)
                  if test "$ac_cv_header_GL_glu_h" = "yes"
                  then
-                    WINE_CHECK_SONAME(GLU,gluLookAt,,,[$OPENGL_LIBS $X_LIBS $X_PRE_LIBS $XLIB -lm $X_EXTRA_LIBS])
+                    WINE_CHECK_SONAME(GLU,gluLookAt,,,[$OPENGL_LIBS $X_LIBS $X_PRE_LIBS $XLIB  $X_EXTRA_LIBS])
                  fi
                  WINE_NOTICE_WITH(glu,[test "x$ac_cv_lib_soname_GLU" = "x"],
                                  [libGLU ${notice_platform}development files not found, GLU won't be supported.])
@@ -1344,7 +1344,7 @@ then
     AC_DEFINE(HAVE_PPDEV, 1, [Define if we can use ppdev.h for parallel port access])
 fi
 
-dnl **** Check for pthread functions ****
+dnl **** Check for functions ****
 WINE_CHECK_LIB_FUNCS(\
         pthread_attr_get_np \
         pthread_getattr_np \
@@ -1490,10 +1490,10 @@ WINE_WARNING_WITH(jpeg,[test "x$ac_cv_lib_soname_jpeg" = "x"],
 dnl **** Check for libpng ****
 if test "$ac_cv_header_png_h" = "yes"
 then
-    WINE_CHECK_SONAME(png,png_create_read_struct,,,-lm -lz,[[libpng[[0-9]]*]])
+    WINE_CHECK_SONAME(png,png_create_read_struct,,, -lz,[[libpng[[0-9]]*]])
     AC_CHECK_LIB(png,png_set_expand_gray_1_2_4_to_8,
 	[AC_DEFINE(HAVE_PNG_SET_EXPAND_GRAY_1_2_4_TO_8,1,[Define to 1 if libpng has the png_set_expand_gray_1_2_4_to_8 function.])]
-	,,-lm -lz)
+        ,, -lz)
 elif test -n "$X_CFLAGS" -a "x$with_png" != "xno"
 then
     dnl libpng is in the X directory on Mac OS X
@@ -1505,9 +1505,9 @@ then
     if test "$ac_cv_header_png_h" = "yes"
     then
         AC_SUBST(PNGINCL,"$X_CFLAGS")
-        WINE_CHECK_SONAME(png,png_create_read_struct,,,[$X_LIBS -lm -lz],[[libpng[[0-9]]*]])
+        WINE_CHECK_SONAME(png,png_create_read_struct,,,[$X_LIBS  -lz],[[libpng[[0-9]]*]])
         AC_CHECK_LIB(png,png_set_expand_gray_1_2_4_to_8,
-		[AC_DEFINE(HAVE_PNG_SET_EXPAND_GRAY_1_2_4_TO_8,1)],,[$X_LIBS -lm -lz])
+                [AC_DEFINE(HAVE_PNG_SET_EXPAND_GRAY_1_2_4_TO_8,1)],,[$X_LIBS  -lz])
     fi
 fi
 WINE_WARNING_WITH(png,[test "x$ac_cv_lib_soname_png" = "x"],
@@ -2288,7 +2288,7 @@ WINE_CONFIG_DLL(d3dx9_32)
 WINE_CONFIG_DLL(d3dx9_33)
 WINE_CONFIG_DLL(d3dx9_34)
 WINE_CONFIG_DLL(d3dx9_35)
-WINE_CONFIG_DLL(d3dx9_36,,[d3dx9])
+dnl WINE_CONFIG_DLL(d3dx9_36,,[d3dx9])
 WINE_CONFIG_TEST(dlls/d3dx9_36/tests)
 WINE_CONFIG_DLL(d3dx9_37)
 WINE_CONFIG_DLL(d3dx9_38)
@@ -2298,7 +2298,7 @@ WINE_CONFIG_DLL(d3dx9_41)
 WINE_CONFIG_DLL(d3dx9_42)
 WINE_CONFIG_DLL(d3dxof,,[d3dxof])
 WINE_CONFIG_TEST(dlls/d3dxof/tests)
-WINE_CONFIG_DLL(dbghelp,,[dbghelp])
+dnl WINE_CONFIG_DLL(dbghelp,,[dbghelp])
 WINE_CONFIG_DLL(dciman32,,[dciman32])
 WINE_CONFIG_DLL(ddeml.dll16,enable_win16)
 WINE_CONFIG_DLL(ddraw,,[ddraw])
@@ -2370,7 +2370,7 @@ WINE_CONFIG_DLL(iccvid)
 WINE_CONFIG_DLL(icmp)
 WINE_CONFIG_DLL(ifsmgr.vxd,enable_win16)
 WINE_CONFIG_DLL(imaadp32.acm)
-WINE_CONFIG_DLL(imagehlp,,[imagehlp])
+dnl WINE_CONFIG_DLL(imagehlp,,[imagehlp])
 WINE_CONFIG_TEST(dlls/imagehlp/tests)
 WINE_CONFIG_DLL(imm.dll16,enable_win16)
 WINE_CONFIG_DLL(imm32,,[imm32])

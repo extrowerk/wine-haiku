@@ -283,7 +283,7 @@ void init_signals(void)
     sigaddset( &blocked_sigset, SIGHUP );
     sigaddset( &blocked_sigset, SIGINT );
     sigaddset( &blocked_sigset, SIGALRM );
-    sigaddset( &blocked_sigset, SIGIO );
+//    sigaddset( &blocked_sigset, SIGIO );
     sigaddset( &blocked_sigset, SIGQUIT );
     sigaddset( &blocked_sigset, SIGTERM );
 #ifdef SIG_PTHREAD_CANCEL

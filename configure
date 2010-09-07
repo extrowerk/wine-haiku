@@ -6204,15 +6204,15 @@ fi
 done
 
 
-for ac_header in pthread_np.h
+for ac_header in _np.h
 do :
-  ac_fn_c_check_header_compile "$LINENO" "pthread_np.h" "ac_cv_header_pthread_np_h" "#ifdef HAVE_PTHREAD_H
+  ac_fn_c_check_header_compile "$LINENO" "_np.h" "ac_cv_header__np_h" "#ifdef HAVE_PTHREAD_H
 #include <pthread.h>
 #endif
 "
-if test "x$ac_cv_header_pthread_np_h" = x""yes; then :
+if test "x$ac_cv_header__np_h" = x""yes; then :
   cat >>confdefs.h <<_ACEOF
-#define HAVE_PTHREAD_NP_H 1
+#define HAVE__NP_H 1
 _ACEOF
 
 fi
@@ -7075,13 +7075,13 @@ fi
 
 if test "$ac_cv_header_pthread_h" = "yes"
 then
-    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for pthread_create in -lpthread" >&5
-$as_echo_n "checking for pthread_create in -lpthread... " >&6; }
-if test "${ac_cv_lib_pthread_pthread_create+set}" = set; then :
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for pthread_create in -lroot" >&5
+$as_echo_n "checking for pthread_create in -lroot... " >&6; }
+if test "${ac_cv_lib_root_pthread_create+set}" = set; then :
   $as_echo_n "(cached) " >&6
 else
   ac_check_lib_save_LIBS=$LIBS
-LIBS="-lpthread  $LIBS"
+LIBS="-lroot  $LIBS"
 cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -7101,18 +7101,18 @@ return pthread_create ();
 }
 _ACEOF
 if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_lib_pthread_pthread_create=yes
+  ac_cv_lib_root_pthread_create=yes
 else
-  ac_cv_lib_pthread_pthread_create=no
+  ac_cv_lib_root_pthread_create=no
 fi
 rm -f core conftest.err conftest.$ac_objext \
     conftest$ac_exeext conftest.$ac_ext
 LIBS=$ac_check_lib_save_LIBS
 fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_pthread_pthread_create" >&5
-$as_echo "$ac_cv_lib_pthread_pthread_create" >&6; }
-if test "x$ac_cv_lib_pthread_pthread_create" = x""yes; then :
-  LIBPTHREAD="-lpthread"
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_root_pthread_create" >&5
+$as_echo "$ac_cv_lib_root_pthread_create" >&6; }
+if test "x$ac_cv_lib_root_pthread_create" = x""yes; then :
+  LIBPTHREAD="-lroot"
 
 fi
 
@@ -8682,7 +8682,7 @@ if test "${ac_cv_lib_soname_GL+set}" = set; then :
   $as_echo_n "(cached) " >&6
 else
   ac_check_soname_save_LIBS=$LIBS
-LIBS="-lGL $X_LIBS $XLIB -lm $X_EXTRA_LIBS $LIBS"
+LIBS="-lGL $X_LIBS $XLIB  $X_EXTRA_LIBS $LIBS"
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -8721,7 +8721,7 @@ if test "${ac_cv_lib_soname_GL+set}" = set; then :
   $as_echo_n "(cached) " >&6
 else
   ac_check_soname_save_LIBS=$LIBS
-LIBS="-lGL $X_LIBS $XLIB -lm $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib $LIBS"
+LIBS="-lGL $X_LIBS $XLIB  $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib $LIBS"
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -8795,7 +8795,7 @@ if test "${ac_cv_lib_soname_GLU+set}" = set; then :
   $as_echo_n "(cached) " >&6
 else
   ac_check_soname_save_LIBS=$LIBS
-LIBS="-lGLU $OPENGL_LIBS $X_LIBS $X_PRE_LIBS $XLIB -lm $X_EXTRA_LIBS $LIBS"
+LIBS="-lGLU $OPENGL_LIBS $X_LIBS $X_PRE_LIBS $XLIB  $X_EXTRA_LIBS $LIBS"
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -11133,7 +11133,7 @@ if test "${ac_cv_lib_soname_png+set}" = set; then :
   $as_echo_n "(cached) " >&6
 else
   ac_check_soname_save_LIBS=$LIBS
-LIBS="-lpng -lm -lz $LIBS"
+LIBS="-lpng -lz $LIBS"
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -11183,7 +11183,7 @@ if test "${ac_cv_lib_png_png_set_expand_gray_1_2_4_to_8+set}" = set; then :
   $as_echo_n "(cached) " >&6
 else
   ac_check_lib_save_LIBS=$LIBS
-LIBS="-lpng -lm -lz $LIBS"
+LIBS="-lpng -lz $LIBS"
 cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -11248,7 +11248,7 @@ if test "${ac_cv_lib_soname_png+set}" = set; then :
   $as_echo_n "(cached) " >&6
 else
   ac_check_soname_save_LIBS=$LIBS
-LIBS="-lpng $X_LIBS -lm -lz $LIBS"
+LIBS="-lpng $X_LIBS  -lz $LIBS"
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -11298,7 +11298,7 @@ if test "${ac_cv_lib_png_png_set_expand_gray_1_2_4_to_8+set}" = set; then :
   $as_echo_n "(cached) " >&6
 else
   ac_check_lib_save_LIBS=$LIBS
-LIBS="-lpng $X_LIBS -lm -lz $LIBS"
+LIBS="-lpng $X_LIBS  -lz $LIBS"
 cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -14352,7 +14352,6 @@ wine_fn_config_dll d3dx9_32 enable_d3dx9_32
 wine_fn_config_dll d3dx9_33 enable_d3dx9_33
 wine_fn_config_dll d3dx9_34 enable_d3dx9_34
 wine_fn_config_dll d3dx9_35 enable_d3dx9_35
-wine_fn_config_dll d3dx9_36 enable_d3dx9_36 d3dx9
 wine_fn_config_test dlls/d3dx9_36/tests d3dx9_36_test
 wine_fn_config_dll d3dx9_37 enable_d3dx9_37
 wine_fn_config_dll d3dx9_38 enable_d3dx9_38
@@ -14362,7 +14361,6 @@ wine_fn_config_dll d3dx9_41 enable_d3dx9_41
 wine_fn_config_dll d3dx9_42 enable_d3dx9_42
 wine_fn_config_dll d3dxof enable_d3dxof d3dxof
 wine_fn_config_test dlls/d3dxof/tests d3dxof_test
-wine_fn_config_dll dbghelp enable_dbghelp dbghelp
 wine_fn_config_dll dciman32 enable_dciman32 dciman32
 wine_fn_config_dll ddeml.dll16 enable_win16
 wine_fn_config_dll ddraw enable_ddraw ddraw
@@ -14434,7 +14432,6 @@ wine_fn_config_dll iccvid enable_iccvid
 wine_fn_config_dll icmp enable_icmp
 wine_fn_config_dll ifsmgr.vxd enable_win16
 wine_fn_config_dll imaadp32.acm enable_imaadp32_acm
-wine_fn_config_dll imagehlp enable_imagehlp imagehlp
 wine_fn_config_test dlls/imagehlp/tests imagehlp_test
 wine_fn_config_dll imm.dll16 enable_win16
 wine_fn_config_dll imm32 enable_imm32 imm32

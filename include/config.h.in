@@ -640,9 +640,6 @@
 /* Define to 1 if you have the <pthread.h> header file. */
 #undef HAVE_PTHREAD_H
 
-/* Define to 1 if you have the <pthread_np.h> header file. */
-#undef HAVE_PTHREAD_NP_H
-
 /* Define to 1 if you have the <pwd.h> header file. */
 #undef HAVE_PWD_H
 
@@ -1113,6 +1110,9 @@
 
 /* Define to 1 if you have the <zlib.h> header file. */
 #undef HAVE_ZLIB_H
+
+/* Define to 1 if you have the <_np.h> header file. */
+#undef HAVE__NP_H
 
 /* Define to 1 if you have the `_pclose' function. */
 #undef HAVE__PCLOSE

@@ -986,7 +986,7 @@ void server_init_process(void)
     /* setup the signal mask */
     sigemptyset( &server_block_set );
     sigaddset( &server_block_set, SIGALRM );
-    sigaddset( &server_block_set, SIGIO );
+//    sigaddset( &server_block_set, SIGIO );
     sigaddset( &server_block_set, SIGINT );
     sigaddset( &server_block_set, SIGHUP );
     sigaddset( &server_block_set, SIGUSR1 );

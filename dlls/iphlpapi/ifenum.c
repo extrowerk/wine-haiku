@@ -546,7 +546,8 @@ DWORD getInterfacePhysicalByIndex(DWORD index, PDWORD len, PBYTE addr,
   char *name = getInterfaceNameByIndex(index, nameBuf);
 
   if (name)
-    return getInterfacePhysicalByName(name, len, addr, type);
+//    return getInterfacePhysicalByName(name, len, addr, type);
+    return ERROR_INVALID_DATA;
   else
     return ERROR_INVALID_DATA;
 }
@@ -624,7 +625,8 @@ DWORD getInterfaceEntryByName(const char *name, PMIB_IFROW entry)
   if (!entry)
     return ERROR_INVALID_PARAMETER;
 
-  if (getInterfacePhysicalByName(name, &len, addr, &type) == NO_ERROR) {
+//  if (getInterfacePhysicalByName(name, &len, addr, &type) == NO_ERROR) {
+	if (0) {
     WCHAR *assigner;
     const char *walker;
 

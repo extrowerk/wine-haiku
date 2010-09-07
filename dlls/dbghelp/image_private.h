@@ -19,9 +19,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef HAVE_ELF_H
+//#ifdef HAVE_ELF_H
 # include <elf.h>
-#endif
+//#endif
 #ifdef HAVE_SYS_ELF32_H
 # include <sys/elf32.h>
 #endif
@@ -44,7 +44,7 @@
 #endif
 
 #define IMAGE_NO_MAP  ((void*)-1)
-
+#define SHT_NULL        0
 #ifdef __ELF__
 
 #ifdef _WIN64

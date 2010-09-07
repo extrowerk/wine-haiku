@@ -208,6 +208,22 @@ typedef struct trapframe SIGCONTEXT;
 
 #endif /* bsdi */
 
+#ifdef __HAIKU__
+
+typedef struct sigcontext SIGCONTEXT;
+
+#define EAX_sig(context) (((vregs*)context)->eax)
+#define EBX_sig(context) (((vregs*)context)->_reserved_2[2])
+#define ECX_sig(context) (((vregs*)context)->ecx)
+#define EDX_sig(context) (((vregs*)context)->edx)
+#define EBP_sig(context) (((vregs*)context)->ebp)
+#define ESP_sig(context) (((vregs*)context)->esp)
+#define ESI_sig(context) (((vregs*)context)->_reserved_2[1])
+#define EDI_sig(context) (((vregs*)context)->_reserved_2[0])
+#define EIP_sig(context) (((vregs*)context)->eip)
+
+#endif
+
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 
 typedef struct sigcontext SIGCONTEXT;
@@ -1122,13 +1138,13 @@ static inline void restore_context( const CONTEXT *context, SIGCONTEXT *sigconte
     ESI_sig(sigcontext) = context->Esi;
     EDI_sig(sigcontext) = context->Edi;
     EBP_sig(sigcontext) = context->Ebp;
-    EFL_sig(sigcontext) = context->EFlags;
+//    EFL_sig(sigcontext) = context->EFlags;
     EIP_sig(sigcontext) = context->Eip;
     ESP_sig(sigcontext) = context->Esp;
-    CS_sig(sigcontext)  = context->SegCs;
-    DS_sig(sigcontext)  = context->SegDs;
-    ES_sig(sigcontext)  = context->SegEs;
-    SS_sig(sigcontext)  = context->SegSs;
+//    CS_sig(sigcontext)  = context->SegCs;
+//    DS_sig(sigcontext)  = context->SegDs;
+//    ES_sig(sigcontext)  = context->SegEs;
+//    SS_sig(sigcontext)  = context->SegSs;
 #ifdef GS_sig
     GS_sig(sigcontext)  = context->SegGs;
 #else
@@ -1615,13 +1631,13 @@ static EXCEPTION_RECORD *setup_exception_record( SIGCONTEXT *sigcontext, void *s
     ESP_sig(sigcontext) = (DWORD)stack;
     EIP_sig(sigcontext) = (DWORD)func;
     /* clear single-step, direction, and align check flag */
-    EFL_sig(sigcontext) &= ~(0x100|0x400|0x40000);
-    CS_sig(sigcontext)  = wine_get_cs();
-    DS_sig(sigcontext)  = wine_get_ds();
-    ES_sig(sigcontext)  = wine_get_es();
-    FS_sig(sigcontext)  = wine_get_fs();
-    GS_sig(sigcontext)  = wine_get_gs();
-    SS_sig(sigcontext)  = wine_get_ss();
+//    EFL_sig(sigcontext) &= ~(0x100|0x400|0x40000);
+//    CS_sig(sigcontext)  = wine_get_cs();
+//    DS_sig(sigcontext)  = wine_get_ds();
+//    ES_sig(sigcontext)  = wine_get_es();
+//    FS_sig(sigcontext)  = wine_get_fs();
+//    GS_sig(sigcontext)  = wine_get_gs();
+//    SS_sig(sigcontext)  = wine_get_ss();
 
     return stack->rec_ptr;
 }
@@ -1829,7 +1845,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 
     /* check for page fault inside the thread stack */
     if (get_trap_code(context) == TRAP_x86_PAGEFLT &&
-        (char *)siginfo->si_addr >= (char *)NtCurrentTeb()->DeallocationStack &&
+        //(char *)siginfo->si_addr >= (char *)NtCurrentTeb()->DeallocationStack &&
         (char *)siginfo->si_addr < (char *)NtCurrentTeb()->Tib.StackBase &&
         virtual_handle_stack_fault( siginfo->si_addr ))
     {
@@ -1954,9 +1970,9 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         /* TODO:
          * Behaviour only tested for divide-by-zero exceptions
          * Check for other SIMD exceptions as well */
-        if(siginfo->si_code != FPE_FLTDIV)
-            FIXME("untested SIMD exception: %#x. Might not work correctly\n",
-                  siginfo->si_code);
+        //if(siginfo->si_code != FPE_FLTDIV)
+          //  FIXME("untested SIMD exception: %#x. Might not work correctly\n",
+            //      siginfo->si_code);
 
         rec->ExceptionCode = STATUS_FLOAT_MULTIPLE_TRAPS;
         rec->NumberParameters = 1;
@@ -2194,23 +2210,23 @@ void signal_init_process(void)
     struct sigaction sig_act;
 
     sig_act.sa_mask = server_block_set;
-    sig_act.sa_flags = SA_SIGINFO | SA_RESTART;
+    sig_act.sa_flags = /*SA_SIGINFO |*/ SA_RESTART;
 #ifdef SA_ONSTACK
     sig_act.sa_flags |= SA_ONSTACK;
 #endif
 
-    sig_act.sa_sigaction = int_handler;
+    sig_act.sa_handler = int_handler;
     if (sigaction( SIGINT, &sig_act, NULL ) == -1) goto error;
-    sig_act.sa_sigaction = fpe_handler;
+    sig_act.sa_handler = fpe_handler;
     if (sigaction( SIGFPE, &sig_act, NULL ) == -1) goto error;
-    sig_act.sa_sigaction = abrt_handler;
+    sig_act.sa_handler = abrt_handler;
     if (sigaction( SIGABRT, &sig_act, NULL ) == -1) goto error;
-    sig_act.sa_sigaction = quit_handler;
+    sig_act.sa_handler = quit_handler;
     if (sigaction( SIGQUIT, &sig_act, NULL ) == -1) goto error;
-    sig_act.sa_sigaction = usr1_handler;
+    sig_act.sa_handler = usr1_handler;
     if (sigaction( SIGUSR1, &sig_act, NULL ) == -1) goto error;
 
-    sig_act.sa_sigaction = segv_handler;
+    sig_act.sa_handler = segv_handler;
     if (sigaction( SIGSEGV, &sig_act, NULL ) == -1) goto error;
     if (sigaction( SIGILL, &sig_act, NULL ) == -1) goto error;
 #ifdef SIGBUS
@@ -2218,12 +2234,12 @@ void signal_init_process(void)
 #endif
 
 #ifdef SIGTRAP
-    sig_act.sa_sigaction = trap_handler;
+    sig_act.sa_handler = trap_handler;
     if (sigaction( SIGTRAP, &sig_act, NULL ) == -1) goto error;
 #endif
 
 #ifdef __HAVE_VM86
-    sig_act.sa_sigaction = usr2_handler;
+    sig_act.sa_handler = usr2_handler;
     if (sigaction( SIGUSR2, &sig_act, NULL ) == -1) goto error;
 #endif
 
