@@ -1376,6 +1376,8 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     TRACE_(key)("type %d, window %lx, state 0x%04x, keycode %u\n",
 		event->type, event->window, event->state, event->keycode);
 
+    if (event->type == KeyPress) update_user_time( event->time );
+
     wine_tsx11_lock();
     /* Clients should pass only KeyPress events to XmbLookupString */
     if (xic && event->type == KeyPress)
@@ -2539,9 +2541,13 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
     e.state = 0;
     e.type = KeyPress;
 
-    focus = GetFocus();
-    if (focus) focus = GetAncestor( focus, GA_ROOT );
-    if (!focus) focus = GetActiveWindow();
+    focus = x11drv_thread_data()->last_xic_hwnd;
+    if (!focus)
+    {
+        focus = GetFocus();
+        if (focus) focus = GetAncestor( focus, GA_ROOT );
+        if (!focus) focus = GetActiveWindow();
+    }
     e.window = X11DRV_get_whole_window( focus );
     xic = X11DRV_get_ic( focus );
 

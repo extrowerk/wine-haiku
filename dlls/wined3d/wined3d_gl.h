@@ -1760,6 +1760,7 @@ typedef enum wined3d_gl_extension
     ARB_SYNC,
     ARB_TEXTURE_BORDER_CLAMP,
     ARB_TEXTURE_COMPRESSION,
+    ARB_TEXTURE_COMPRESSION_RGTC,
     ARB_TEXTURE_CUBE_MAP,
     ARB_TEXTURE_ENV_ADD,
     ARB_TEXTURE_ENV_COMBINE,
@@ -1818,6 +1819,7 @@ typedef enum wined3d_gl_extension
     NV_FRAGMENT_PROGRAM_OPTION,
     NV_HALF_FLOAT,
     NV_LIGHT_MAX_EXPONENT,
+    NV_POINT_SPRITE,
     NV_REGISTER_COMBINERS,
     NV_REGISTER_COMBINERS2,
     NV_TEXGEN_REFLECTION,
@@ -1836,7 +1838,7 @@ typedef enum wined3d_gl_extension
     WGL_ARB_PIXEL_FORMAT,
     WGL_WINE_PIXEL_FORMAT_PASSTHROUGH,
     /* Internally used */
-    WINE_NORMALIZED_TEXRECT,
+    WINED3D_GL_NORMALIZED_TEXRECT,
     WINED3D_GL_VERSION_2_0,
 
     WINED3D_GL_EXT_COUNT,
@@ -2448,6 +2450,15 @@ typedef GLvoid (WINE_GLAPI *PGLFNGETSYNCIVPROC)(GLsync sync, GLenum pname, GLsiz
 #ifndef GL_ARB_texture_border_clamp
 #define GL_ARB_texture_border_clamp 1
 #define GL_CLAMP_TO_BORDER_ARB                              0x812d
+#endif
+
+/* GL_ARB_texture_compression_rgtc */
+#ifndef GL_ARB_texture_compression_rgtc
+#define GL_ARB_texture_compression_rgtc 1
+#define GL_COMPRESSED_RED_RGTC1                             0x8dbb
+#define GL_COMPRESSED_SIGNED_RED_RGTC1                      0x8dbc
+#define GL_COMPRESSED_RED_GREEN_RGTC2                       0x8dbd
+#define GL_COMPRESSED_SIGNED_RED_GREEN_RGTC2                0x8dbe
 #endif
 
 /* GL_ARB_texture_cube_map */
@@ -3482,6 +3493,16 @@ typedef void (WINE_GLAPI *PGLFNVERTEXATTRIBS4HVNVPROC)(GLuint index, GLsizei n, 
 #define GL_MAX_SPOT_EXPONENT_NV                             0x8505
 #endif
 
+/* GL_NV_point_sprite */
+#ifndef GL_NV_point_sprite
+#define GL_NV_point_sprite 1
+#define GL_NV_POINT_SPRITE_NV                               0x8861
+#define GL_NV_COORD_REPLACE_NV                              0x8862
+#define GL_NV_POINT_SPRITE_R_MODE_NV                        0x8863
+#endif
+typedef void (WINE_GLAPI *PGLFNPOINTPARAMETERIVNVPROC)(GLenum pname, const GLint *params);
+typedef void (WINE_GLAPI *PGLFNPOINTPARAMETERINVPROC)(GLenum pname, GLint param);
+
 /* GL_NV_register_combiners */
 #ifndef GL_NV_register_combiners
 #define GL_NV_register_combiners 1
@@ -4477,6 +4498,11 @@ typedef BOOL (WINAPI *WINED3D_PFNWGLSETPIXELFORMATWINE)(HDC hdc, int iPixelForma
             glVertexAttribs3hvNV,                       NV_HALF_FLOAT,                  NULL) \
     USE_GL_FUNC(PGLFNVERTEXATTRIBS4HVNVPROC, \
             glVertexAttribs4hvNV,                       NV_HALF_FLOAT,                  NULL) \
+    /* GL_NV_point_sprite */ \
+    USE_GL_FUNC(PGLFNPOINTPARAMETERIVNVPROC, \
+            glPointParameterivNV,                       NV_POINT_SPRITE,                NULL) \
+    USE_GL_FUNC(PGLFNPOINTPARAMETERINVPROC, \
+            glPointParameteriNV,                        NV_POINT_SPRITE,                NULL) \
     /* GL_NV_register_combiners */ \
     USE_GL_FUNC(PGLFNCOMBINERINPUTNVPROC, \
             glCombinerInputNV,                          NV_REGISTER_COMBINERS,          NULL) \

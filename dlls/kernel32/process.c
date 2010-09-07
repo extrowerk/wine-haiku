@@ -70,8 +70,6 @@ typedef struct
     DWORD dwReserved;
 } LOADPARMS32;
 
-static UINT process_error_mode;
-
 static DWORD shutdown_flags = 0;
 static DWORD shutdown_priority = 0x280;
 static BOOL is_wow64;
@@ -1529,7 +1527,7 @@ static startup_info_t *create_startup_info( LPCWSTR filename, LPCWSTR cmdline,
 
     info->console_flags = cur_params->ConsoleFlags;
     if (flags & CREATE_NEW_PROCESS_GROUP) info->console_flags = 1;
-    if (flags & CREATE_NEW_CONSOLE) info->console = (obj_handle_t)1;  /* FIXME: cf. kernel_main.c */
+    if (flags & CREATE_NEW_CONSOLE) info->console = wine_server_obj_handle(KERNEL32_CONSOLE_ALLOC);
 
     if (startup->dwFlags & STARTF_USESTDHANDLES)
     {
@@ -1661,7 +1659,7 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
 
     if (!is_win64 && !is_wow64 && (binary_info->flags & BINARY_FLAG_64BIT))
     {
-        ERR( "starting 64-bit process %s not supported on this environment\n", debugstr_w(filename) );
+        ERR( "starting 64-bit process %s not supported in 32-bit wineprefix\n", debugstr_w(filename) );
         SetLastError( ERROR_BAD_EXE_FORMAT );
         return FALSE;
     }
@@ -2450,8 +2448,12 @@ BOOL WINAPI GetExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode )
  */
 UINT WINAPI SetErrorMode( UINT mode )
 {
-    UINT old = process_error_mode;
-    process_error_mode = mode;
+    UINT old;
+
+    NtQueryInformationProcess( GetCurrentProcess(), ProcessDefaultHardErrorMode,
+                               &old, sizeof(old), NULL );
+    NtSetInformationProcess( GetCurrentProcess(), ProcessDefaultHardErrorMode,
+                             &mode, sizeof(mode) );
     return old;
 }
 
@@ -2460,7 +2462,11 @@ UINT WINAPI SetErrorMode( UINT mode )
  */
 UINT WINAPI GetErrorMode( void )
 {
-    return process_error_mode;
+    UINT mode;
+
+    NtQueryInformationProcess( GetCurrentProcess(), ProcessDefaultHardErrorMode,
+                               &mode, sizeof(mode), NULL );
+    return mode;
 }
 
 /**********************************************************************
@@ -3320,6 +3326,26 @@ BOOL WINAPI IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
 HANDLE WINAPI GetCurrentProcess(void)
 {
     return (HANDLE)~(ULONG_PTR)0;
+}
+
+/***********************************************************************
+ *           GetLogicalProcessorInformation     (KERNEL32.@)
+ */
+BOOL WINAPI GetLogicalProcessorInformation(PSYSTEM_LOGICAL_PROCESSOR_INFORMATION buffer, PDWORD pBufLen)
+{
+    FIXME("(%p,%p): stub\n", buffer, pBufLen);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/***********************************************************************
+ *           GetLogicalProcessorInformationEx   (KERNEL32.@)
+ */
+BOOL WINAPI GetLogicalProcessorInformationEx(LOGICAL_PROCESSOR_RELATIONSHIP relationship, PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer, PDWORD pBufLen)
+{
+    FIXME("(%u,%p,%p): stub\n", relationship, buffer, pBufLen);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }
 
 /***********************************************************************

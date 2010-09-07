@@ -200,7 +200,7 @@ static void add_script_runner(HTMLDocumentNode *This)
 #define NSRUNNABLE_THIS(iface) DEFINE_THIS(HTMLDocumentNode, IRunnable, iface)
 
 static nsresult NSAPI nsRunnable_QueryInterface(nsIRunnable *iface,
-        nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
     HTMLDocumentNode *This = NSRUNNABLE_THIS(iface);
 
@@ -312,10 +312,8 @@ static void call_explorer_69(HTMLDocumentObj *doc)
         FIXME("handle result\n");
 }
 
-static void parse_complete_proc(task_t *task)
+static void parse_complete(HTMLDocumentObj *doc)
 {
-    HTMLDocumentObj *doc = ((docobj_task_t*)task)->doc;
-
     TRACE("(%p)\n", doc);
 
     if(doc->usermode == EDITMODE)
@@ -328,35 +326,24 @@ static void parse_complete_proc(task_t *task)
     call_explorer_69(doc);
 
     /* FIXME: IE7 calls EnableModelless(TRUE), EnableModelless(FALSE) and sets interactive state here */
-
-    set_ready_state(doc->basedoc.window, READYSTATE_INTERACTIVE);
 }
 
 static void handle_end_load(HTMLDocumentNode *This)
 {
-    docobj_task_t *task;
-
     TRACE("\n");
 
     if(!This->basedoc.doc_obj)
         return;
 
-    if(This != This->basedoc.doc_obj->basedoc.doc_node) {
-        set_ready_state(This->basedoc.window, READYSTATE_INTERACTIVE);
-        return;
+    if(This == This->basedoc.doc_obj->basedoc.doc_node) {
+        /*
+         * This should be done in the worker thread that parses HTML,
+         * but we don't have such thread (Gecko parses HTML for us).
+         */
+        parse_complete(This->basedoc.doc_obj);
     }
 
-    task = heap_alloc(sizeof(docobj_task_t));
-    if(!task)
-        return;
-
-    task->doc = This->basedoc.doc_obj;
-
-    /*
-     * This should be done in the worker thread that parses HTML,
-     * but we don't have such thread (Gecko parses HTML for us).
-     */
-    push_task(&task->header, &parse_complete_proc, This->basedoc.doc_obj->basedoc.task_magic);
+    set_ready_state(This->basedoc.window, READYSTATE_INTERACTIVE);
 }
 
 static nsresult NSAPI nsRunnable_Run(nsIRunnable *iface)
@@ -460,7 +447,7 @@ static const nsIRunnableVtbl nsRunnableVtbl = {
 #define NSDOCOBS_THIS(iface) DEFINE_THIS(HTMLDocumentNode, IDocumentObserver, iface)
 
 static nsresult NSAPI nsDocumentObserver_QueryInterface(nsIDocumentObserver *iface,
-        nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
     HTMLDocumentNode *This = NSDOCOBS_THIS(iface);
 
@@ -511,12 +498,12 @@ static void NSAPI nsDocumentObserver_AttributeWillChange(nsIDocumentObserver *if
 }
 
 static void NSAPI nsDocumentObserver_AttributeChanged(nsIDocumentObserver *iface, nsIDocument *aDocument,
-        nsIContent *aContent, PRInt32 aNameSpaceID, nsIAtom *aAttribute, PRInt32 aModType, PRUint32 aStateMask)
+        nsIContent *aContent, PRInt32 aNameSpaceID, nsIAtom *aAttribute, PRInt32 aModType)
 {
 }
 
 static void NSAPI nsDocumentObserver_ContentAppended(nsIDocumentObserver *iface, nsIDocument *aDocument,
-        nsIContent *aContainer, PRInt32 aNewIndexInContainer)
+        nsIContent *aContainer, nsIContent *aFirstNewContent, PRInt32 aNewIndexInContainer)
 {
 }
 
@@ -526,7 +513,8 @@ static void NSAPI nsDocumentObserver_ContentInserted(nsIDocumentObserver *iface,
 }
 
 static void NSAPI nsDocumentObserver_ContentRemoved(nsIDocumentObserver *iface, nsIDocument *aDocument,
-        nsIContent *aContainer, nsIContent *aChild, PRInt32 aIndexInContainer)
+        nsIContent *aContainer, nsIContent *aChild, PRInt32 aIndexInContainer,
+        nsIContent *aProviousSibling)
 {
 }
 
@@ -558,12 +546,20 @@ static void NSAPI nsDocumentObserver_EndLoad(nsIDocumentObserver *iface, nsIDocu
 
     TRACE("\n");
 
+    if(This->skip_mutation_notif)
+        return;
+
     This->content_ready = TRUE;
     push_mutation_queue(This, MUTATION_ENDLOAD, NULL);
 }
 
 static void NSAPI nsDocumentObserver_ContentStatesChanged(nsIDocumentObserver *iface, nsIDocument *aDocument,
         nsIContent *aContent1, nsIContent *aContent2, PRInt32 aStateMask)
+{
+}
+
+static void NSAPI nsDocumentObserver_DocumentStatesChanged(nsIDocumentObserver *iface, nsIDocument *aDocument,
+        PRInt32 aStateMask)
 {
 }
 
@@ -678,6 +674,7 @@ static const nsIDocumentObserverVtbl nsDocumentObserverVtbl = {
     nsDocumentObserver_BeginLoad,
     nsDocumentObserver_EndLoad,
     nsDocumentObserver_ContentStatesChanged,
+    nsDocumentObserver_DocumentStatesChanged,
     nsDocumentObserver_StyleSheetAdded,
     nsDocumentObserver_StyleSheetRemoved,
     nsDocumentObserver_StyleSheetApplicableStateChanged,

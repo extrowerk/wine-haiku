@@ -1818,28 +1818,18 @@ out:
 
 static void D3D7_OldRenderStateTest(void)
 {
-    HRESULT rc;
+    HRESULT hr;
     DWORD val;
 
-    /* Test reaction to some deprecated states in D3D7.
-
-     * IDirect3DDevice7 in Wine currently relays such states to wined3d where they are do-nothing and return 0, instead
-     * of INVALIDPARAMS. Unless an app is found which cares this is probably ok. What this test shows is that these states
-     * need not to be handled in D3D7.
-     */
-    todo_wine {
-        rc = IDirect3DDevice7_SetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREHANDLE, 0);
-        ok(rc == DDERR_INVALIDPARAMS, "IDirect3DDevice7_SetRenderState returned %08x\n", rc);
-
-        rc = IDirect3DDevice7_GetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREHANDLE, &val);
-        ok(rc == DDERR_INVALIDPARAMS, "IDirect3DDevice7_GetRenderState returned %08x\n", rc);
-
-        rc = IDirect3DDevice7_SetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREMAPBLEND, D3DTBLEND_MODULATE);
-        ok(rc == DDERR_INVALIDPARAMS, "IDirect3DDevice7_SetRenderState returned %08x\n", rc);
-
-        rc = IDirect3DDevice7_GetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREMAPBLEND, &val);
-        ok(rc == DDERR_INVALIDPARAMS, "IDirect3DDevice7_GetRenderState returned %08x\n", rc);
-    }
+    /* Test reaction to some deprecated states in D3D7. */
+    hr = IDirect3DDevice7_SetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREHANDLE, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirect3DDevice7_SetRenderState returned %#x.\n", hr);
+    hr = IDirect3DDevice7_GetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREHANDLE, &val);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirect3DDevice7_GetRenderState returned %#x.\n", hr);
+    hr = IDirect3DDevice7_SetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREMAPBLEND, D3DTBLEND_MODULATE);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirect3DDevice7_SetRenderState returned %#x.\n", hr);
+    hr = IDirect3DDevice7_GetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREMAPBLEND, &val);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirect3DDevice7_GetRenderState returned %#x.\n", hr);
 }
 
 #define IS_VALUE_NEAR(a, b)    ( ((a) == (b)) || ((a) == (b) - 1) || ((a) == (b) + 1) )
@@ -3403,8 +3393,14 @@ static void FindDevice(void)
         {&IID_IDirect3DRGBDevice},
     };
 
+    static const GUID *nonexistent_deviceGUIDs[] = {&IID_IDirect3DMMXDevice,
+                                                    &IID_IDirect3DRefDevice,
+                                                    &IID_IDirect3DTnLHalDevice,
+                                                    &IID_IDirect3DNullDevice};
+
     D3DFINDDEVICESEARCH search = {0};
     D3DFINDDEVICERESULT result = {0};
+    IDirect3DDevice *d3dhal;
     HRESULT hr;
     int i;
 
@@ -3454,16 +3450,46 @@ static void FindDevice(void)
     ok(hr == DDERR_NOTFOUND,
        "Expected IDirect3D1::FindDevice to return DDERR_NOTFOUND, got 0x%08x\n", hr);
 
-    /* The reference device GUID can't be enumerated. */
+    /* These GUIDs appear to be never present. */
+    for (i = 0; i < sizeof(nonexistent_deviceGUIDs)/sizeof(nonexistent_deviceGUIDs[0]); i++)
+    {
+        search.dwSize = sizeof(search);
+        search.dwFlags = D3DFDS_GUID;
+        search.guid = *nonexistent_deviceGUIDs[i];
+        result.dwSize = sizeof(result);
+
+        hr = IDirect3D_FindDevice(Direct3D1, &search, &result);
+        ok(hr == DDERR_NOTFOUND,
+           "[%d] Expected IDirect3D1::FindDevice to return DDERR_NOTFOUND, got 0x%08x\n", i, hr);
+    }
+
+    /* The HAL device can only be enumerated if hardware acceleration is present. */
     search.dwSize = sizeof(search);
     search.dwFlags = D3DFDS_GUID;
-    search.guid = IID_IDirect3DRefDevice;
+    search.guid = IID_IDirect3DHALDevice;
     result.dwSize = sizeof(result);
 
     hr = IDirect3D_FindDevice(Direct3D1, &search, &result);
-    todo_wine
-    ok(hr == DDERR_NOTFOUND,
-       "Expected IDirect3D1::FindDevice to return DDERR_NOTFOUND, got 0x%08x\n", hr);
+    trace("IDirect3D::FindDevice returned 0x%08x for the HAL device GUID\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        hr = IDirectDrawSurface_QueryInterface(Surface1, &IID_IDirect3DHALDevice, (void **)&d3dhal);
+        /* Currently Wine only supports the creation of one Direct3D device
+         * for a given DirectDraw instance. */
+        todo_wine
+        ok(SUCCEEDED(hr), "Expected IDirectDrawSurface::QueryInterface to succeed, got 0x%08x\n", hr);
+
+        if (SUCCEEDED(hr))
+            IDirect3DDevice_Release(d3dhal);
+    }
+    else
+    {
+        hr = IDirectDrawSurface_QueryInterface(Surface1, &IID_IDirect3DHALDevice, (void **)&d3dhal);
+        ok(FAILED(hr), "Expected IDirectDrawSurface::QueryInterface to fail, got 0x%08x\n", hr);
+
+        if (SUCCEEDED(hr))
+            IDirect3DDevice_Release(d3dhal);
+    }
 
     /* These GUIDs appear to be always present. */
     for (i = 0; i < sizeof(deviceGUIDs)/sizeof(deviceGUIDs[0]); i++)
@@ -3498,6 +3524,98 @@ static void FindDevice(void)
     todo_wine
     ok(hr == D3D_OK,
        "Expected IDirect3D1::FindDevice to return D3D_OK, got 0x%08x\n", hr);
+}
+
+static void BackBuffer3DCreateSurfaceTest(void)
+{
+    DDSURFACEDESC ddsd;
+    DDSURFACEDESC created_ddsd;
+    DDSURFACEDESC2 ddsd2;
+    IDirectDrawSurface *surf;
+    IDirectDrawSurface4 *surf4;
+    IDirectDrawSurface7 *surf7;
+    HRESULT hr;
+    IDirectDraw2 *dd2;
+    IDirectDraw4 *dd4;
+    IDirectDraw7 *dd7;
+    DDCAPS ddcaps;
+    IDirect3DDevice *d3dhal;
+
+    const DWORD caps = DDSCAPS_BACKBUFFER | DDSCAPS_3DDEVICE;
+    const DWORD expected_caps = DDSCAPS_BACKBUFFER | DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM;
+
+    memset(&ddcaps, 0, sizeof(ddcaps));
+    ddcaps.dwSize = sizeof(DDCAPS);
+    hr = IDirectDraw_GetCaps(DirectDraw1, &ddcaps, NULL);
+    if (!(ddcaps.ddsCaps.dwCaps & DDSCAPS_VIDEOMEMORY))
+    {
+        skip("DDraw reported no VIDEOMEMORY cap. Broken video driver? Skipping surface caps tests.\n");
+        return ;
+    }
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    ddsd.dwWidth = 64;
+    ddsd.dwHeight = 64;
+    ddsd.ddsCaps.dwCaps = caps;
+    memset(&ddsd2, 0, sizeof(ddsd2));
+    ddsd2.dwSize = sizeof(ddsd2);
+    ddsd2.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    ddsd2.dwWidth = 64;
+    ddsd2.dwHeight = 64;
+    ddsd2.ddsCaps.dwCaps = caps;
+    memset(&created_ddsd, 0, sizeof(created_ddsd));
+    created_ddsd.dwSize = sizeof(DDSURFACEDESC);
+
+    hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &surf, NULL);
+    todo_wine ok(SUCCEEDED(hr), "IDirectDraw_CreateSurface failed: 0x%08x\n", hr);
+    if (surf != NULL)
+    {
+        hr = IDirectDrawSurface_GetSurfaceDesc(surf, &created_ddsd);
+        ok(SUCCEEDED(hr), "IDirectDraw_GetSurfaceDesc failed: 0x%08x\n", hr);
+        todo_wine ok(created_ddsd.ddsCaps.dwCaps == expected_caps,
+           "GetSurfaceDesc returned caps %x, expected %x\n", created_ddsd.ddsCaps.dwCaps,
+           expected_caps);
+
+        hr = IDirectDrawSurface_QueryInterface(surf, &IID_IDirect3DHALDevice, (void **)&d3dhal);
+        /* Currently Wine only supports the creation of one Direct3D device
+           for a given DirectDraw instance. It has been created already
+           in D3D1_createObjects() - IID_IDirect3DRGBDevice */
+        todo_wine ok(SUCCEEDED(hr), "Expected IDirectDrawSurface::QueryInterface to succeed, got 0x%08x\n", hr);
+
+        if (SUCCEEDED(hr))
+            IDirect3DDevice_Release(d3dhal);
+
+        IDirectDrawSurface_Release(surf);
+    }
+
+    hr = IDirectDraw_QueryInterface(DirectDraw1, &IID_IDirectDraw2, (void **) &dd2);
+    ok(SUCCEEDED(hr), "IDirectDraw_QueryInterface failed: 0x%08x\n", hr);
+
+    hr = IDirectDraw2_CreateSurface(dd2, &ddsd, &surf, NULL);
+    ok(hr == DDERR_INVALIDCAPS, "IDirectDraw2_CreateSurface didn't return %x08x, but %x08x\n",
+       DDERR_INVALIDCAPS, hr);
+
+    IDirectDraw2_Release(dd2);
+
+    hr = IDirectDraw_QueryInterface(DirectDraw1, &IID_IDirectDraw4, (void **) &dd4);
+    ok(SUCCEEDED(hr), "IDirectDraw_QueryInterface failed: 0x%08x\n", hr);
+
+    hr = IDirectDraw4_CreateSurface(dd4, &ddsd2, &surf4, NULL);
+    ok(hr == DDERR_INVALIDCAPS, "IDirectDraw4_CreateSurface didn't return %x08x, but %x08x\n",
+       DDERR_INVALIDCAPS, hr);
+
+    IDirectDraw4_Release(dd4);
+
+    hr = IDirectDraw_QueryInterface(DirectDraw1, &IID_IDirectDraw7, (void **) &dd7);
+    ok(SUCCEEDED(hr), "IDirectDraw_QueryInterface failed: 0x%08x\n", hr);
+
+    hr = IDirectDraw7_CreateSurface(dd7, &ddsd2, &surf7, NULL);
+    ok(hr == DDERR_INVALIDCAPS, "IDirectDraw7_CreateSurface didn't return %x08x, but %x08x\n",
+       DDERR_INVALIDCAPS, hr);
+
+    IDirectDraw7_Release(dd7);
 }
 
 START_TEST(d3d)
@@ -3535,6 +3653,7 @@ START_TEST(d3d)
         TextureLoadTest();
         ViewportTest();
         FindDevice();
+        BackBuffer3DCreateSurfaceTest();
         D3D1_releaseObjects();
     }
 

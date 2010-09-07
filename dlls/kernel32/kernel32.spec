@@ -547,6 +547,8 @@
 @ stdcall GetLogicalDriveStringsA(long ptr)
 @ stdcall GetLogicalDriveStringsW(long ptr)
 @ stdcall GetLogicalDrives()
+@ stdcall GetLogicalProcessorInformation(ptr ptr)
+@ stdcall GetLogicalProcessorInformationEx(long ptr ptr)
 @ stdcall GetLongPathNameA (str long long)
 @ stdcall GetLongPathNameW (wstr long long)
 @ stdcall GetMailslotInfo(long ptr ptr ptr ptr)
@@ -658,6 +660,7 @@
 @ stdcall GetTimeZoneInformation(ptr)
 @ stdcall GetUserDefaultLCID()
 @ stdcall GetUserDefaultLangID()
+@ stdcall GetUserDefaultLocaleName(ptr long)
 @ stdcall GetUserDefaultUILanguage()
 @ stdcall GetUserGeoID(long)
 @ stub GetVDMCurrentDirectories
@@ -726,7 +729,7 @@
 @ stdcall InitializeCriticalSectionEx(ptr long long)
 @ stdcall InitializeSListHead(ptr) ntdll.RtlInitializeSListHead
 @ stdcall -arch=i386 InterlockedCompareExchange (ptr long long)
-@ stdcall -arch=i386 -ret64 InterlockedCompareExchange64(ptr double double) ntdll.RtlInterlockedCompareExchange64
+@ stdcall -arch=i386 -ret64 InterlockedCompareExchange64(ptr int64 int64) ntdll.RtlInterlockedCompareExchange64
 @ stdcall -arch=i386 InterlockedDecrement(ptr)
 @ stdcall -arch=i386 InterlockedExchange(ptr long)
 @ stdcall -arch=i386 InterlockedExchangeAdd (ptr long )
@@ -873,7 +876,7 @@
 @ stdcall QueryFullProcessImageNameA(ptr long ptr ptr)
 @ stdcall QueryFullProcessImageNameW(ptr long ptr ptr)
 @ stdcall QueryInformationJobObject(long long ptr long ptr)
-# @ stub QueryMemoryResourceNotification
+@ stdcall QueryMemoryResourceNotification(ptr ptr)
 @ stub QueryNumberOfEventLogRecords
 @ stub QueryOldestEventLogRecord
 @ stdcall QueryPerformanceCounter(ptr)
@@ -1024,11 +1027,11 @@
 @ stdcall SetFileAttributesA(str long)
 @ stdcall SetFileAttributesW(wstr long)
 @ stdcall SetFilePointer(long long ptr long)
-@ stdcall SetFilePointerEx(long double ptr long)
+@ stdcall SetFilePointerEx(long int64 ptr long)
 # @ stub SetFileShortNameA
 # @ stub SetFileShortNameW
 @ stdcall SetFileTime(long ptr ptr ptr)
-# @ stub SetFileValidData
+@ stdcall SetFileValidData(ptr int64)
 # @ stub SetFirmwareEnvironmentVariableA
 # @ stub SetFirmwareEnvironmentVariableW
 @ stdcall SetHandleContext(long long)
@@ -1128,8 +1131,8 @@
 @ stdcall VerLanguageNameW(long wstr long)
 @ stdcall -ret64 VerSetConditionMask(long long long long) ntdll.VerSetConditionMask
 @ stdcall VerifyConsoleIoHandle(long)
-@ stdcall VerifyVersionInfoA(long long double)
-@ stdcall VerifyVersionInfoW(long long double)
+@ stdcall VerifyVersionInfoA(long long int64)
+@ stdcall VerifyVersionInfoW(long long int64)
 @ stdcall VirtualAlloc(ptr long long long)
 @ stdcall VirtualAllocEx(long ptr long long long)
 @ stub VirtualBufferExceptionHandler
@@ -1150,6 +1153,7 @@
 @ stdcall WaitForSingleObjectEx(long long long)
 @ stdcall WaitNamedPipeA (str long)
 @ stdcall WaitNamedPipeW (wstr long)
+@ stdcall WerRegisterFile(wstr long long)
 @ stdcall WideCharToMultiByte(long long wstr long ptr long ptr ptr)
 @ stdcall WinExec(str long)
 @ stdcall Wow64EnableWow64FsRedirection(long)

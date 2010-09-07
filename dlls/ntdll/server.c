@@ -564,7 +564,7 @@ int server_get_unix_fd( HANDLE handle, unsigned int wanted_access, int *unix_fd,
             if ((fd = receive_fd( &fd_handle )) != -1)
             {
                 assert( wine_server_ptr_handle(fd_handle) == handle );
-                *needs_close = (reply->removable ||
+                *needs_close = (!reply->cacheable ||
                                 !add_fd_to_cache( handle, fd, reply->type,
                                                   reply->access, reply->options ));
             }
@@ -947,9 +947,9 @@ static int get_unix_tid(void)
 {
     int ret = -1;
 #if defined(linux) && defined(__i386__)
-    __asm__("int $0x80" : "=a" (ret) : "0" (224) /* SYS_gettid */);
+    ret = syscall(224 /*SYS_gettid*/);
 #elif defined(linux) && defined(__x86_64__)
-    __asm__("syscall" : "=a" (ret) : "0" (186) /* SYS_gettid */);
+    ret = syscall(186 /*SYS_gettid*/);
 #elif defined(__sun)
     ret = pthread_self();
 #elif defined(__APPLE__)

@@ -28,7 +28,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
-#include "msxml2.h"
+#include "msxml6.h"
 
 #include "msxml_private.h"
 
@@ -60,14 +60,15 @@ static HRESULT WINAPI domtext_QueryInterface(
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMText ) ||
          IsEqualGUID( riid, &IID_IXMLDOMCharacterData) ||
+         IsEqualGUID( riid, &IID_IXMLDOMNode ) ||
          IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
         *ppvObject = iface;
     }
-    else if ( IsEqualGUID( riid, &IID_IXMLDOMNode ) )
+    else if(node_query_interface(&This->node, riid, ppvObject))
     {
-        *ppvObject = IXMLDOMNode_from_impl(&This->node);
+        return *ppvObject ? S_OK : E_NOINTERFACE;
     }
     else if ( IsEqualGUID( riid, &IID_IXMLDOMElement ) ||
               IsEqualGUID( riid, &IID_IXMLDOMCDATASection ) )
@@ -191,23 +192,39 @@ static HRESULT WINAPI domtext_get_nodeName(
     BSTR* p )
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    return IXMLDOMNode_get_nodeName( IXMLDOMNode_from_impl(&This->node), p );
+
+    static const WCHAR textW[] = {'#','t','e','x','t',0};
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return return_bstr(textW, p);
 }
 
 static HRESULT WINAPI domtext_get_nodeValue(
     IXMLDOMText *iface,
-    VARIANT* var1 )
+    VARIANT* value )
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    return IXMLDOMNode_get_nodeValue( IXMLDOMNode_from_impl(&This->node), var1 );
+
+    TRACE("(%p)->(%p)\n", This, value);
+
+    if(!value)
+        return E_INVALIDARG;
+
+    V_VT(value) = VT_BSTR;
+    V_BSTR(value) = bstr_from_xmlChar(This->node.node->content);
+    return S_OK;
 }
 
 static HRESULT WINAPI domtext_put_nodeValue(
     IXMLDOMText *iface,
-    VARIANT var1 )
+    VARIANT value)
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    return IXMLDOMNode_put_nodeValue( IXMLDOMNode_from_impl(&This->node), var1 );
+
+    TRACE("(%p)->(v%d)\n", This, V_VT(&value));
+
+    return node_put_value(&This->node, &value);
 }
 
 static HRESULT WINAPI domtext_get_nodeType(
@@ -215,7 +232,11 @@ static HRESULT WINAPI domtext_get_nodeType(
     DOMNodeType* domNodeType )
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    return IXMLDOMNode_get_nodeType( IXMLDOMNode_from_impl(&This->node), domNodeType );
+
+    TRACE("(%p)->(%p)\n", This, domNodeType);
+
+    *domNodeType = NODE_TEXT;
+    return S_OK;
 }
 
 static HRESULT WINAPI domtext_get_parentNode(
@@ -223,7 +244,10 @@ static HRESULT WINAPI domtext_get_parentNode(
     IXMLDOMNode** parent )
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    return IXMLDOMNode_get_parentNode( IXMLDOMNode_from_impl(&This->node), parent );
+
+    TRACE("(%p)->(%p)\n", This, parent);
+
+    return node_get_parent(&This->node, parent);
 }
 
 static HRESULT WINAPI domtext_get_childNodes(
@@ -482,19 +506,12 @@ static HRESULT WINAPI domtext_get_data(
     BSTR *p)
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    HRESULT hr;
-    VARIANT vRet;
 
     if(!p)
         return E_INVALIDARG;
 
-    hr = IXMLDOMNode_get_nodeValue( IXMLDOMNode_from_impl(&This->node), &vRet );
-    if(hr == S_OK)
-    {
-        *p = V_BSTR(&vRet);
-    }
-
-    return hr;
+    *p = bstr_from_xmlChar(This->node.node->content);
+    return S_OK;
 }
 
 static HRESULT WINAPI domtext_put_data(
@@ -508,8 +525,7 @@ static HRESULT WINAPI domtext_put_data(
 
     V_VT(&val) = VT_BSTR;
     V_BSTR(&val) = data;
-
-    return IXMLDOMNode_put_nodeValue( IXMLDOMNode_from_impl(&This->node), val );
+    return node_put_value(&This->node, &val);
 }
 
 static HRESULT WINAPI domtext_get_length(
@@ -726,10 +742,23 @@ static HRESULT WINAPI domtext_splitText(
     LONG offset, IXMLDOMText **txtNode)
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    FIXME("(%p)->(%d %p)\n", This, offset, txtNode);
+    LONG length = 0;
+
+    TRACE("(%p)->(%d %p)\n", This, offset, txtNode);
+
+    if (!txtNode || offset < 0) return E_INVALIDARG;
+
+    *txtNode = NULL;
+
+    IXMLDOMText_get_length(iface, &length);
+
+    if (offset > length) return E_INVALIDARG;
+    if (offset == length) return S_FALSE;
+
+    FIXME("adjacent text nodes are not supported\n");
+
     return E_NOTIMPL;
 }
-
 
 static const struct IXMLDOMTextVtbl domtext_vtbl =
 {
@@ -798,7 +827,7 @@ IUnknown* create_text( xmlNodePtr text )
     This->lpVtbl = &domtext_vtbl;
     This->ref = 1;
 
-    init_xmlnode(&This->node, text, (IUnknown*)&This->lpVtbl, NULL);
+    init_xmlnode(&This->node, text, (IXMLDOMNode*)&This->lpVtbl, NULL);
 
     return (IUnknown*) &This->lpVtbl;
 }

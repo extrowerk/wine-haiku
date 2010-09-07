@@ -1044,13 +1044,17 @@ HRESULT WINAPI AtlAxAttachControl(IUnknown* pControl, HWND hWnd, IUnknown** ppUn
 
     TRACE( "%p %p %p\n", pControl, hWnd, ppUnkContainer );
 
-    *ppUnkContainer = NULL;
+    if (!pControl)
+        return E_INVALIDARG;
 
     hr = IOCS_Create( hWnd, pControl, &pUnkContainer );
-    if ( SUCCEEDED( hr ) )
+    if ( SUCCEEDED( hr ) && ppUnkContainer)
     {
         *ppUnkContainer = (IUnknown*) pUnkContainer;
     }
+
+    if(!hWnd)
+        return S_FALSE;
 
     return hr;
 }

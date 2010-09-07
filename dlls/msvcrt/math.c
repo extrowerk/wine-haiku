@@ -51,6 +51,15 @@ typedef int (CDECL *MSVCRT_matherr_func)(struct MSVCRT__exception *);
 
 static MSVCRT_matherr_func MSVCRT_default_matherr_func = NULL;
 
+/*********************************************************************
+ *      _set_SSE2_enable (MSVCRT.@)
+ */
+int CDECL MSVCRT__set_SSE2_enable(int flag)
+{
+    FIXME("(%x) stub\n", flag);
+    return flag;
+}
+
 #ifdef __x86_64__
 
 /*********************************************************************
@@ -1187,13 +1196,52 @@ char * CDECL _fcvt( double number, int ndigits, int *decpt, int *sign )
 
 /***********************************************************************
  *		_gcvt  (MSVCRT.@)
- *
- * FIXME: uses both E and F.
  */
 char * CDECL _gcvt( double number, int ndigit, char *buff )
 {
-    sprintf(buff, "%.*E", ndigit, number);
+    if(!buff) {
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return NULL;
+    }
+
+    if(ndigit < 0) {
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return NULL;
+    }
+
+    MSVCRT_sprintf(buff, "%.*g", ndigit, number);
     return buff;
+}
+
+/***********************************************************************
+ *              _gcvt_s  (MSVCRT.@)
+ */
+int CDECL _gcvt_s(char *buff, MSVCRT_size_t size, double number, int digits)
+{
+    int len;
+
+    if(!buff) {
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    if( digits<0 || digits>=size) {
+        if(size)
+            buff[0] = '\0';
+
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return MSVCRT_ERANGE;
+    }
+
+    len = MSVCRT__scprintf("%.*g", digits, number);
+    if(len > size) {
+        buff[0] = '\0';
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return MSVCRT_ERANGE;
+    }
+
+    MSVCRT_sprintf(buff, "%.*g", digits, number);
+    return 0;
 }
 
 #include <stdlib.h> /* div_t, ldiv_t */

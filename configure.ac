@@ -4,8 +4,8 @@ dnl See ChangeLog file for detailed change history.
 
 m4_define(WINE_VERSION,regexp(m4_include(VERSION),[version \([-.0-9A-Za-z]+\)],[\1]))
 
-dnl autoconf versions before 2.59d don't handle multi-line subst variables correctly
-AC_PREREQ(2.59d)
+dnl autoconf versions before 2.62 don't handle source dir symlinks correctly
+AC_PREREQ(2.62)
 AC_INIT([Wine],[WINE_VERSION],[wine-devel@winehq.org],[wine],[http://www.winehq.org])
 AC_CONFIG_SRCDIR(server/atom.c)
 AC_CONFIG_HEADERS(include/config.h)
@@ -55,6 +55,8 @@ AC_ARG_WITH(gnutls,    AS_HELP_STRING([--without-gnutls],[do not use GnuTLS (sch
 AC_ARG_WITH(gsm,       AS_HELP_STRING([--without-gsm],[do not use libgsm (GSM 06.10 codec support)]),
             [if test "x$withval" = "xno"; then ac_cv_header_gsm_h=no; ac_cv_header_gsm_gsm_h=no; fi])
 AC_ARG_WITH(hal,       AS_HELP_STRING([--without-hal],[do not use HAL (dynamic device support)]))
+AC_ARG_WITH(icns,      AS_HELP_STRING([--without-icns],[do not use ICNS icon support]),
+            [if test "x$withval" = "xno"; then ac_cv_header_icns_h=no; fi])
 AC_ARG_WITH(jack,      AS_HELP_STRING([--without-jack],[do not use the Jack sound support]),
             [if test "x$withval" = "xno"; then ac_cv_header_jack_jack_h=no; fi])
 AC_ARG_WITH(jpeg,      AS_HELP_STRING([--without-jpeg],[do not use JPEG]),
@@ -243,7 +245,7 @@ cat >conftest.l <<EOF
 }
 %%
 EOF
-if $FLEX -t conftest.l >/dev/null 2>&1
+if $FLEX -t conftest.l >/dev/null 2>&AS_MESSAGE_LOG_FD
 then
   AC_MSG_RESULT([yes])
 else
@@ -293,13 +295,13 @@ if test "x$enable_maintainer_mode" != "xyes"
 then
   AC_SUBST([MAINTAINER_MODE],[\#])
 else
-  if test "$FONTFORGE" = "false"; then WINE_WARNING([fontforge is missing, fonts can't be rebuilt.]); fi
-  if test "$RSVG" = "false"; then WINE_WARNING([rsvg is missing, icons can't be rebuilt.]); fi
+  if test "$FONTFORGE" = "false"; then AC_MSG_ERROR([You need fontforge to rebuild fonts in maintainer mode.]); fi
+  if test "$RSVG" = "false"; then AC_MSG_ERROR([You need rsvg to rebuild icons in maintainer mode.]); fi
 
   dnl Check the imagemagick version
   if test "$CONVERT" = false
   then
-    WINE_WARNING([imagemagick is missing, icons can't be rebuilt.])
+    AC_MSG_ERROR([You need imagemagick to rebuild icons in maintainer mode.])
   else
     AC_MSG_CHECKING([for recent enough imagemagick])
     convert_version=`convert --version | head -n1`
@@ -310,12 +312,12 @@ else
       if test "$convert_version_major" -eq 6 -a "$convert_version_minor" -lt 6
       then
         CONVERT=false
-        WINE_WARNING([imagemagick version 6.6 or newer is needed to rebuild icons.])
       fi
     fi
     if test "$CONVERT" = false
     then
       AC_MSG_RESULT([no ($convert_version_major.$convert_version_minor)])
+      AC_MSG_ERROR([You need imagemagick version 6.6 or newer to rebuild icons in maintainer mode.])
     else
       AC_MSG_RESULT([yes ($convert_version_major.$convert_version_minor)])
     fi
@@ -324,7 +326,7 @@ else
   dnl Check the icotool version
   if test "$ICOTOOL" = false
   then
-    WINE_WARNING([icotool is missing, icons can't be rebuilt.])
+    AC_MSG_ERROR([You need icotool to rebuild icons in maintainer mode.])
   else
     AC_MSG_CHECKING([for recent enough icotool])
     icotool_version=`icotool --version | head -n1`
@@ -341,18 +343,13 @@ else
     if test "$ICOTOOL" = false
     then
       AC_MSG_RESULT([no ($icotool_version_major.$icotool_version_minor)])
+      AC_MSG_ERROR([You need icotool version 0.29.0 or newer to rebuild icons in maintainer mode.])
     else
       AC_MSG_RESULT([yes ($icotool_version_major.$icotool_version_minor)])
     fi
   fi
 
 fi
-
-case $host_cpu in
-  *i[[3456789]]86*)
-    AC_PATH_PROG(PRELINK, prelink, false, [/sbin /usr/sbin $PATH])
-    ;;
-esac
 
 dnl **** Check for some libraries ****
 
@@ -396,6 +393,7 @@ AC_CHECK_HEADERS(\
 	grp.h \
 	gsm.h \
 	gsm/gsm.h \
+	icns.h \
 	ieeefp.h \
 	inet/mib2.h \
 	io.h \
@@ -793,6 +791,11 @@ case $host_os in
         *i[[3456789]]86* | x86_64)
           WINE_TRY_CFLAGS([-Wl,--section-start,.interp=0x7bf00400],
                           [LDEXECFLAGS="$LDEXECFLAGS -Wl,--section-start,.interp=0x7bf00400"])
+          AC_PATH_PROG(PRELINK, prelink, false, [/sbin /usr/sbin $PATH])
+          if test "x$PRELINK" = xfalse
+          then
+              WINE_WARNING([prelink not found, base address of core dlls won't be set correctly.])
+          fi
           ;;
       esac
 
@@ -832,26 +835,34 @@ If you are using Linux, you will need a newer binutils.]
 fi
 
 dnl Check for cross compiler to build test programs
-if test "$cross_compiling" = "no" -a "$LIBEXT" != "dll"
+AC_SUBST([CROSSTEST_DISABLE],[\#])
+if test "$cross_compiling" = "no" -a "x$enable_tests" != xno -a "$LIBEXT" != "dll"
 then
     WINE_CHECK_MINGW_PROG(CROSSCC,gcc,false)
     if test "$CROSSCC" != "false"
     then
-        AC_SUBST(CROSSTEST,"\$(CROSSTEST)")
-        set x $CROSSCC
-        shift
-        target=""
-        while test $# -ge 1
-        do
-            case "$1" in
-              *-gcc) target=`expr "$1" : '\(.*\)-gcc'` ;;
-            esac
-            shift
-        done
-        if test -n "$target"
-        then
-            AC_SUBST(CROSSTARGET,"$target")
-        fi
+        ac_save_CC="$CC"
+        CC="$CROSSCC"
+        AC_MSG_CHECKING([whether $CROSSCC works])
+        AC_COMPILE_IFELSE(AC_LANG_PROGRAM([]),
+                          [AC_MSG_RESULT([yes])
+                           set x $CROSSCC
+                           shift
+                           target=""
+                           while test $# -ge 1
+                           do
+                               case "$1" in
+                                 *-gcc) target=`expr "$1" : '\(.*\)-gcc'` ;;
+                               esac
+                               shift
+                           done
+                           if test -n "$target"
+                           then
+                               CROSSTEST_DISABLE=""
+                               AC_SUBST(CROSSTARGET,"$target")
+                           fi],
+                          [AC_MSG_RESULT([no])])
+        CC="$ac_save_CC"
     fi
 fi
 
@@ -1479,6 +1490,17 @@ fi
 WINE_NOTICE_WITH(gsm,[test "x$ac_cv_lib_soname_gsm" = "x"],
                  [libgsm ${notice_platform}development files not found, gsm 06.10 codec won't be supported.])
 
+dnl **** Check for libicns ****
+if test "$ac_cv_header_icns_h" = "yes"
+then
+    WINE_CHECK_SONAME(icns,icns_write_family_to_file)
+fi
+case $host_os in
+  darwin*|macosx*)
+    WINE_NOTICE_WITH(icns,[test "x$ac_cv_lib_soname_icns" = "x"],
+                     [libicns ${notice_platform}development files not found, ICNS icons won't be supported.]) ;;
+esac
+
 dnl **** Check for libjpeg ****
 if test "$ac_cv_header_jpeglib_h" = "yes"
 then
@@ -1602,6 +1624,17 @@ then
   if test "$ac_cv_c_string_h_warnings" = "no"
   then
     EXTRACFLAGS="$EXTRACFLAGS -Wpointer-arith"
+  fi
+
+  dnl Fortify enables unused result warnings on a gazillion functions, making it useless
+  saved_CFLAGS="$CFLAGS"
+  CFLAGS="$CFLAGS -Werror"
+  AC_CACHE_CHECK([for broken unused result warnings], ac_cv_c_unused_result_warnings,
+      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <unistd.h>]], [[write(2,"a",1)]])],[ac_cv_c_unused_result_warnings=no],[ac_cv_c_unused_result_warnings=yes]))
+  CFLAGS="$saved_CFLAGS"
+  if test "$ac_cv_c_unused_result_warnings" = "yes"
+  then
+    WINE_TRY_CFLAGS([-Wno-unused-result])
   fi
 
   dnl Enable -Werror for maintainer mode
@@ -2273,9 +2306,32 @@ WINE_CONFIG_DLL(d3d8,,[d3d8])
 WINE_CONFIG_TEST(dlls/d3d8/tests)
 WINE_CONFIG_DLL(d3d9,,[d3d9])
 WINE_CONFIG_TEST(dlls/d3d9/tests)
+WINE_CONFIG_DLL(d3dcompiler_33)
+WINE_CONFIG_DLL(d3dcompiler_34)
+WINE_CONFIG_DLL(d3dcompiler_35)
+WINE_CONFIG_DLL(d3dcompiler_36)
+WINE_CONFIG_DLL(d3dcompiler_37)
+WINE_CONFIG_DLL(d3dcompiler_38)
+WINE_CONFIG_DLL(d3dcompiler_39)
+WINE_CONFIG_DLL(d3dcompiler_40)
+WINE_CONFIG_DLL(d3dcompiler_41)
+WINE_CONFIG_DLL(d3dcompiler_42)
+WINE_CONFIG_DLL(d3dcompiler_43,,[d3dcompiler])
+WINE_CONFIG_TEST(dlls/d3dcompiler_43/tests)
 WINE_CONFIG_DLL(d3dim,,[d3dim])
 WINE_CONFIG_DLL(d3drm,,[d3drm])
 WINE_CONFIG_TEST(dlls/d3drm/tests)
+WINE_CONFIG_DLL(d3dx10_33)
+WINE_CONFIG_DLL(d3dx10_34)
+WINE_CONFIG_DLL(d3dx10_35)
+WINE_CONFIG_DLL(d3dx10_36)
+WINE_CONFIG_DLL(d3dx10_37)
+WINE_CONFIG_DLL(d3dx10_38)
+WINE_CONFIG_DLL(d3dx10_39)
+WINE_CONFIG_DLL(d3dx10_40)
+WINE_CONFIG_DLL(d3dx10_41)
+WINE_CONFIG_DLL(d3dx10_42)
+WINE_CONFIG_DLL(d3dx10_43)
 WINE_CONFIG_DLL(d3dx9_24)
 WINE_CONFIG_DLL(d3dx9_25)
 WINE_CONFIG_DLL(d3dx9_26)
@@ -2296,6 +2352,7 @@ WINE_CONFIG_DLL(d3dx9_39)
 WINE_CONFIG_DLL(d3dx9_40)
 WINE_CONFIG_DLL(d3dx9_41)
 WINE_CONFIG_DLL(d3dx9_42)
+WINE_CONFIG_DLL(d3dx9_43)
 WINE_CONFIG_DLL(d3dxof,,[d3dxof])
 WINE_CONFIG_TEST(dlls/d3dxof/tests)
 dnl WINE_CONFIG_DLL(dbghelp,,[dbghelp])
@@ -2316,6 +2373,7 @@ WINE_CONFIG_DLL(display.drv16,enable_win16)
 WINE_CONFIG_DLL(dmband)
 WINE_CONFIG_DLL(dmcompos)
 WINE_CONFIG_DLL(dmime)
+WINE_CONFIG_TEST(dlls/dmime/tests)
 WINE_CONFIG_DLL(dmloader)
 WINE_CONFIG_TEST(dlls/dmloader/tests)
 WINE_CONFIG_DLL(dmscript)
@@ -2346,11 +2404,15 @@ WINE_CONFIG_LIB(dxerr9)
 WINE_CONFIG_DLL(dxgi,,[dxgi])
 WINE_CONFIG_TEST(dlls/dxgi/tests)
 WINE_CONFIG_LIB(dxguid)
+WINE_CONFIG_DLL(explorerframe)
+WINE_CONFIG_TEST(dlls/explorerframe/tests)
 WINE_CONFIG_DLL(faultrep)
 WINE_CONFIG_DLL(fltlib)
 WINE_CONFIG_DLL(fusion)
 WINE_CONFIG_TEST(dlls/fusion/tests)
 WINE_CONFIG_DLL(fwpuclnt)
+WINE_CONFIG_DLL(gameux)
+WINE_CONFIG_TEST(dlls/gameux/tests)
 WINE_CONFIG_DLL(gdi.exe16,enable_win16)
 WINE_CONFIG_DLL(gdi32,,[gdi32])
 WINE_CONFIG_TEST(dlls/gdi32/tests)
@@ -2432,6 +2494,7 @@ WINE_CONFIG_DLL(mscat32)
 WINE_CONFIG_DLL(mscms,,[mscms])
 WINE_CONFIG_TEST(dlls/mscms/tests)
 WINE_CONFIG_DLL(mscoree)
+WINE_CONFIG_TEST(dlls/mscoree/tests)
 WINE_CONFIG_DLL(msctf)
 WINE_CONFIG_TEST(dlls/msctf/tests)
 WINE_CONFIG_DLL(msdaps)
@@ -2455,6 +2518,9 @@ WINE_CONFIG_DLL(mssip32)
 WINE_CONFIG_DLL(mstask)
 WINE_CONFIG_TEST(dlls/mstask/tests)
 WINE_CONFIG_DLL(msvcirt)
+WINE_CONFIG_DLL(msvcp80)
+WINE_CONFIG_DLL(msvcp90)
+WINE_CONFIG_TEST(dlls/msvcp90/tests)
 WINE_CONFIG_DLL(msvcr100)
 WINE_CONFIG_DLL(msvcr70,,[msvcr70])
 WINE_CONFIG_DLL(msvcr71,,[msvcr71])
@@ -2475,6 +2541,7 @@ WINE_CONFIG_DLL(mswsock,,[mswsock])
 WINE_CONFIG_DLL(msxml3)
 WINE_CONFIG_TEST(dlls/msxml3/tests)
 WINE_CONFIG_DLL(msxml4)
+WINE_CONFIG_DLL(msxml6)
 WINE_CONFIG_DLL(nddeapi,,[nddeapi])
 WINE_CONFIG_DLL(netapi32,,[netapi32])
 WINE_CONFIG_TEST(dlls/netapi32/tests)
@@ -2519,7 +2586,8 @@ WINE_CONFIG_TEST(dlls/pdh/tests)
 WINE_CONFIG_DLL(pidgen)
 WINE_CONFIG_DLL(powrprof,,[powrprof])
 WINE_CONFIG_DLL(printui)
-WINE_CONFIG_DLL(propsys)
+WINE_CONFIG_DLL(propsys,,[propsys])
+WINE_CONFIG_TEST(dlls/propsys/tests)
 WINE_CONFIG_DLL(psapi,,[psapi])
 WINE_CONFIG_TEST(dlls/psapi/tests)
 WINE_CONFIG_DLL(pstorec)
@@ -2546,6 +2614,7 @@ WINE_CONFIG_TEST(dlls/rpcrt4/tests)
 WINE_CONFIG_DLL(rsabase)
 WINE_CONFIG_DLL(rsaenh,,[rsaenh])
 WINE_CONFIG_TEST(dlls/rsaenh/tests)
+WINE_CONFIG_DLL(rstrtmgr)
 WINE_CONFIG_DLL(rtutils,,[rtutils])
 WINE_CONFIG_DLL(samlib)
 WINE_CONFIG_DLL(sane.ds)
@@ -2627,6 +2696,7 @@ WINE_CONFIG_DLL(vwin32.vxd,enable_win16)
 WINE_CONFIG_DLL(w32skrnl,enable_win16)
 WINE_CONFIG_DLL(w32sys.dll16,enable_win16)
 WINE_CONFIG_DLL(wbemprox)
+WINE_CONFIG_DLL(wer)
 WINE_CONFIG_DLL(wiaservc)
 WINE_CONFIG_DLL(win32s16.dll16,enable_win16)
 WINE_CONFIG_DLL(win87em.dll16,enable_win16)
@@ -2710,6 +2780,7 @@ WINE_CONFIG_PROGRAM(extrac32,install)
 WINE_CONFIG_PROGRAM(hh,install)
 WINE_CONFIG_PROGRAM(icinfo,install)
 WINE_CONFIG_PROGRAM(iexplore,install)
+WINE_CONFIG_PROGRAM(ipconfig,install)
 WINE_CONFIG_PROGRAM(lodctr,install)
 WINE_CONFIG_PROGRAM(mshta,install)
 WINE_CONFIG_PROGRAM(msiexec,installbin)
@@ -2721,8 +2792,10 @@ WINE_CONFIG_PROGRAM(ping,install)
 WINE_CONFIG_PROGRAM(progman,install)
 WINE_CONFIG_PROGRAM(reg,install)
 WINE_CONFIG_PROGRAM(regedit,installbin)
+WINE_CONFIG_TEST(programs/regedit/tests)
 WINE_CONFIG_PROGRAM(regsvr32,installbin)
 WINE_CONFIG_PROGRAM(rpcss,install)
+WINE_CONFIG_PROGRAM(rundll.exe16,install,enable_win16)
 WINE_CONFIG_PROGRAM(rundll32,install)
 WINE_CONFIG_PROGRAM(sc,install)
 WINE_CONFIG_PROGRAM(secedit,install)
@@ -2753,6 +2826,7 @@ WINE_CONFIG_PROGRAM(winoldap.mod16,install,enable_win16)
 WINE_CONFIG_PROGRAM(winver,install)
 WINE_CONFIG_PROGRAM(wordpad,install)
 WINE_CONFIG_PROGRAM(write,install)
+WINE_CONFIG_PROGRAM(wscript,install)
 WINE_CONFIG_PROGRAM(xcopy,install)
 WINE_CONFIG_MAKEFILE([server])
 WINE_CONFIG_TOOL(tools)

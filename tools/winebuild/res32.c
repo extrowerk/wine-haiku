@@ -220,8 +220,12 @@ static void load_next_resource( DLLSPEC *spec )
     res->data_size = get_dword();
     hdr_size = get_dword();
     if (hdr_size & 3) fatal_error( "%s header size not aligned\n", input_buffer_filename );
+    if (hdr_size < 32) fatal_error( "%s invalid header size %u\n", input_buffer_filename, hdr_size );
 
     res->data = input_buffer + input_buffer_pos - 2*sizeof(unsigned int) + hdr_size;
+    if ((const unsigned char *)res->data < input_buffer ||
+        (const unsigned char *)res->data >= input_buffer + input_buffer_size)
+        fatal_error( "%s invalid header size %u\n", input_buffer_filename, hdr_size );
     get_string( &res->type );
     get_string( &res->name );
     if (input_buffer_pos & 2) get_word();  /* align to dword boundary */
@@ -597,7 +601,7 @@ void output_res_o_file( DLLSPEC *spec )
 {
     unsigned int i;
     char *res_file = NULL;
-    int fd, err;
+    int fd;
 
     if (!spec->nb_resources) fatal_error( "--resources mode needs at least one resource file as input\n" );
     if (!output_file_name) fatal_error( "No output file name specified\n" );
@@ -652,14 +656,10 @@ void output_res_o_file( DLLSPEC *spec )
 
     if (res_file)
     {
-        char *prog = find_tool( "windres", NULL );
-        char *cmd = xmalloc( strlen(prog) + strlen(res_file) + strlen(output_file_name) + 9 );
-        sprintf( cmd, "%s -i %s -o %s", prog, res_file, output_file_name );
-        if (verbose) fprintf( stderr, "%s\n", cmd );
-        err = system( cmd );
-        if (err) fatal_error( "%s failed with status %d\n", prog, err );
-        free( cmd );
-        free( prog );
+        struct strarray *args = strarray_init();
+        strarray_add( args, find_tool( "windres", NULL ), "-i", res_file, "-o", output_file_name, NULL );
+        spawn( args );
+        strarray_free( args );
     }
     output_file_name = NULL;  /* so we don't try to assemble it */
 }

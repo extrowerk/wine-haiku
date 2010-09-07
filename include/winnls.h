@@ -378,6 +378,7 @@ extern "C" {
 #define C1_BLANK		0x0040
 #define C1_XDIGIT		0x0080
 #define C1_ALPHA		0x0100
+#define C1_DEFINED		0x0200
 
 /* Type 2 flags */
 #define	C2_LEFTTORIGHT		0x0001
@@ -766,6 +767,7 @@ WINBASEAPI INT         WINAPI GetTimeFormatW(LCID,DWORD,const SYSTEMTIME*,LPCWST
 #define                       GetTimeFormat WINELIB_NAME_AW(GetTimeFormat)
 WINBASEAPI LANGID      WINAPI GetUserDefaultLangID(void);
 WINBASEAPI LCID        WINAPI GetUserDefaultLCID(void);
+WINBASEAPI INT         WINAPI GetUserDefaultLocaleName(LPWSTR,int);
 WINBASEAPI LANGID      WINAPI GetUserDefaultUILanguage(void);
 WINBASEAPI GEOID       WINAPI GetUserGeoID(GEOCLASS);
 WINBASEAPI BOOL        WINAPI IsDBCSLeadByte(BYTE);

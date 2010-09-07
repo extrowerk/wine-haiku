@@ -27,7 +27,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
-#include "msxml2.h"
+#include "msxml6.h"
 
 #include "msxml_private.h"
 
@@ -58,14 +58,15 @@ static HRESULT WINAPI dom_pi_QueryInterface(
     TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppvObject);
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMProcessingInstruction ) ||
+         IsEqualGUID( riid, &IID_IXMLDOMNode ) ||
          IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
         *ppvObject = iface;
     }
-    else if ( IsEqualGUID( riid, &IID_IXMLDOMNode ) )
+    else if(node_query_interface(&This->node, riid, ppvObject))
     {
-        *ppvObject = IXMLDOMNode_from_impl(&This->node);
+        return *ppvObject ? S_OK : E_NOINTERFACE;
     }
     else
     {
@@ -182,27 +183,33 @@ static HRESULT WINAPI dom_pi_get_nodeName(
     BSTR* p )
 {
     dom_pi *This = impl_from_IXMLDOMProcessingInstruction( iface );
-    return IXMLDOMNode_get_nodeName( IXMLDOMNode_from_impl(&This->node), p );
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return node_get_nodeName(&This->node, p);
 }
 
 static HRESULT WINAPI dom_pi_get_nodeValue(
     IXMLDOMProcessingInstruction *iface,
-    VARIANT* var1 )
+    VARIANT* value)
 {
     dom_pi *This = impl_from_IXMLDOMProcessingInstruction( iface );
-    return IXMLDOMNode_get_nodeValue( IXMLDOMNode_from_impl(&This->node), var1 );
+
+    TRACE("(%p)->(%p)\n", This, value);
+
+    return node_get_content(&This->node, value);
 }
 
 static HRESULT WINAPI dom_pi_put_nodeValue(
     IXMLDOMProcessingInstruction *iface,
-    VARIANT var1 )
+    VARIANT value)
 {
     dom_pi *This = impl_from_IXMLDOMProcessingInstruction( iface );
     BSTR sTarget;
     static const WCHAR szXML[] = {'x','m','l',0};
     HRESULT hr;
 
-    TRACE("%p\n", This );
+    TRACE("(%p)->(v%d)\n", This, V_VT(&value));
 
     /* Cannot set data to a PI node whose target is 'xml' */
     hr = dom_pi_get_nodeName(iface, &sTarget);
@@ -217,7 +224,7 @@ static HRESULT WINAPI dom_pi_put_nodeValue(
         SysFreeString(sTarget);
     }
 
-    return IXMLDOMNode_put_nodeValue( IXMLDOMNode_from_impl(&This->node), var1 );
+    return node_put_value(&This->node, &value);
 }
 
 static HRESULT WINAPI dom_pi_get_nodeType(
@@ -225,7 +232,11 @@ static HRESULT WINAPI dom_pi_get_nodeType(
     DOMNodeType* domNodeType )
 {
     dom_pi *This = impl_from_IXMLDOMProcessingInstruction( iface );
-    return IXMLDOMNode_get_nodeType( IXMLDOMNode_from_impl(&This->node), domNodeType );
+
+    TRACE("(%p)->(%p)\n", This, domNodeType);
+
+    *domNodeType = NODE_PROCESSING_INSTRUCTION;
+    return S_OK;
 }
 
 static HRESULT WINAPI dom_pi_get_parentNode(
@@ -233,7 +244,10 @@ static HRESULT WINAPI dom_pi_get_parentNode(
     IXMLDOMNode** parent )
 {
     dom_pi *This = impl_from_IXMLDOMProcessingInstruction( iface );
-    return IXMLDOMNode_get_parentNode( IXMLDOMNode_from_impl(&This->node), parent );
+
+    TRACE("(%p)->(%p)\n", This, parent);
+
+    return node_get_parent(&This->node, parent);
 }
 
 static HRESULT WINAPI dom_pi_get_childNodes(
@@ -491,23 +505,25 @@ static HRESULT WINAPI dom_pi_get_target(
     IXMLDOMProcessingInstruction *iface,
     BSTR *p)
 {
-    /* target returns the same value as nodeName property */
     dom_pi *This = impl_from_IXMLDOMProcessingInstruction( iface );
-    return IXMLDOMNode_get_nodeName( IXMLDOMNode_from_impl(&This->node), p );
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    /* target returns the same value as nodeName property */
+    return node_get_nodeName(&This->node, p);
 }
 
 static HRESULT WINAPI dom_pi_get_data(
     IXMLDOMProcessingInstruction *iface,
     BSTR *p)
 {
-    dom_pi *This = impl_from_IXMLDOMProcessingInstruction( iface );
     HRESULT hr = E_FAIL;
     VARIANT vRet;
 
     if(!p)
         return E_INVALIDARG;
 
-    hr = IXMLDOMNode_get_nodeValue( IXMLDOMNode_from_impl(&This->node), &vRet );
+    hr = IXMLDOMProcessingInstruction_get_nodeValue( iface, &vRet );
     if(hr == S_OK)
     {
         *p = V_BSTR(&vRet);
@@ -544,7 +560,7 @@ static HRESULT WINAPI dom_pi_put_data(
     V_VT(&val) = VT_BSTR;
     V_BSTR(&val) = data;
 
-    hr = IXMLDOMNode_put_nodeValue( IXMLDOMNode_from_impl(&This->node), val );
+    hr = IXMLDOMProcessingInstruction_put_nodeValue( iface, val );
 
     return hr;
 }
@@ -611,7 +627,7 @@ IUnknown* create_pi( xmlNodePtr pi )
     This->lpVtbl = &dom_pi_vtbl;
     This->ref = 1;
 
-    init_xmlnode(&This->node, pi, (IUnknown*)&This->lpVtbl, NULL);
+    init_xmlnode(&This->node, pi, (IXMLDOMNode*)&This->lpVtbl, NULL);
 
     return (IUnknown*) &This->lpVtbl;
 }

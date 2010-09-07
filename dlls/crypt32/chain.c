@@ -23,6 +23,7 @@
 #define CERT_CHAIN_PARA_HAS_EXTRA_FIELDS
 #define CERT_REVOCATION_PARA_HAS_EXTRA_FIELDS
 #include "wincrypt.h"
+#include "wininet.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
 #include "crypt32_private.h"
@@ -1343,7 +1344,7 @@ static CERT_POLICIES_INFO *CRYPT_GetPolicies(PCCERT_CONTEXT cert)
     return policies;
 }
 
-static void CRYPT_CheckPolicies(CERT_POLICIES_INFO *policies, CERT_INFO *cert,
+static void CRYPT_CheckPolicies(const CERT_POLICIES_INFO *policies, CERT_INFO *cert,
  DWORD *errorStatus)
 {
     DWORD i;
@@ -3001,7 +3002,7 @@ static BOOL WINAPI verify_basic_constraints_policy(LPCSTR szPolicyOID,
     return TRUE;
 }
 
-static BOOL match_dns_to_subject_alt_name(PCERT_EXTENSION ext,
+static BOOL match_dns_to_subject_alt_name(const CERT_EXTENSION *ext,
  LPCWSTR server_name)
 {
     BOOL matches = FALSE;
@@ -3069,7 +3070,7 @@ static BOOL match_dns_to_subject_alt_name(PCERT_EXTENSION ext,
     return matches;
 }
 
-static BOOL find_matching_domain_component(CERT_NAME_INFO *name,
+static BOOL find_matching_domain_component(const CERT_NAME_INFO *name,
  LPCWSTR component)
 {
     BOOL matches = FALSE;
@@ -3080,7 +3081,7 @@ static BOOL find_matching_domain_component(CERT_NAME_INFO *name,
             if (!strcmp(szOID_DOMAIN_COMPONENT,
              name->rgRDN[i].rgRDNAttr[j].pszObjId))
             {
-                PCERT_RDN_ATTR attr;
+                const CERT_RDN_ATTR *attr;
 
                 attr = &name->rgRDN[i].rgRDNAttr[j];
                 /* Compare with memicmpW rather than strcmpiW in order to avoid
@@ -3088,7 +3089,7 @@ static BOOL find_matching_domain_component(CERT_NAME_INFO *name,
                  * must match one domain component attribute's entire string
                  * value with a case-insensitive match.
                  */
-                matches = !memicmpW(component, (LPWSTR)attr->Value.pbData,
+                matches = !memicmpW(component, (LPCWSTR)attr->Value.pbData,
                  attr->Value.cbData / sizeof(WCHAR));
             }
     return matches;
@@ -3149,7 +3150,7 @@ static BOOL match_domain_component(LPCWSTR allowed_component, DWORD allowed_len,
     return matches;
 }
 
-static BOOL match_common_name(LPCWSTR server_name, PCERT_RDN_ATTR nameAttr)
+static BOOL match_common_name(LPCWSTR server_name, const CERT_RDN_ATTR *nameAttr)
 {
     LPCWSTR allowed = (LPCWSTR)nameAttr->Value.pbData;
     LPCWSTR allowed_component = allowed;
@@ -3331,7 +3332,8 @@ static BOOL WINAPI verify_ssl_policy(LPCSTR szPolicyOID,
         if (sslPara && sslPara->u.cbSize >= sizeof(HTTPSPolicyCallbackData))
         {
             if (sslPara->dwAuthType == AUTHTYPE_SERVER &&
-             sslPara->pwszServerName)
+             sslPara->pwszServerName &&
+             !(sslPara->fdwChecks & SECURITY_FLAG_IGNORE_CERT_CN_INVALID))
             {
                 PCCERT_CONTEXT cert;
                 PCERT_EXTENSION altNameExt;

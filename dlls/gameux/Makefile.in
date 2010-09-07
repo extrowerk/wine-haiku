@@ -1,0 +1,18 @@
+EXTRADEFS = -DCOM_NO_WINDOWS_H
+TOPSRCDIR = @top_srcdir@
+TOPOBJDIR = ../..
+SRCDIR    = @srcdir@
+VPATH     = @srcdir@
+MODULE    = gameux.dll
+IMPORTS   = uuid ole32 user32 advapi32
+
+C_SRCS = \
+	factory.c \
+	gameexplorer.c \
+	gamestatistics.c \
+	main.c \
+	regsvr.c
+
+RC_SRCS = version.rc
+
+@MAKE_DLL_RULES@

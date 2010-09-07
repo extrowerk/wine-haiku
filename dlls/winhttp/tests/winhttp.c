@@ -770,6 +770,8 @@ static void test_secure_connection(void)
     DWORD size, status, policy, bitness;
     BOOL ret;
     CERT_CONTEXT *cert;
+    WINHTTP_CERTIFICATE_INFO info;
+    char buffer[32];
 
     ses = WinHttpOpen(test_useragent, 0, NULL, NULL, 0);
     ok(ses != NULL, "failed to open session %u\n", GetLastError());
@@ -823,6 +825,17 @@ static void test_secure_connection(void)
     ret = WinHttpQueryOption(req, WINHTTP_OPTION_SECURITY_KEY_BITNESS, &bitness, &size );
     ok(ret, "failed to retrieve key bitness %u\n", GetLastError());
 
+    size = sizeof(info);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_SECURITY_CERTIFICATE_STRUCT, &info, &size );
+    ok(ret, "failed to retrieve certificate info %u\n", GetLastError());
+
+    trace("lpszSubjectInfo %s\n", wine_dbgstr_w(info.lpszSubjectInfo));
+    trace("lpszIssuerInfo %s\n", wine_dbgstr_w(info.lpszIssuerInfo));
+    trace("lpszProtocolName %s\n", wine_dbgstr_w(info.lpszProtocolName));
+    trace("lpszSignatureAlgName %s\n", wine_dbgstr_w(info.lpszSignatureAlgName));
+    trace("lpszEncryptionAlgName %s\n", wine_dbgstr_w(info.lpszEncryptionAlgName));
+    trace("dwKeySize %u\n", info.dwKeySize);
+
     ret = WinHttpReceiveResponse(req, NULL);
     ok(ret, "failed to receive response %u\n", GetLastError());
 
@@ -834,6 +847,13 @@ static void test_secure_connection(void)
     size = 0;
     ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_RAW_HEADERS_CRLF, NULL, NULL, &size, NULL);
     ok(!ret, "succeeded unexpectedly\n");
+
+    for (;;)
+    {
+        size = 0;
+        ret = WinHttpReadData(req, buffer, sizeof(buffer), &size);
+        if (!size) break;
+    }
 
 cleanup:
     WinHttpCloseHandle(req);

@@ -44,9 +44,9 @@ dlls/actxprxy/actxprxy_urlhist_p.c
 dlls/advapi32/svcctl.h
 dlls/advapi32/svcctl_c.c
 dlls/atl/atliface.h
-dlls/d3dx9_36/asmshader.tab.c
-dlls/d3dx9_36/asmshader.tab.h
-dlls/d3dx9_36/asmshader.yy.c
+dlls/d3dcompiler_43/asmshader.tab.c
+dlls/d3dcompiler_43/asmshader.tab.h
+dlls/d3dcompiler_43/asmshader.yy.c
 dlls/dispex/disp_ex.h
 dlls/dispex/disp_ex_p.c
 dlls/dxdiagn/fil_data.h
@@ -64,7 +64,11 @@ dlls/kernel32/nls/winerr_lth.mc.rc
 dlls/kernel32/nls/winerr_nld.mc.rc
 dlls/kernel32/nls/winerr_nor.mc.rc
 dlls/kernel32/nls/winerr_plk.mc.rc
+dlls/kernel32/nls/winerr_ptb.mc.rc
 dlls/kernel32/nls/winerr_ptg.mc.rc
+dlls/kernel32/nls/winerr_rus.mc.rc
+dlls/kernel32/nls/winerr_ukr.mc.rc
+dlls/libd3dcompiler.def
 dlls/libd3dx9.def
 dlls/libkernel.def
 dlls/libwinspool.def
@@ -150,6 +154,7 @@ include/control.h
 include/ctfutb.h
 include/ctxtcall.h
 include/d3d10.h
+include/d3dcommon.h
 include/ddstream.h
 include/devicetopology.h
 include/dimm.h
@@ -184,6 +189,7 @@ include/msinkaut.h
 include/mstask.h
 include/msxml.h
 include/msxml2.h
+include/msxml6.h
 include/netcon.h
 include/netfw.h
 include/oaidl.h
@@ -253,8 +259,11 @@ programs/winedbg/debug.yy.c
 programs/winedbg/winedbg.man
 programs/winetest/*_test.exe
 programs/winetest/*_test.rc
+programs/winetest/build.nfo
 programs/winetest/build.rc
 programs/winhlp32/macro.lex.yy.c
+programs/wscript/ihost.h
+programs/wscript/ihost.tlb
 server/wineserver
 server/wineserver-installed
 server/wineserver.de.man

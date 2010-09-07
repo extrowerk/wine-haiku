@@ -60,6 +60,7 @@
 #endif
 #ifdef HAVE_OPENSSL_SSL_H
 # include <openssl/ssl.h>
+# include <openssl/opensslv.h>
 #undef FAR
 #undef DSA
 #endif
@@ -113,7 +114,11 @@ static CRITICAL_SECTION init_ssl_cs = { &init_ssl_cs_debug, -1, 0, 0, 0, 0 };
 static void *OpenSSL_ssl_handle;
 static void *OpenSSL_crypto_handle;
 
+#if defined(OPENSSL_VERSION_NUMBER) && (OPENSSL_VERSION_NUMBER> 0x1000000)
+static const SSL_METHOD *meth;
+#else
 static SSL_METHOD *meth;
+#endif
 static SSL_CTX *ctx;
 static int hostname_idx;
 static int error_idx;
@@ -770,6 +775,8 @@ DWORD NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int 
     if (!connection->useSSL)
     {
 	*recvd = recv(connection->socketFD, buf, len, flags);
+        if(!*recvd)
+            NETCON_close(connection);
 	return *recvd == -1 ? sock_get_error(errno) :  ERROR_SUCCESS;
     }
     else
@@ -779,8 +786,10 @@ DWORD NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int 
 
         /* Check if EOF was received */
         if(!*recvd && (pSSL_get_error(connection->ssl_s, *recvd)==SSL_ERROR_ZERO_RETURN
-                    || pSSL_get_error(connection->ssl_s, *recvd)==SSL_ERROR_SYSCALL))
+                    || pSSL_get_error(connection->ssl_s, *recvd)==SSL_ERROR_SYSCALL)) {
+            NETCON_close(connection);
             return ERROR_SUCCESS;
+        }
 
         return *recvd > 0 ? ERROR_SUCCESS : ERROR_INTERNET_CONNECTION_ABORTED;
 #else

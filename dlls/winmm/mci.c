@@ -123,14 +123,6 @@ static UINT MCI_GetDriverFromString(LPCWSTR lpstrName)
 
     EnterCriticalSection(&WINMM_cs);
     for (wmd = MciDrivers; wmd; wmd = wmd->lpNext) {
-	if (wmd->lpstrElementName && strcmpW(wmd->lpstrElementName, lpstrName) == 0) {
-	    ret = wmd->wDeviceID;
-	    break;
-	}
-	if (wmd->lpstrDeviceType && strcmpiW(wmd->lpstrDeviceType, lpstrName) == 0) {
-	    ret = wmd->wDeviceID;
-	    break;
-	}
 	if (wmd->lpstrAlias && strcmpiW(wmd->lpstrAlias, lpstrName) == 0) {
 	    ret = wmd->wDeviceID;
 	    break;
@@ -144,7 +136,7 @@ static UINT MCI_GetDriverFromString(LPCWSTR lpstrName)
 /**************************************************************************
  * 			MCI_MessageToString			[internal]
  */
-const char* MCI_MessageToString(UINT wMsg)
+static const char* MCI_MessageToString(UINT wMsg)
 {
 #define CASE(s) case (s): return #s
 
@@ -213,7 +205,7 @@ const char* MCI_MessageToString(UINT wMsg)
     }
 }
 
-LPWSTR MCI_strdupAtoW( LPCSTR str )
+static LPWSTR MCI_strdupAtoW( LPCSTR str )
 {
     LPWSTR ret;
     INT len;
@@ -222,18 +214,6 @@ LPWSTR MCI_strdupAtoW( LPCSTR str )
     len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0 );
     ret = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
     if (ret) MultiByteToWideChar( CP_ACP, 0, str, -1, ret, len );
-    return ret;
-}
-
-LPSTR MCI_strdupWtoA( LPCWSTR str )
-{
-    LPSTR ret;
-    INT len;
-
-    if (!str) return NULL;
-    len = WideCharToMultiByte( CP_ACP, 0, str, -1, NULL, 0, NULL, NULL );
-    ret = HeapAlloc( GetProcessHeap(), 0, len );
-    if (ret) WideCharToMultiByte( CP_ACP, 0, str, -1, ret, len, NULL, NULL );
     return ret;
 }
 
@@ -560,6 +540,23 @@ static	DWORD	MCI_GetDevTypeFromFileName(LPCWSTR fileName, LPWSTR buf, UINT len)
     return MCIERR_EXTENSION_NOT_FOUND;
 }
 
+/**************************************************************************
+ * 				MCI_GetDevTypeFromResource	[internal]
+ */
+static	UINT	MCI_GetDevTypeFromResource(LPCWSTR lpstrName)
+{
+    WCHAR	buf[32];
+    UINT	uDevType;
+    for (uDevType = MCI_DEVTYPE_FIRST; uDevType <= MCI_DEVTYPE_LAST; uDevType++) {
+	if (LoadStringW(hWinMM32Instance, uDevType, buf, sizeof(buf) / sizeof(WCHAR))) {
+	    /* FIXME: ignore digits suffix */
+	    if (!strcmpiW(buf, lpstrName))
+		return uDevType;
+	}
+    }
+    return 0;
+}
+
 #define	MAX_MCICMDTABLE			20
 #define MCI_COMMAND_TABLE_NOT_LOADED	0xFFFE
 
@@ -782,7 +779,6 @@ static	BOOL	MCI_UnLoadMciDriver(LPWINE_MCIDRIVER wmd)
 
     HeapFree(GetProcessHeap(), 0, wmd->lpstrDeviceType);
     HeapFree(GetProcessHeap(), 0, wmd->lpstrAlias);
-    HeapFree(GetProcessHeap(), 0, wmd->lpstrElementName);
 
     HeapFree(GetProcessHeap(), 0, wmd);
     return TRUE;
@@ -900,15 +896,27 @@ static DWORD MCI_SendCommandFrom32(MCIDEVICEID wDevID, UINT16 wMsg, DWORD_PTR dw
 static	DWORD	MCI_FinishOpen(LPWINE_MCIDRIVER wmd, LPMCI_OPEN_PARMSW lpParms,
 			       DWORD dwParam)
 {
-    if (dwParam & MCI_OPEN_ELEMENT)
-    {
-        wmd->lpstrElementName = HeapAlloc(GetProcessHeap(),0,(strlenW(lpParms->lpstrElementName)+1) * sizeof(WCHAR));
-        strcpyW( wmd->lpstrElementName, lpParms->lpstrElementName );
+    LPCWSTR alias = NULL;
+    /* Open always defines an alias for further reference */
+    if (dwParam & MCI_OPEN_ALIAS) {         /* open ... alias */
+        alias = lpParms->lpstrAlias;
+        if (MCI_GetDriverFromString(alias))
+            return MCIERR_DUPLICATE_ALIAS;
+    } else {
+        if ((dwParam & MCI_OPEN_ELEMENT)    /* open file.wav */
+            && !(dwParam & MCI_OPEN_ELEMENT_ID))
+            alias = lpParms->lpstrElementName;
+        else if (dwParam & MCI_OPEN_TYPE )  /* open cdaudio */
+            alias = wmd->lpstrDeviceType;
+        if (alias && MCI_GetDriverFromString(alias))
+            return MCIERR_DEVICE_OPEN;
     }
-    if (dwParam & MCI_OPEN_ALIAS)
-    {
-        wmd->lpstrAlias = HeapAlloc(GetProcessHeap(), 0, (strlenW(lpParms->lpstrAlias)+1) * sizeof(WCHAR));
-        strcpyW( wmd->lpstrAlias, lpParms->lpstrAlias);
+    if (alias) {
+        wmd->lpstrAlias = HeapAlloc(GetProcessHeap(), 0, (strlenW(alias)+1) * sizeof(WCHAR));
+        if (!wmd->lpstrAlias) return MCIERR_OUT_OF_MEMORY;
+        strcpyW( wmd->lpstrAlias, alias);
+        /* In most cases, natives adds MCI_OPEN_ALIAS to the flags passed to the driver.
+         * Don't.  The drivers don't care about the winmm alias. */
     }
     lpParms->wDeviceID = wmd->wDeviceID;
 
@@ -1223,12 +1231,13 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 {
     LPWSTR		verb, dev, args;
     LPWINE_MCIDRIVER	wmd = 0;
-    MCIDEVICEID		uDevID;
+    MCIDEVICEID		uDevID, auto_open = 0;
     DWORD		dwFlags = 0, dwRet = 0;
     int			offset = 0;
     DWORD_PTR		data[MCI_DATA_SIZE];
     DWORD		retType;
     LPCWSTR		lpCmd = 0;
+    WORD		wMsg = 0;
     static const WCHAR  wszNew[] = {'n','e','w',0};
     static const WCHAR  wszSAliasS[] = {' ','a','l','i','a','s',' ',0};
     static const WCHAR  wszTypeS[]   = {'t','y','p','e',' ',0};
@@ -1238,6 +1247,7 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 
     TRACE("(%s, %p, %d, %p)\n", 
           debugstr_w(lpstrCommand), lpstrRet, uRetLen, hwndCallback);
+    if (lpstrRet && uRetLen) *lpstrRet = '\0';
 
     /* format is <command> <device> <optargs> */
     if (!(verb = HeapAlloc(GetProcessHeap(), 0, (strlenW(lpstrCommand)+1) * sizeof(WCHAR))))
@@ -1324,38 +1334,26 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 	if (dwRet == MCIERR_DEVICE_NOT_INSTALLED)
 	    dwRet = MCIERR_INVALID_DEVICE_NAME;
 	HeapFree(GetProcessHeap(), 0, devType);
-	if (dwRet) {
-	    MCI_UnLoadMciDriver(wmd);
+	if (dwRet)
 	    goto errCleanUp;
-	}
-    } else if (!strcmpW(verb, wszSysinfo)) {
-	/* System commands are not subject to auto-open. */
-	/* It's too early to handle Sysinfo here because the
-	 * requirements on dev depend on the flags:
-	 * alias with INSTALLNAME, name like "waveaudio"
-	 * with QUANTITY and NAME. */
-	data[4] = MCI_ALL_DEVICE_ID;
-	if (MCI_ALL_DEVICE_ID != uDevID) {
-	    /* FIXME: Map device name like waveaudio to MCI_DEVTYPE_xyz */
-	    uDevID = mciGetDeviceIDW(dev);
-	    wmd = MCI_GetDriver(uDevID);
-	    if (wmd)
-		data[4] = wmd->wType;
-	}
-    } else if (!strcmpW(verb, wszSound) || !strcmpW(verb, wszBreak)) {
+    } else if (!strcmpW(verb, wszSysinfo) || !strcmpW(verb, wszSound) || !strcmpW(verb, wszBreak)) {
 	/* Prevent auto-open for system commands. */
     } else if ((MCI_ALL_DEVICE_ID != uDevID) && !(wmd = MCI_GetDriver(mciGetDeviceIDW(dev)))) {
 	/* auto open */
         static const WCHAR wszOpenWait[] = {'o','p','e','n',' ','%','s',' ','w','a','i','t',0};
-	WCHAR   buf[128];
-	sprintfW(buf, wszOpenWait, dev);
-
-	if ((dwRet = mciSendStringW(buf, NULL, 0, 0)) != 0)
+	WCHAR   buf[138], retbuf[6];
+	snprintfW(buf, sizeof(buf)/sizeof(WCHAR), wszOpenWait, dev);
+	/* open via mciSendString handles quoting, dev!file syntax and alias creation */
+	if ((dwRet = mciSendStringW(buf, retbuf, sizeof(retbuf)/sizeof(WCHAR), 0)) != 0)
 	    goto errCleanUp;
+	auto_open = strtoulW(retbuf, NULL, 10);
+	TRACE("auto-opened %u\n", auto_open);
 
-	wmd = MCI_GetDriver(mciGetDeviceIDW(dev));
+	/* FIXME: test for notify flag (how to preparse?) before opening */
+	/* FIXME: Accept only core commands yet parse them with the specific table */
+	wmd = MCI_GetDriver(auto_open);
 	if (!wmd) {
-	    /* FIXME: memory leak, MCI driver is not closed */
+	    ERR("No auto-open device %d for %s\n", auto_open, debugstr_w(dev));
 	    dwRet = MCIERR_INVALID_DEVICE_ID;
 	    goto errCleanUp;
 	}
@@ -1381,6 +1379,7 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 	dwRet = MCIERR_UNRECOGNIZED_COMMAND;
 	goto errCleanUp;
     }
+    wMsg = MCI_GetMessage(lpCmd);
 
     /* set return information */
     switch (retType = MCI_GetReturnType(lpCmd)) {
@@ -1398,32 +1397,75 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 	goto errCleanUp;
 
     /* set up call back */
+    if (auto_open) {
+	if (dwFlags & MCI_NOTIFY) {
+	    dwRet = MCIERR_NOTIFY_ON_AUTO_OPEN;
+	    goto errCleanUp;
+	}
+	/* FIXME: the command should get its own notification window set up and
+	 * ask for device closing while processing the notification mechanism.
+	 * hwndCallback = ...
+	 * dwFlags |= MCI_NOTIFY;
+	 * In the meantime special-case all commands but PLAY and RECORD below. */
+    }
     if (dwFlags & MCI_NOTIFY) {
 	data[0] = (DWORD_PTR)hwndCallback;
     }
 
-    /* FIXME: the command should get it's own notification window set up and
-     * ask for device closing while processing the notification mechanism
-     */
-    if (lpstrRet && uRetLen) *lpstrRet = '\0';
+    switch (wMsg) {
+    case MCI_OPEN:
+	if (strcmpW(verb, wszOpen)) {
+	    FIXME("Cannot open with command %s\n", debugstr_w(verb));
+	    dwRet = MCIERR_INTERNAL;
+	    wMsg = 0;
+	    goto errCleanUp;
+	}
+	break;
+    case MCI_SYSINFO:
+	/* Requirements on dev depend on the flags:
+	 * alias with INSTALLNAME, name like "digitalvideo"
+	 * with QUANTITY and NAME. */
+	{
+	    LPMCI_SYSINFO_PARMSW lpParms = (LPMCI_SYSINFO_PARMSW)data;
+	    lpParms->wDeviceType = MCI_ALL_DEVICE_ID;
+	    if (uDevID != MCI_ALL_DEVICE_ID) {
+		if (dwFlags & MCI_SYSINFO_INSTALLNAME)
+		    wmd = MCI_GetDriver(mciGetDeviceIDW(dev));
+		else if (!(lpParms->wDeviceType = MCI_GetDevTypeFromResource(dev))) {
+		    dwRet = MCIERR_DEVICE_TYPE_REQUIRED;
+		    goto errCleanUp;
+		}
+	    }
+	}
+	break;
+    }
 
     TRACE("[%d, %s, %08x, %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx]\n",
-	  wmd ? wmd->wDeviceID : uDevID, MCI_MessageToString(MCI_GetMessage(lpCmd)), dwFlags,
+	  wmd ? wmd->wDeviceID : uDevID, MCI_MessageToString(wMsg), dwFlags,
 	  data[0], data[1], data[2], data[3], data[4],
 	  data[5], data[6], data[7], data[8], data[9]);
 
-    if (strcmpW(verb, wszOpen) == 0) {
+    if (wMsg == MCI_OPEN) {
 	if ((dwRet = MCI_FinishOpen(wmd, (LPMCI_OPEN_PARMSW)data, dwFlags)))
-	    MCI_UnLoadMciDriver(wmd);
+	    goto errCleanUp;
 	/* FIXME: notification is not properly shared across two opens */
     } else {
-	dwRet = MCI_SendCommand(wmd ? wmd->wDeviceID : uDevID, MCI_GetMessage(lpCmd), dwFlags, (DWORD_PTR)data);
+	dwRet = MCI_SendCommand(wmd ? wmd->wDeviceID : uDevID, wMsg, dwFlags, (DWORD_PTR)data);
     }
     TRACE("=> 1/ %x (%s)\n", dwRet, debugstr_w(lpstrRet));
     dwRet = MCI_HandleReturnValues(dwRet, wmd, retType, data, lpstrRet, uRetLen);
     TRACE("=> 2/ %x (%s)\n", dwRet, debugstr_w(lpstrRet));
 
 errCleanUp:
+    if (auto_open) {
+	/* PLAY and RECORD are the only known non-immediate commands */
+	if (LOWORD(dwRet) || !(wMsg == MCI_PLAY || wMsg == MCI_RECORD))
+	    MCI_SendCommand(auto_open, MCI_CLOSE, 0, 0);
+	else
+	    FIXME("leaking auto-open device %u\n", auto_open);
+    }
+    if (wMsg == MCI_OPEN && LOWORD(dwRet) && wmd)
+	MCI_UnLoadMciDriver(wmd);
     HeapFree(GetProcessHeap(), 0, verb);
     return dwRet;
 }
@@ -1781,7 +1823,17 @@ static	DWORD MCI_SysInfo(UINT uDevID, DWORD dwFlags, LPMCI_SYSINFO_PARMSW lpParm
 	    } else {
 		TRACE("MCI_SYSINFO_QUANTITY: # of installed MCI drivers of type %d\n", lpParms->wDeviceType);
 		FIXME("Don't know how to get # of MCI devices of a given type\n");
-		cnt = 1;
+		/* name = LoadStringW(hWinMM32Instance, LOWORD(lpParms->wDeviceType))
+		 * then lookup registry and/or system.ini for name, ignoring digits suffix */
+		switch (LOWORD(lpParms->wDeviceType)) {
+		case MCI_DEVTYPE_CD_AUDIO:
+		case MCI_DEVTYPE_WAVEFORM_AUDIO:
+		case MCI_DEVTYPE_SEQUENCER:
+		    cnt = 1;
+		    break;
+		default: /* "digitalvideo" gets 0 because it's not in the registry */
+		    cnt = 0;
+		}
 	    }
 	}
 	*(DWORD*)lpParms->lpstrReturn = cnt;
@@ -1796,7 +1848,8 @@ static	DWORD MCI_SysInfo(UINT uDevID, DWORD dwFlags, LPMCI_SYSINFO_PARMSW lpParm
 				  wmd->lpstrDeviceType);
 	} else {
 	    *lpParms->lpstrReturn = 0;
-	    ret = MCIERR_INVALID_DEVICE_ID;
+	    ret = (uDevID == MCI_ALL_DEVICE_ID)
+		? MCIERR_CANNOT_USE_ALL : MCIERR_INVALID_DEVICE_NAME;
 	}
 	TRACE("(%d) => %s\n", lpParms->dwNumber, debugstr_w(lpParms->lpstrReturn));
 	break;

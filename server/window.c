@@ -1834,7 +1834,7 @@ DECL_HANDLER(get_desktop_window)
 DECL_HANDLER(set_window_owner)
 {
     struct window *win = get_window( req->handle );
-    struct window *owner = NULL;
+    struct window *owner = NULL, *ptr;
 
     if (!win) return;
     if (req->owner && !(owner = get_window( req->owner ))) return;
@@ -1843,6 +1843,17 @@ DECL_HANDLER(set_window_owner)
         set_error( STATUS_ACCESS_DENIED );
         return;
     }
+
+    /* make sure owner is not a successor of window */
+    for (ptr = owner; ptr; ptr = ptr->owner ? get_window( ptr->owner ) : NULL)
+    {
+        if (ptr == win)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
+    }
+
     reply->prev_owner = win->owner;
     reply->full_owner = win->owner = owner ? owner->handle : 0;
 }
@@ -2111,11 +2122,34 @@ DECL_HANDLER(get_window_rectangles)
 {
     struct window *win = get_window( req->handle );
 
-    if (win)
+    if (!win) return;
+
+    reply->window  = win->window_rect;
+    reply->visible = win->visible_rect;
+    reply->client  = win->client_rect;
+
+    switch (req->relative)
     {
-        reply->window  = win->window_rect;
-        reply->visible = win->visible_rect;
-        reply->client  = win->client_rect;
+    case COORDS_CLIENT:
+        offset_rect( &reply->window, -win->client_rect.left, -win->client_rect.top );
+        offset_rect( &reply->visible, -win->client_rect.left, -win->client_rect.top );
+        offset_rect( &reply->client, -win->client_rect.left, -win->client_rect.top );
+        break;
+    case COORDS_WINDOW:
+        offset_rect( &reply->window, -win->window_rect.left, -win->window_rect.top );
+        offset_rect( &reply->visible, -win->window_rect.left, -win->window_rect.top );
+        offset_rect( &reply->client, -win->window_rect.left, -win->window_rect.top );
+        break;
+    case COORDS_PARENT:
+        break;
+    case COORDS_SCREEN:
+        client_to_screen_rect( win->parent, &reply->window );
+        client_to_screen_rect( win->parent, &reply->visible );
+        client_to_screen_rect( win->parent, &reply->client );
+        break;
+    default:
+        set_error( STATUS_INVALID_PARAMETER );
+        break;
     }
 }
 

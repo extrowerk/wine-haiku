@@ -28,20 +28,20 @@
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
 HRESULT resource_init(IWineD3DResource *iface, WINED3DRESOURCETYPE resource_type,
-        IWineD3DDeviceImpl *device, UINT size, DWORD usage, const struct wined3d_format_desc *format_desc,
-        WINED3DPOOL pool, IUnknown *parent, const struct wined3d_parent_ops *parent_ops)
+        IWineD3DDeviceImpl *device, UINT size, DWORD usage, const struct wined3d_format *format,
+        WINED3DPOOL pool, void *parent, const struct wined3d_parent_ops *parent_ops)
 {
     struct IWineD3DResourceClass *resource = &((IWineD3DResourceImpl *)iface)->resource;
 
     resource->device = device;
-    resource->parent = parent;
     resource->resourceType = resource_type;
     resource->ref = 1;
     resource->pool = pool;
-    resource->format_desc = format_desc;
+    resource->format = format;
     resource->usage = usage;
     resource->size = size;
     resource->priority = 0;
+    resource->parent = parent;
     resource->parent_ops = parent_ops;
     list_init(&resource->privateData);
 
@@ -103,6 +103,12 @@ void resource_cleanup(IWineD3DResource *iface)
     This->resource.heapMemory = 0;
 
     if (This->resource.device) device_resource_released(This->resource.device, iface);
+}
+
+void resource_unload(IWineD3DResourceImpl *resource)
+{
+    context_resource_unloaded(resource->resource.device, (IWineD3DResource *)resource,
+            resource->resource.resourceType);
 }
 
 static PrivateData* resource_find_private_data(IWineD3DResourceImpl *This, REFGUID tag)
@@ -238,12 +244,4 @@ WINED3DRESOURCETYPE resource_get_type(IWineD3DResource *iface)
     IWineD3DResourceImpl *This = (IWineD3DResourceImpl *)iface;
     TRACE("(%p) : returning %d\n", This, This->resource.resourceType);
     return This->resource.resourceType;
-}
-
-HRESULT resource_get_parent(IWineD3DResource *iface, IUnknown **pParent)
-{
-    IWineD3DResourceImpl *This = (IWineD3DResourceImpl *)iface;
-    IUnknown_AddRef(This->resource.parent);
-    *pParent = This->resource.parent;
-    return WINED3D_OK;
 }

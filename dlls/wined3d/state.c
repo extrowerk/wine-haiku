@@ -244,7 +244,7 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, struct 
         /* Disable blending in all cases even without pixelshaders. With blending on we could face a big performance penalty.
          * The d3d9 visual test confirms the behavior. */
         if (context->render_offscreen
-                && !(target->resource.format_desc->Flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING))
+                && !(target->resource.format->Flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING))
         {
             glDisable(GL_BLEND);
             checkGLcall("glDisable GL_BLEND");
@@ -276,10 +276,10 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, struct 
          * returns 1.0, so D3DBLEND_DESTALPHA is GL_ONE, and D3DBLEND_INVDESTALPHA is GL_ZERO
          */
         case WINED3DBLEND_DESTALPHA          :
-            dstBlend = target->resource.format_desc->alpha_mask ? GL_DST_ALPHA : GL_ONE;
+            dstBlend = target->resource.format->alpha_mask ? GL_DST_ALPHA : GL_ONE;
             break;
         case WINED3DBLEND_INVDESTALPHA       :
-            dstBlend = target->resource.format_desc->alpha_mask ? GL_ONE_MINUS_DST_ALPHA : GL_ZERO;
+            dstBlend = target->resource.format->alpha_mask ? GL_ONE_MINUS_DST_ALPHA : GL_ZERO;
             break;
 
         case WINED3DBLEND_SRCALPHASAT        :
@@ -318,10 +318,10 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, struct 
         case WINED3DBLEND_SRCALPHASAT        : srcBlend = GL_SRC_ALPHA_SATURATE;  break;
 
         case WINED3DBLEND_DESTALPHA          :
-            srcBlend = target->resource.format_desc->alpha_mask ? GL_DST_ALPHA : GL_ONE;
+            srcBlend = target->resource.format->alpha_mask ? GL_DST_ALPHA : GL_ONE;
             break;
         case WINED3DBLEND_INVDESTALPHA       :
-            srcBlend = target->resource.format_desc->alpha_mask ? GL_ONE_MINUS_DST_ALPHA : GL_ZERO;
+            srcBlend = target->resource.format->alpha_mask ? GL_ONE_MINUS_DST_ALPHA : GL_ZERO;
             break;
 
         case WINED3DBLEND_BOTHSRCALPHA       : srcBlend = GL_SRC_ALPHA;
@@ -487,7 +487,7 @@ static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock, struct 
                 /* The surface conversion does not do color keying conversion for surfaces that have an alpha
                  * channel on their own. Likewise, the alpha test shouldn't be set up for color keying if the
                  * surface has alpha bits */
-                if (!surf->resource.format_desc->alpha_mask) enable_ckey = TRUE;
+                if (!surf->resource.format->alpha_mask) enable_ckey = TRUE;
             }
         }
     }
@@ -1459,7 +1459,7 @@ static void state_pscale(DWORD state, IWineD3DStateBlockImpl *stateblock, struct
 
     if(stateblock->renderState[WINED3DRS_POINTSCALEENABLE]) {
         GLfloat scaleFactor;
-        float h = stateblock->viewport.Height;
+        DWORD h = stateblock->viewport.Height;
 
         if (pointSize.f < gl_info->limits.pointsize_min)
         {
@@ -1487,7 +1487,7 @@ static void state_pscale(DWORD state, IWineD3DStateBlockImpl *stateblock, struct
         } else {
             scaleFactor = 1.0f;
         }
-        scaleFactor = pow(h * scaleFactor, 2);
+        scaleFactor = powf(h * scaleFactor, 2);
 
         att[0] = A.f / scaleFactor;
         att[1] = B.f / scaleFactor;
@@ -3108,7 +3108,7 @@ void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, struct wined3d
             IWineD3DBaseTextureImpl *texture = (IWineD3DBaseTextureImpl *)stateblock->textures[0];
             IWineD3DSurfaceImpl *surf = (IWineD3DSurfaceImpl *)texture->baseTexture.sub_resources[0];
 
-            if (surf->CKeyFlags & WINEDDSD_CKSRCBLT && !surf->resource.format_desc->alpha_mask)
+            if (surf->CKeyFlags & WINEDDSD_CKSRCBLT && !surf->resource.format->alpha_mask)
             {
                 /* Color keying needs to pass alpha values from the texture through to have the alpha test work
                  * properly. On the other hand applications can still use texture combiners apparently. This code
@@ -3200,7 +3200,7 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, s
     set_texture_matrix(&stateblock->transforms[WINED3DTS_TEXTURE0 + texUnit].u.m[0][0],
             stateblock->textureState[texUnit][WINED3DTSS_TEXTURETRANSFORMFLAGS], generated, context->last_was_rhw,
             stateblock->device->strided_streams.use_map & (1 << (WINED3D_FFP_TEXCOORD0 + coordIdx))
-            ? stateblock->device->strided_streams.elements[WINED3D_FFP_TEXCOORD0 + coordIdx].format_desc->format
+            ? stateblock->device->strided_streams.elements[WINED3D_FFP_TEXCOORD0 + coordIdx].format->id
             : WINED3DFMT_UNKNOWN,
             stateblock->device->frag_pipe->ffp_proj_control);
 
@@ -3262,7 +3262,7 @@ static void loadTexCoords(const struct wined3d_gl_info *gl_info, IWineD3DStateBl
             checkGLcall("glClientActiveTextureARB");
 
             /* The coords to supply depend completely on the fvf / vertex shader */
-            glTexCoordPointer(e->format_desc->gl_vtx_format, e->format_desc->gl_vtx_type, e->stride,
+            glTexCoordPointer(e->format->gl_vtx_format, e->format->gl_vtx_type, e->stride,
                     e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
             glEnableClientState(GL_TEXTURE_COORD_ARRAY);
         } else {
@@ -3600,7 +3600,7 @@ void apply_pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, struct w
     IWineD3DDeviceImpl *device = stateblock->device;
     BOOL use_pshader = use_ps(stateblock);
     BOOL use_vshader = use_vs(stateblock);
-    int i;
+    unsigned int i;
 
     if (use_pshader) {
         if(!context->last_was_pshader) {
@@ -3905,10 +3905,6 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
             glOrtho(x, x + w, y + h, y, 0.0, -1.0);
         checkGLcall("glOrtho");
 
-        /* Window Coord 0 is the middle of the first pixel, so translate by 1/2 pixels */
-        glTranslatef(63.0f / 128.0f, 63.0f / 128.0f, 0.0f);
-        checkGLcall("glTranslatef(63.0f / 128.0f, 63.0f / 128.0f, 0.0f)");
-
         /* D3D texture coordinates are flipped compared to OpenGL ones, so
          * render everything upside down when rendering offscreen. */
         if (context->render_offscreen)
@@ -3916,7 +3912,13 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
             glScalef(1.0f, -1.0f, 1.0f);
             checkGLcall("glScalef");
         }
-    } else {
+
+        /* Window Coord 0 is the middle of the first pixel, so translate by 1/2 pixels */
+        glTranslatef(63.0f / 128.0f, 63.0f / 128.0f, 0.0f);
+        checkGLcall("glTranslatef(63.0f / 128.0f, -63.0f / 128.0f, 0.0f)");
+    }
+    else
+    {
         /* The rule is that the window coordinate 0 does not correspond to the
             beginning of the first pixel, but the center of the first pixel.
             As a consequence if you want to correctly draw one line exactly from
@@ -4078,20 +4080,20 @@ static inline void loadNumberedArrays(IWineD3DStateBlockImpl *stateblock,
                         i, stream_info->elements[i].stride, vb->conversion_stride);
                 TRACE("Original offset %p, additional offset 0x%08x\n",
                         stream_info->elements[i].data, vb->conversion_shift[(DWORD_PTR)stream_info->elements[i].data]);
-                TRACE("Opengl type %#x\n", stream_info->elements[i].format_desc->gl_vtx_type);
+                TRACE("Opengl type %#x\n", stream_info->elements[i].format->gl_vtx_type);
                 shift_index = ((DWORD_PTR)stream_info->elements[i].data + offset[stream_info->elements[i].stream_idx]);
                 shift_index = shift_index % stream_info->elements[i].stride;
-                GL_EXTCALL(glVertexAttribPointerARB(i, stream_info->elements[i].format_desc->gl_vtx_format,
-                        stream_info->elements[i].format_desc->gl_vtx_type,
-                        stream_info->elements[i].format_desc->gl_normalized,
+                GL_EXTCALL(glVertexAttribPointerARB(i, stream_info->elements[i].format->gl_vtx_format,
+                        stream_info->elements[i].format->gl_vtx_type,
+                        stream_info->elements[i].format->gl_normalized,
                         vb->conversion_stride, stream_info->elements[i].data + vb->conversion_shift[shift_index]
                         + stateblock->loadBaseVertexIndex * stream_info->elements[i].stride
                         + offset[stream_info->elements[i].stream_idx]));
 
             } else {
-                GL_EXTCALL(glVertexAttribPointerARB(i, stream_info->elements[i].format_desc->gl_vtx_format,
-                        stream_info->elements[i].format_desc->gl_vtx_type,
-                        stream_info->elements[i].format_desc->gl_normalized,
+                GL_EXTCALL(glVertexAttribPointerARB(i, stream_info->elements[i].format->gl_vtx_format,
+                        stream_info->elements[i].format->gl_vtx_type,
+                        stream_info->elements[i].format->gl_normalized,
                         stream_info->elements[i].stride, stream_info->elements[i].data
                         + stateblock->loadBaseVertexIndex * stream_info->elements[i].stride
                         + offset[stream_info->elements[i].stream_idx]));
@@ -4115,7 +4117,7 @@ static inline void loadNumberedArrays(IWineD3DStateBlockImpl *stateblock,
 
             if (context->numbered_array_mask & (1 << i)) unload_numbered_array(context, i);
 
-            switch (stream_info->elements[i].format_desc->format)
+            switch (stream_info->elements[i].format->id)
             {
                 case WINED3DFMT_R32_FLOAT:
                     GL_EXTCALL(glVertexAttrib1fvARB(i, (const GLfloat *)ptr));
@@ -4225,13 +4227,13 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
 
         if (gl_info->supported[ARB_VERTEX_BLEND])
         {
-            TRACE("Blend %d %p %d\n", e->format_desc->component_count,
+            TRACE("Blend %u %p %u\n", e->format->component_count,
                     e->data + stateblock->loadBaseVertexIndex * e->stride, e->stride + offset[e->stream_idx]);
 
             glEnableClientState(GL_WEIGHT_ARRAY_ARB);
             checkGLcall("glEnableClientState(GL_WEIGHT_ARRAY_ARB)");
 
-            GL_EXTCALL(glVertexBlendARB(e->format_desc->component_count + 1));
+            GL_EXTCALL(glVertexBlendARB(e->format->component_count + 1));
 
             if (curVBO != e->buffer_object)
             {
@@ -4241,11 +4243,11 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
             }
 
             TRACE("glWeightPointerARB(%#x, %#x, %#x, %p);\n",
-                    e->format_desc->gl_vtx_format,
-                    e->format_desc->gl_vtx_type,
+                    e->format->gl_vtx_format,
+                    e->format->gl_vtx_type,
                     e->stride,
                     e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
-            GL_EXTCALL(glWeightPointerARB(e->format_desc->gl_vtx_format, e->format_desc->gl_vtx_type, e->stride,
+            GL_EXTCALL(glWeightPointerARB(e->format->gl_vtx_format, e->format->gl_vtx_type, e->stride,
                     e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]));
 
             checkGLcall("glWeightPointerARB");
@@ -4305,17 +4307,17 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
          */
         if (!e->buffer_object)
         {
-            TRACE("glVertexPointer(3, %#x, %#x, %p);\n", e->format_desc->gl_vtx_type, e->stride,
+            TRACE("glVertexPointer(3, %#x, %#x, %p);\n", e->format->gl_vtx_type, e->stride,
                     e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
-            glVertexPointer(3 /* min(e->format_desc->gl_vtx_format, 3) */, e->format_desc->gl_vtx_type, e->stride,
+            glVertexPointer(3 /* min(e->format->gl_vtx_format, 3) */, e->format->gl_vtx_type, e->stride,
                     e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
         }
         else
         {
             TRACE("glVertexPointer(%#x, %#x, %#x, %p);\n",
-                    e->format_desc->gl_vtx_format, e->format_desc->gl_vtx_type, e->stride,
+                    e->format->gl_vtx_format, e->format->gl_vtx_type, e->stride,
                     e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
-            glVertexPointer(e->format_desc->gl_vtx_format, e->format_desc->gl_vtx_type, e->stride,
+            glVertexPointer(e->format->gl_vtx_format, e->format->gl_vtx_type, e->stride,
                     e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
         }
         checkGLcall("glVertexPointer(...)");
@@ -4334,9 +4336,9 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
             curVBO = e->buffer_object;
         }
 
-        TRACE("glNormalPointer(%#x, %#x, %p);\n", e->format_desc->gl_vtx_type, e->stride,
+        TRACE("glNormalPointer(%#x, %#x, %p);\n", e->format->gl_vtx_type, e->stride,
                 e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
-        glNormalPointer(e->format_desc->gl_vtx_type, e->stride,
+        glNormalPointer(e->format->gl_vtx_type, e->stride,
                 e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
         checkGLcall("glNormalPointer(...)");
         glEnableClientState(GL_NORMAL_ARRAY);
@@ -4367,9 +4369,9 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
         }
 
         TRACE("glColorPointer(%#x, %#x %#x, %p);\n",
-                e->format_desc->gl_vtx_format, e->format_desc->gl_vtx_type, e->stride,
+                e->format->gl_vtx_format, e->format->gl_vtx_type, e->stride,
                 e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
-        glColorPointer(e->format_desc->gl_vtx_format, e->format_desc->gl_vtx_type, e->stride,
+        glColorPointer(e->format->gl_vtx_format, e->format->gl_vtx_type, e->stride,
                 e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
         checkGLcall("glColorPointer(4, GL_UNSIGNED_BYTE, ...)");
         glEnableClientState(GL_COLOR_ARRAY);
@@ -4388,8 +4390,8 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
         e = &si->elements[WINED3D_FFP_SPECULAR];
         if (gl_info->supported[EXT_SECONDARY_COLOR])
         {
-            GLenum type = e->format_desc->gl_vtx_type;
-            GLint format = e->format_desc->gl_vtx_format;
+            GLenum type = e->format->gl_vtx_type;
+            GLint format = e->format->gl_vtx_format;
 
             if (curVBO != e->buffer_object)
             {
@@ -5416,28 +5418,28 @@ const struct StateEntryTemplate ffp_vertexstate_template[] = {
      * otherwise, register sampler_texmatrix, which takes care of updating the texture matrix
      */
     { STATE_SAMPLER(0),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
-    { STATE_SAMPLER(0),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(0),                                   { 0,                                                  NULL                }, WINED3D_GL_NORMALIZED_TEXRECT   },
     { STATE_SAMPLER(0),                                   { STATE_SAMPLER(0),                                   sampler_texmatrix   }, WINED3D_GL_EXT_NONE             },
     { STATE_SAMPLER(1),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
-    { STATE_SAMPLER(1),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(1),                                   { 0,                                                  NULL                }, WINED3D_GL_NORMALIZED_TEXRECT   },
     { STATE_SAMPLER(1),                                   { STATE_SAMPLER(1),                                   sampler_texmatrix   }, WINED3D_GL_EXT_NONE             },
     { STATE_SAMPLER(2),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
-    { STATE_SAMPLER(2),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(2),                                   { 0,                                                  NULL                }, WINED3D_GL_NORMALIZED_TEXRECT   },
     { STATE_SAMPLER(2),                                   { STATE_SAMPLER(2),                                   sampler_texmatrix   }, WINED3D_GL_EXT_NONE             },
     { STATE_SAMPLER(3),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
-    { STATE_SAMPLER(3),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(3),                                   { 0,                                                  NULL                }, WINED3D_GL_NORMALIZED_TEXRECT   },
     { STATE_SAMPLER(3),                                   { STATE_SAMPLER(3),                                   sampler_texmatrix   }, WINED3D_GL_EXT_NONE             },
     { STATE_SAMPLER(4),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
-    { STATE_SAMPLER(4),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(4),                                   { 0,                                                  NULL                }, WINED3D_GL_NORMALIZED_TEXRECT   },
     { STATE_SAMPLER(4),                                   { STATE_SAMPLER(4),                                   sampler_texmatrix   }, WINED3D_GL_EXT_NONE             },
     { STATE_SAMPLER(5),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
-    { STATE_SAMPLER(5),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(5),                                   { 0,                                                  NULL                }, WINED3D_GL_NORMALIZED_TEXRECT   },
     { STATE_SAMPLER(5),                                   { STATE_SAMPLER(5),                                   sampler_texmatrix   }, WINED3D_GL_EXT_NONE             },
     { STATE_SAMPLER(6),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
-    { STATE_SAMPLER(6),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(6),                                   { 0,                                                  NULL                }, WINED3D_GL_NORMALIZED_TEXRECT   },
     { STATE_SAMPLER(6),                                   { STATE_SAMPLER(6),                                   sampler_texmatrix   }, WINED3D_GL_EXT_NONE             },
     { STATE_SAMPLER(7),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
-    { STATE_SAMPLER(7),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(7),                                   { 0,                                                  NULL                }, WINED3D_GL_NORMALIZED_TEXRECT   },
     { STATE_SAMPLER(7),                                   { STATE_SAMPLER(7),                                   sampler_texmatrix   }, WINED3D_GL_EXT_NONE             },
     {0 /* Terminate */,                                   { 0,                                                  0                   }, WINED3D_GL_EXT_NONE             },
 };

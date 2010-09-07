@@ -62,11 +62,11 @@
   64 stdcall -noname DriveType(long)
   65 stdcall -noname InvalidateDriveType(long)
   66 stdcall -noname IsNetDrive(long)
-  67 stdcall -noname Shell_MergeMenus(long long long long long long)
+  67 stdcall -ordinal Shell_MergeMenus(long long long long long long)
   68 stdcall -noname SHGetSetSettings(ptr long long)
   69 stub -noname SHGetNetResource
   70 stdcall -noname SHCreateDefClassObject(long long long long long)
-  71 stdcall -noname Shell_GetImageList(ptr ptr)
+  71 stdcall -ordinal Shell_GetImageLists(ptr ptr)
   72 stdcall -noname Shell_GetCachedImageIndex(ptr ptr long) Shell_GetCachedImageIndexAW
   73 stdcall -noname SHShellFolderView_Message(long long long)
   74 stdcall -noname SHCreateStdEnumFmtEtc(long ptr ptr)
@@ -123,9 +123,9 @@
  128 stdcall -noname SHDllGetClassObject(ptr ptr ptr) DllGetClassObject
  129 stdcall -noname DAD_AutoScroll(long ptr ptr)
  130 stdcall -noname DAD_DragEnter(long)
- 131 stdcall -noname DAD_DragEnterEx(long double)
+ 131 stdcall -noname DAD_DragEnterEx(long int64)
  132 stdcall -noname DAD_DragLeave()
- 134 stdcall -noname DAD_DragMove(double)
+ 134 stdcall -noname DAD_DragMove(int64)
  136 stdcall -noname DAD_SetDragImage(long long)
  137 stdcall -noname DAD_ShowDragImage(long)
  139 stub Desktop_UpdateBriefcaseOnEvent
@@ -330,8 +330,13 @@
 @ stub SHChangeNotifySuspendResume
 @ stdcall SHCreateDirectoryExA(long str ptr)
 @ stdcall SHCreateDirectoryExW(long wstr ptr)
+@ stdcall SHCreateItemFromIDList(ptr ptr ptr)
+@ stdcall SHCreateItemFromParsingName(wstr ptr ptr ptr)
 @ stub SHCreateProcessAsUserW
 @ stdcall SHCreateShellItem(ptr ptr ptr ptr)
+@ stdcall SHCreateShellItemArray(ptr ptr long ptr ptr)
+@ stdcall SHCreateShellItemArrayFromDataObject(ptr ptr ptr)
+@ stdcall SHCreateShellItemArrayFromShellItem(ptr ptr ptr)
 @ stdcall SHEmptyRecycleBinA(long str long)
 @ stdcall SHEmptyRecycleBinW(long wstr long)
 @ stub SHExtractIconsW
@@ -357,13 +362,19 @@
 @ stub SHGetFreeDiskSpace
 @ stdcall SHGetIconOverlayIndexA(str long)
 @ stdcall SHGetIconOverlayIndexW(wstr long)
+@ stdcall SHGetIDListFromObject(ptr ptr)
 @ stdcall SHGetInstanceExplorer(long)
+@ stdcall SHGetItemFromDataObject(ptr long ptr ptr)
+@ stdcall SHGetItemFromObject(ptr ptr ptr)
+@ stdcall SHGetKnownFolderPath(ptr long ptr ptr)
 @ stdcall SHGetLocalizedName(wstr ptr long ptr)
 @ stdcall SHGetMalloc(ptr)
+@ stdcall SHGetNameFromIDList(ptr long ptr)
 @ stdcall SHGetNewLinkInfo(str str ptr long long) SHGetNewLinkInfoA
 @ stdcall SHGetPathFromIDList(ptr ptr) SHGetPathFromIDListA
 @ stdcall SHGetPathFromIDListA(ptr ptr)
 @ stdcall SHGetPathFromIDListW(ptr ptr)
+@ stdcall SHGetPropertyStoreFromParsingName(wstr ptr long ptr ptr)
 @ stdcall SHGetSettings(ptr long)
 @ stdcall SHGetSpecialFolderLocation(long long ptr)
 @ stdcall SHGetSpecialFolderPathA(long ptr long long)

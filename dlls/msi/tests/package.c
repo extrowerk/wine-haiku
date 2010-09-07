@@ -36,6 +36,12 @@ char CURR_DIR[MAX_PATH];
 static UINT (WINAPI *pMsiApplyMultiplePatchesA)(LPCSTR, LPCSTR, LPCSTR);
 
 static BOOL (WINAPI *pConvertSidToStringSidA)(PSID, LPSTR*);
+static BOOL (WINAPI *pGetTokenInformation)( HANDLE, TOKEN_INFORMATION_CLASS, LPVOID, DWORD, PDWORD );
+static BOOL (WINAPI *pOpenProcessToken)( HANDLE, DWORD, PHANDLE );
+static LONG (WINAPI *pRegDeleteKeyExA)(HKEY, LPCSTR, REGSAM, DWORD);
+static LONG (WINAPI *pRegDeleteKeyExW)(HKEY, LPCWSTR, REGSAM, DWORD);
+static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
+static void (WINAPI *pGetSystemInfo)(LPSYSTEM_INFO);
 
 static BOOL (WINAPI *pSRRemoveRestorePoint)(DWORD);
 static BOOL (WINAPI *pSRSetRestorePointA)(RESTOREPOINTINFOA*, STATEMGRSTATUS*);
@@ -44,6 +50,7 @@ static void init_functionpointers(void)
 {
     HMODULE hmsi = GetModuleHandleA("msi.dll");
     HMODULE hadvapi32 = GetModuleHandleA("advapi32.dll");
+    HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
     HMODULE hsrclient;
 
 #define GET_PROC(mod, func) \
@@ -52,6 +59,12 @@ static void init_functionpointers(void)
     GET_PROC(hmsi, MsiApplyMultiplePatchesA);
 
     GET_PROC(hadvapi32, ConvertSidToStringSidA);
+    GET_PROC(hadvapi32, GetTokenInformation);
+    GET_PROC(hadvapi32, OpenProcessToken);
+    GET_PROC(hadvapi32, RegDeleteKeyExA)
+    GET_PROC(hadvapi32, RegDeleteKeyExW)
+    GET_PROC(hkernel32, IsWow64Process)
+    GET_PROC(hkernel32, GetSystemInfo)
 
     hsrclient = LoadLibraryA("srclient.dll");
     GET_PROC(hsrclient, SRRemoveRestorePoint);
@@ -59,6 +72,31 @@ static void init_functionpointers(void)
 #undef GET_PROC
 }
 
+static BOOL is_process_limited(void)
+{
+    HANDLE token;
+
+    if (!pOpenProcessToken || !pGetTokenInformation) return FALSE;
+
+    if (pOpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+    {
+        BOOL ret;
+        TOKEN_ELEVATION_TYPE type = TokenElevationTypeDefault;
+        DWORD size;
+
+        ret = pGetTokenInformation(token, TokenElevationType, &type, sizeof(type), &size);
+        CloseHandle(token);
+        return (ret && type == TokenElevationTypeLimited);
+    }
+    return FALSE;
+}
+
+static LONG delete_key( HKEY key, LPCSTR subkey, REGSAM access )
+{
+    if (pRegDeleteKeyExA)
+        return pRegDeleteKeyExA( key, subkey, access, 0 );
+    return RegDeleteKeyA( key, subkey );
+}
 
 static LPSTR get_user_sid(LPSTR *usersid)
 {
@@ -85,7 +123,7 @@ static LPSTR get_user_sid(LPSTR *usersid)
 }
 
 /* RegDeleteTreeW from dlls/advapi32/registry.c */
-static LSTATUS package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey)
+static LSTATUS package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey, REGSAM access)
 {
     LONG ret;
     DWORD dwMaxSubkeyLen, dwMaxValueLen;
@@ -95,7 +133,7 @@ static LSTATUS package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey)
 
     if(lpszSubKey)
     {
-        ret = RegOpenKeyExW(hKey, lpszSubKey, 0, KEY_READ, &hSubKey);
+        ret = RegOpenKeyExW(hKey, lpszSubKey, 0, access, &hSubKey);
         if (ret) return ret;
     }
 
@@ -123,12 +161,17 @@ static LSTATUS package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey)
         if (RegEnumKeyExW(hSubKey, 0, lpszName, &dwSize, NULL,
                           NULL, NULL, NULL)) break;
 
-        ret = package_RegDeleteTreeW(hSubKey, lpszName);
+        ret = package_RegDeleteTreeW(hSubKey, lpszName, access);
         if (ret) goto cleanup;
     }
 
     if (lpszSubKey)
-        ret = RegDeleteKeyW(hKey, lpszSubKey);
+    {
+        if (pRegDeleteKeyExW)
+            ret = pRegDeleteKeyExW(hKey, lpszSubKey, access, 0);
+        else
+            ret = RegDeleteKeyW(hKey, lpszSubKey);
+    }
     else
         while (TRUE)
         {
@@ -210,6 +253,11 @@ static void set_component_path(LPCSTR filename, MSIINSTALLCONTEXT context,
     CHAR path[MAX_PATH];
     LPCSTR prod = NULL;
     HKEY hkey;
+    REGSAM access = KEY_ALL_ACCESS;
+    BOOL wow64;
+
+    if (pIsWow64Process && pIsWow64Process(GetCurrentProcess(), &wow64) && wow64)
+        access |= KEY_WOW64_64KEY;
 
     MultiByteToWideChar(CP_ACP, 0, guid, -1, guidW, MAX_PATH);
     squash_guid(guidW, squashedW);
@@ -248,7 +296,7 @@ static void set_component_path(LPCSTR filename, MSIINSTALLCONTEXT context,
                 "7D2F387510109040002000060BECB6AB", usersid);
     }
 
-    RegCreateKeyA(HKEY_LOCAL_MACHINE, comppath, &hkey);
+    RegCreateKeyExA(HKEY_LOCAL_MACHINE, comppath, 0, NULL, 0, access, NULL, &hkey, NULL);
 
     lstrcpyA(path, CURR_DIR);
     lstrcatA(path, "\\");
@@ -257,7 +305,7 @@ static void set_component_path(LPCSTR filename, MSIINSTALLCONTEXT context,
     RegSetValueExA(hkey, prod, 0, REG_SZ, (LPBYTE)path, lstrlenA(path));
     RegCloseKey(hkey);
 
-    RegCreateKeyA(HKEY_LOCAL_MACHINE, prodpath, &hkey);
+    RegCreateKeyExA(HKEY_LOCAL_MACHINE, prodpath, 0, NULL, 0, access, NULL, &hkey, NULL);
     RegCloseKey(hkey);
 }
 
@@ -269,6 +317,11 @@ static void delete_component_path(LPCSTR guid, MSIINSTALLCONTEXT context, LPSTR 
     CHAR squashed[MAX_PATH];
     CHAR comppath[MAX_PATH];
     CHAR prodpath[MAX_PATH];
+    REGSAM access = KEY_ALL_ACCESS;
+    BOOL wow64;
+
+    if (pIsWow64Process && pIsWow64Process(GetCurrentProcess(), &wow64) && wow64)
+        access |= KEY_WOW64_64KEY;
 
     MultiByteToWideChar(CP_ACP, 0, guid, -1, guidW, MAX_PATH);
     squash_guid(guidW, squashedW);
@@ -305,10 +358,10 @@ static void delete_component_path(LPCSTR guid, MSIINSTALLCONTEXT context, LPSTR 
     }
 
     MultiByteToWideChar(CP_ACP, 0, comppath, -1, substrW, MAX_PATH);
-    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW);
+    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW, access);
 
     MultiByteToWideChar(CP_ACP, 0, prodpath, -1, substrW, MAX_PATH);
-    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW);
+    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW, access);
 }
 
 static UINT do_query(MSIHANDLE hdb, const char *query, MSIHANDLE *phrec)
@@ -670,7 +723,7 @@ static MSIHANDLE create_package_db(void)
 
     /* create an empty database */
     res = MsiOpenDatabase(msifile, MSIDBOPEN_CREATE, &hdb );
-    ok( res == ERROR_SUCCESS , "Failed to create database\n" );
+    ok( res == ERROR_SUCCESS , "Failed to create database %u\n", res );
     if( res != ERROR_SUCCESS )
         return hdb;
 
@@ -690,22 +743,29 @@ static MSIHANDLE create_package_db(void)
     return hdb;
 }
 
-static MSIHANDLE package_from_db(MSIHANDLE hdb)
+static UINT package_from_db(MSIHANDLE hdb, MSIHANDLE *handle)
 {
     UINT res;
-    CHAR szPackage[10];
+    CHAR szPackage[12];
     MSIHANDLE hPackage;
 
-    sprintf(szPackage,"#%i",hdb);
-    res = MsiOpenPackage(szPackage,&hPackage);
+    sprintf(szPackage, "#%u", hdb);
+    res = MsiOpenPackage(szPackage, &hPackage);
     if (res != ERROR_SUCCESS)
-        return 0;
+    {
+        MsiCloseHandle(hdb);
+        return res;
+    }
 
     res = MsiCloseHandle(hdb);
     if (res != ERROR_SUCCESS)
-        return 0;
+    {
+        MsiCloseHandle(hPackage);
+        return res;
+    }
 
-    return hPackage;
+    *handle = hPackage;
+    return ERROR_SUCCESS;
 }
 
 static void create_test_file(const CHAR *name)
@@ -809,8 +869,14 @@ static void test_createpackage(void)
     MSIHANDLE hPackage = 0;
     UINT res;
 
-    hPackage = package_from_db(create_package_db());
-    ok( hPackage != 0, " Failed to create package\n");
+    res = package_from_db(create_package_db(), &hPackage);
+    if (res == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( res == ERROR_SUCCESS, " Failed to create package %u\n", res );
 
     res = MsiCloseHandle( hPackage);
     ok( res == ERROR_SUCCESS , "Failed to close package\n" );
@@ -825,8 +891,14 @@ static void test_doaction( void )
     r = MsiDoAction( -1, NULL );
     ok( r == ERROR_INVALID_PARAMETER, "wrong return val\n");
 
-    hpkg = package_from_db(create_package_db());
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(create_package_db(), &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     r = MsiDoAction(hpkg, NULL);
     ok( r == ERROR_INVALID_PARAMETER, "wrong return val\n");
@@ -851,8 +923,14 @@ static void test_gettargetpath_bad(void)
     DWORD sz;
     UINT r;
 
-    hpkg = package_from_db(create_package_db());
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(create_package_db(), &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     r = MsiGetTargetPath( 0, NULL, NULL, NULL );
     ok( r == ERROR_INVALID_PARAMETER, "wrong return val\n");
@@ -971,8 +1049,14 @@ static void test_settargetpath(void)
     r = add_file_entry( hdb, "'TestFile', 'TestComp', 'testfile.txt', 0, '', '1033', 8192, 1" );
     ok( r == S_OK, "cannot add file to the File table: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     r = MsiDoAction( hpkg, "CostInitialize");
     ok( r == ERROR_SUCCESS, "cost init failed\n");
@@ -1063,8 +1147,14 @@ static void test_condition(void)
     MSICONDITION r;
     MSIHANDLE hpkg;
 
-    hpkg = package_from_db(create_package_db());
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(create_package_db(), &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     r = MsiEvaluateCondition(0, NULL);
     ok( r == MSICONDITION_ERROR, "wrong return val\n");
@@ -1810,8 +1900,14 @@ static void test_props(void)
             "VALUES( 'MetadataCompName', 'Photoshop.dll' )");
     ok( r == ERROR_SUCCESS , "Failed\n" );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     /* test invalid values */
     r = MsiGetProperty( 0, NULL, NULL, NULL );
@@ -2014,8 +2110,14 @@ static void test_property_table(void)
     hdb = create_package_db();
     ok( hdb, "failed to create package\n");
 
-    hpkg = package_from_db(hdb);
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -2068,8 +2170,8 @@ static void test_property_table(void)
     r = add_property_entry(hdb, "'prop', 'val'");
     ok(r == ERROR_SUCCESS, "cannot add property: %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -2190,6 +2292,11 @@ static void test_msipackage(void)
 
     /* empty szPackagePath */
     r = MsiOpenPackage("", &hpack);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        return;
+    }
     todo_wine
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -2274,8 +2381,14 @@ static void test_formatrecord2(void)
     DWORD sz;
     UINT r;
 
-    hpkg = package_from_db(create_package_db());
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(create_package_db(), &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     r = MsiSetProperty(hpkg, "Manufacturer", " " );
     ok( r == ERROR_SUCCESS, "set property failed\n");
@@ -2352,6 +2465,12 @@ static void test_states(void)
     static const CHAR msifile3[] = "winetest3-package.msi";
     static const CHAR msifile4[] = "winetest4-package.msi";
 
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
+        return;
+    }
+
     hdb = create_package_db();
     ok ( hdb, "failed to create package database\n" );
 
@@ -2361,7 +2480,7 @@ static void test_states(void)
     r = create_property_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create Property table: %d\n", r );
 
-    r = add_property_entry( hdb, "'ProductCode', '{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}'" );
+    r = add_property_entry( hdb, "'ProductCode', '{7262AC98-EEBD-4364-8CE3-D654F6A425B9}'" );
     ok( r == ERROR_SUCCESS, "cannot add property entry: %d\n", r );
 
     r = add_property_entry( hdb, "'ProductLanguage', '1033'" );
@@ -2696,8 +2815,14 @@ static void test_states(void)
     r = add_property_entry( hdb, "'REINSTALLMODE', 'omus'");
     ok( r == ERROR_SUCCESS, "cannot add property: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle(hdb);
 
@@ -3604,8 +3729,8 @@ static void test_states(void)
     r = add_property_entry( hdb, "'REINSTALL', 'eight,nine,ten'");
     ok( r == ERROR_SUCCESS, "cannot add property: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle(hdb);
 
@@ -4496,8 +4621,8 @@ static void test_states(void)
     r = add_property_entry( hdb, "'ADDLOCAL', 'one,two,three,four,five,six,seven,eight,nine,ten'");
     ok( r == ERROR_SUCCESS, "cannot add property: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -5393,8 +5518,8 @@ static void test_states(void)
     r = add_property_entry( hdb, "'ADDSOURCE', 'one,two,three,four,five,six,seven,eight,nine,ten'");
     ok( r == ERROR_SUCCESS, "cannot add property: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -6286,8 +6411,8 @@ static void test_states(void)
     r = add_property_entry( hdb, "'ADDSOURCE', 'one,two,three,four,five,six,seven,eight,nine,ten'");
     ok( r == ERROR_SUCCESS, "cannot add property: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -7186,8 +7311,14 @@ static void test_getproperty(void)
     DWORD size;
     UINT r;
 
-    hPackage = package_from_db(create_package_db());
-    ok( hPackage != 0, " Failed to create package\n");
+    r = package_from_db(create_package_db(), &hPackage);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "Failed to create package %u\n", r );
 
     /* set the property */
     r = MsiSetProperty(hPackage, "Name", "Value");
@@ -7307,8 +7438,14 @@ static void test_removefiles(void)
     r = create_remove_file_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create Remove File table: %d\n", r);
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle( hdb );
 
@@ -7372,7 +7509,7 @@ static void test_appsearch(void)
     UINT r;
     MSIHANDLE hdb;
     CHAR prop[MAX_PATH];
-    DWORD size = MAX_PATH;
+    DWORD size;
 
     hdb = create_package_db();
     ok ( hdb, "failed to create package database\n" );
@@ -7383,26 +7520,46 @@ static void test_appsearch(void)
     r = add_appsearch_entry( hdb, "'WEBBROWSERPROG', 'NewSignature1'" );
     ok( r == ERROR_SUCCESS, "cannot add entry: %d\n", r );
 
+    r = add_appsearch_entry( hdb, "'NOTEPAD', 'NewSignature2'" );
+    ok( r == ERROR_SUCCESS, "cannot add entry: %d\n", r );
+
     r = create_reglocator_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create RegLocator table: %d\n", r );
 
     r = add_reglocator_entry( hdb, "'NewSignature1', 0, 'htmlfile\\shell\\open\\command', '', 1" );
     ok( r == ERROR_SUCCESS, "cannot create RegLocator table: %d\n", r );
 
+    r = create_drlocator_table( hdb );
+    ok( r == ERROR_SUCCESS, "cannot create DrLocator table: %d\n", r );
+
+    r = add_drlocator_entry( hdb, "'NewSignature2', 0, 'c:\\windows\\system32', 0" );
+    ok( r == ERROR_SUCCESS, "cannot create RegLocator table: %d\n", r );
+
     r = create_signature_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create Signature table: %d\n", r );
 
     r = add_signature_entry( hdb, "'NewSignature1', 'FileName', '', '', '', '', '', '', ''" );
-    ok( r == ERROR_SUCCESS, "cannot create Signature table: %d\n", r );
+    ok( r == ERROR_SUCCESS, "cannot add signature: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = add_signature_entry( hdb, "'NewSignature2', 'NOTEPAD.EXE|notepad.exe', '', '', '', '', '', '', ''" );
+    ok( r == ERROR_SUCCESS, "cannot add signature: %d\n", r );
 
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
     MsiCloseHandle( hdb );
+    if (r != ERROR_SUCCESS)
+        goto done;
 
     r = MsiDoAction( hpkg, "AppSearch" );
     ok( r == ERROR_SUCCESS, "AppSearch failed: %d\n", r);
 
+    size = sizeof(prop);
     r = MsiGetPropertyA( hpkg, "WEBBROWSERPROG", prop, &size );
     ok( r == ERROR_SUCCESS, "get property failed: %d\n", r);
     todo_wine
@@ -7410,6 +7567,11 @@ static void test_appsearch(void)
         ok( lstrlenA(prop) != 0, "Expected non-zero length\n");
     }
 
+    size = sizeof(prop);
+    r = MsiGetPropertyA( hpkg, "NOTEPAD", prop, &size );
+    ok( r == ERROR_SUCCESS, "get property failed: %d\n", r);
+
+done:
     MsiCloseHandle( hpkg );
     DeleteFileA(msifile);
 }
@@ -7425,6 +7587,12 @@ static void test_appsearch_complocator(void)
 
     if (!get_user_sid(&usersid))
         return;
+
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
+        return;
+    }
 
     create_test_file("FileName1");
     create_test_file("FileName4");
@@ -7587,8 +7755,13 @@ static void test_appsearch_complocator(void)
     r = add_signature_entry(hdb, "'NewSignature12', 'ignored', '1.1.1.1', '2.1.1.1', '', '', '', '', ''");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "Expected a valid package handle\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
+    ok(r == ERROR_SUCCESS, "Expected a valid package handle %u\n", r);
 
     r = MsiSetPropertyA(hpkg, "SIGPROP8", "october");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -7686,6 +7859,9 @@ static void test_appsearch_complocator(void)
     delete_component_path("{EC30CE73-4CF9-4908-BABD-1ED82E1515FD}",
                           MSIINSTALLCONTEXT_MACHINE, NULL);
 
+    MsiCloseHandle(hpkg);
+
+error:
     DeleteFileA("FileName1");
     DeleteFileA("FileName2");
     DeleteFileA("FileName3");
@@ -7696,7 +7872,6 @@ static void test_appsearch_complocator(void)
     DeleteFileA("FileName8.dll");
     DeleteFileA("FileName9.dll");
     DeleteFileA("FileName10.dll");
-    MsiCloseHandle(hpkg);
     DeleteFileA(msifile);
     LocalFree(usersid);
 }
@@ -7704,17 +7879,12 @@ static void test_appsearch_complocator(void)
 static void test_appsearch_reglocator(void)
 {
     MSIHANDLE hpkg, hdb;
-    CHAR path[MAX_PATH];
-    CHAR prop[MAX_PATH];
-    DWORD binary[2];
-    DWORD size, val;
+    CHAR path[MAX_PATH], prop[MAX_PATH];
+    DWORD binary[2], size, val;
     BOOL space, version;
-    HKEY hklm, classes;
-    HKEY hkcu, users;
-    LPSTR pathdata;
-    LPSTR pathvar;
+    HKEY hklm, classes, hkcu, users;
+    LPSTR pathdata, pathvar, ptr;
     LPCSTR str;
-    LPSTR ptr;
     LONG res;
     UINT r;
 
@@ -7725,6 +7895,11 @@ static void test_appsearch_reglocator(void)
     DeleteFileA("test.dll");
 
     res = RegCreateKeyA(HKEY_CLASSES_ROOT, "Software\\Wine", &classes);
+    if (res == ERROR_ACCESS_DENIED)
+    {
+        skip("Not enough rights to perform tests\n");
+        return;
+    }
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(classes, "Value1", 0, REG_SZ,
@@ -8133,8 +8308,8 @@ static void test_appsearch_reglocator(void)
     r = add_signature_entry(hdb, str);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "Expected a valid package handle\n");
+    r = package_from_db(hdb, &hpkg);
+    ok(r == ERROR_SUCCESS, "Expected a valid package handle %u\n", r);
 
     r = MsiDoAction(hpkg, "AppSearch");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -8357,7 +8532,7 @@ static void test_appsearch_reglocator(void)
     RegDeleteValueA(hklm, "Value15");
     RegDeleteValueA(hklm, "Value16");
     RegDeleteValueA(hklm, "Value17");
-    RegDeleteKeyA(hklm, "");
+    RegDeleteKey(hklm, "");
     RegCloseKey(hklm);
 
     RegDeleteValueA(classes, "Value1");
@@ -8554,8 +8729,13 @@ static void test_appsearch_inilocator(void)
     r = add_signature_entry(hdb, "'NewSignature12', 'ignored', '1.1.1.1', '2.1.1.1', '', '', '', '', ''");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "Expected a valid package handle\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
+    ok(r == ERROR_SUCCESS, "Expected a valid package handle %u\n", r);
 
     r = MsiDoAction(hpkg, "AppSearch");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -8632,12 +8812,14 @@ static void test_appsearch_inilocator(void)
         ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
     }
 
+    MsiCloseHandle(hpkg);
+
+error:
     delete_win_ini("IniFile.ini");
     DeleteFileA("FileName1");
     DeleteFileA("FileName2.dll");
     DeleteFileA("FileName3.dll");
     DeleteFileA("FileName4.dll");
-    MsiCloseHandle(hpkg);
     DeleteFileA(msifile);
 }
 
@@ -8850,8 +9032,13 @@ static void test_appsearch_drlocator(void)
     r = add_signature_entry(hdb, str);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "Expected a valid package handle\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
+    ok(r == ERROR_SUCCESS, "Expected a valid package handle %u\n", r);
 
     r = MsiDoAction(hpkg, "AppSearch");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -8927,6 +9114,9 @@ static void test_appsearch_drlocator(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!prop[0], "Expected \"\", got \"%s\"\n", prop);
 
+    MsiCloseHandle(hpkg);
+
+error:
     DeleteFileA("FileName1");
     DeleteFileA("FileName3.dll");
     DeleteFileA("FileName4.dll");
@@ -8936,7 +9126,6 @@ static void test_appsearch_drlocator(void)
     RemoveDirectoryA("one\\two");
     RemoveDirectoryA("one");
     RemoveDirectoryA("another");
-    MsiCloseHandle(hpkg);
     DeleteFileA(msifile);
 }
 
@@ -9112,8 +9301,14 @@ static void test_featureparents(void)
     r = add_file_entry( hdb, "'hydrus_file', 'hydrus', 'hydrus.txt', 0, '', '1033', 8192, 1" );
     ok( r == ERROR_SUCCESS, "cannot add file: %d\n", r);
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle( hdb );
 
@@ -9241,6 +9436,9 @@ static void test_featureparents(void)
     r = MsiSetFeatureState(hpkg, "orion", INSTALLSTATE_ABSENT);
     ok( r == ERROR_SUCCESS, "failed to set feature state: %d\n", r);
 
+    r = MsiSetFeatureState(hpkg, "nosuchfeature", INSTALLSTATE_ABSENT);
+    ok( r == ERROR_UNKNOWN_FEATURE, "Expected ERROR_UNKNOWN_FEATURE, got %u\n", r);
+
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "zodiac", &state, &action);
@@ -9346,13 +9544,18 @@ static void test_featureparents(void)
 static void test_installprops(void)
 {
     MSIHANDLE hpkg, hdb;
-    CHAR path[MAX_PATH];
-    CHAR buf[MAX_PATH];
+    CHAR path[MAX_PATH], buf[MAX_PATH];
     DWORD size, type;
     LANGID langid;
     HKEY hkey1, hkey2;
     int res;
     UINT r;
+    REGSAM access = KEY_ALL_ACCESS;
+    BOOL wow64;
+    SYSTEM_INFO si;
+
+    if (pIsWow64Process && pIsWow64Process(GetCurrentProcess(), &wow64) && wow64)
+        access |= KEY_WOW64_64KEY;
 
     GetCurrentDirectory(MAX_PATH, path);
     lstrcat(path, "\\");
@@ -9361,8 +9564,14 @@ static void test_installprops(void)
     hdb = create_package_db();
     ok( hdb, "failed to create database\n");
 
-    hpkg = package_from_db(hdb);
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle(hdb);
 
@@ -9372,8 +9581,7 @@ static void test_installprops(void)
     ok( !lstrcmp(buf, path), "Expected %s, got %s\n", path, buf);
 
     RegOpenKey(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\MS Setup (ACME)\\User Info", &hkey1);
-
-    RegOpenKey(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", &hkey2);
+    RegOpenKeyEx(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, access, &hkey2);
 
     size = MAX_PATH;
     type = REG_SZ;
@@ -9455,6 +9663,31 @@ static void test_installprops(void)
     r = MsiGetProperty(hpkg, "ScreenY", buf, &size);
     ok(atol(buf) == res, "Expected %d, got %ld\n", res, atol(buf));
 
+    if (pGetSystemInfo)
+    {
+        pGetSystemInfo(&si);
+        if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
+        {
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "MsiAMD64", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            ok(buf[0], "property not set\n");
+
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "Msix64", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            ok(buf[0], "property not set\n");
+
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "System64Folder", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            ok(buf[0], "property not set\n");
+        }
+    }
+
     CloseHandle(hkey1);
     CloseHandle(hkey2);
     MsiCloseHandle(hpkg);
@@ -9482,8 +9715,14 @@ static void test_launchconditions(void)
     r = add_launchcondition_entry( hdb, "'X != \"1\"', 'one'" );
     ok( r == ERROR_SUCCESS, "cannot add launch condition: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle( hdb );
 
@@ -9541,8 +9780,14 @@ static void test_ccpsearch(void)
     r = create_signature_table(hdb);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -9697,8 +9942,14 @@ static void test_complocator(void)
     r = add_signature_entry(hdb, "'labocania', 'labocania', '', '', '', '', '', '', ''");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -9928,8 +10179,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiDatabaseCommit(hdb);
     ok(r == ERROR_SUCCESS , "Failed to commit database\n");
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -9971,6 +10228,20 @@ static void test_MsiGetSourcePath(void)
        "Expected path to be unchanged, got \"%s\"\n", path);
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
+    ok(size == 0, "Expected 0, got %d\n", size);
+
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
+    ok(size == 0, "Expected 0, got %d\n", size);
+
     /* try SourceDir */
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
@@ -9990,6 +10261,13 @@ static void test_MsiGetSourcePath(void)
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* source path does not exist, but the property exists */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
+    ok(size == 0, "Expected 0, got %d\n", size);
+
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
@@ -10275,6 +10553,31 @@ static void test_MsiGetSourcePath(void)
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
     ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
+    /* remove property */
+    r = MsiSetProperty(hpkg, "SourceDir", NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* try SourceDir again */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetSourcePath(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+
+    /* set property to a valid directory */
+    r = MsiSetProperty(hpkg, "SOURCEDIR", cwd);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* try SOURCEDIR again */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetSourcePath(hpkg, "SOURCEDIR", path, &size);
+    ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
+    ok(!lstrcmpA(path, "kiwi"),
+       "Expected path to be unchanged, got \"%s\"\n", path);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
     MsiCloseHandle(hpkg);
 
     /* compressed source */
@@ -10284,8 +10587,8 @@ static void test_MsiGetSourcePath(void)
 
     set_suminfo_prop(hdb, PID_WORDCOUNT, msidbSumInfoSourceTypeCompressed);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     /* try TARGETDIR */
     size = MAX_PATH;
@@ -10618,8 +10921,14 @@ static void test_shortlongsource(void)
 
     MsiDatabaseCommit(hdb);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -10758,8 +11067,8 @@ static void test_shortlongsource(void)
 
     set_suminfo_prop(hdb, PID_WORDCOUNT, msidbSumInfoSourceTypeSFN);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -10900,7 +11209,7 @@ static void test_shortlongsource(void)
 static void test_sourcedir(void)
 {
     MSIHANDLE hdb, hpkg;
-    CHAR package[10];
+    CHAR package[12];
     CHAR path[MAX_PATH];
     CHAR cwd[MAX_PATH];
     CHAR subsrc[MAX_PATH];
@@ -10920,8 +11229,13 @@ static void test_sourcedir(void)
     r = add_directory_entry(hdb, "'TARGETDIR', '', 'SourceDir'");
     ok(r == S_OK, "failed\n");
 
-    sprintf(package, "#%i", hdb);
+    sprintf(package, "#%u", hdb);
     r = MsiOpenPackage(package, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* properties only */
@@ -11225,8 +11539,10 @@ static void test_sourcedir(void)
        "Expected path to be unchanged, got \"%s\"\n", path);
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
-    MsiCloseHandle(hdb);
     MsiCloseHandle(hpkg);
+
+error:
+    MsiCloseHandle(hdb);
     DeleteFileA(msifile);
 }
 
@@ -11392,6 +11708,11 @@ static void test_emptypackage(void)
     UINT r;
 
     r = MsiOpenPackageA("", &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        return;
+    }
     todo_wine
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -11556,6 +11877,8 @@ static void test_MsiGetProductProperty(void)
     LONG res;
     UINT r;
     SC_HANDLE scm;
+    REGSAM access = KEY_ALL_ACCESS;
+    BOOL wow64;
 
     scm = OpenSCManager(NULL, NULL, SC_MANAGER_CONNECT);
     if (!scm && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
@@ -11569,6 +11892,9 @@ static void test_MsiGetProductProperty(void)
     lstrcatA(path, "\\");
 
     create_test_guid(prodcode, prod_squashed);
+
+    if (pIsWow64Process && pIsWow64Process(GetCurrentProcess(), &wow64) && wow64)
+        access |= KEY_WOW64_64KEY;
 
     r = MsiOpenDatabase(msifile, MSIDBOPEN_CREATE, &hdb);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -11608,14 +11934,20 @@ static void test_MsiGetProductProperty(void)
     lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
-    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
+    if (res == ERROR_ACCESS_DENIED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
-    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &userkey);
+    res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userkey, NULL);
     if (res == ERROR_ACCESS_DENIED)
     {
         skip("Not enough rights to perform tests\n");
@@ -11625,7 +11957,7 @@ static void test_MsiGetProductProperty(void)
     }
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
-    res = RegCreateKeyA(userkey, "InstallProperties", &props);
+    res = RegCreateKeyExA(userkey, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(val, path);
@@ -11760,11 +12092,11 @@ static void test_MsiGetProductProperty(void)
     MsiCloseHandle(hprod);
 
     RegDeleteValueA(props, "LocalPackage");
-    RegDeleteKeyA(props, "");
+    delete_key(props, "", access);
     RegCloseKey(props);
-    RegDeleteKeyA(userkey, "");
+    delete_key(userkey, "", access);
     RegCloseKey(userkey);
-    RegDeleteKeyA(prodkey, "");
+    delete_key(prodkey, "", access);
     RegCloseKey(prodkey);
     DeleteFileA(msifile);
 }
@@ -11777,8 +12109,14 @@ static void test_MsiSetProperty(void)
     DWORD size;
     UINT r;
 
-    hpkg = package_from_db(create_package_db());
-    ok(hpkg != 0, "Expected a valid package\n");
+    r = package_from_db(create_package_db(), &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok(r == ERROR_SUCCESS, "Expected a valid package %u\n", r);
 
     /* invalid hInstall */
     r = MsiSetPropertyA(0, "Prop", "Val");

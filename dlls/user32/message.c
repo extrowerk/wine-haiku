@@ -835,6 +835,7 @@ static size_t pack_message( HWND hwnd, UINT message, WPARAM wparam, LPARAM lpara
         push_data( data, &data->ps.cis, sizeof(data->ps.cis) );
         return 0;
     }
+    case WM_WINE_SETWINDOWPOS:
     case WM_WINDOWPOSCHANGING:
     case WM_WINDOWPOSCHANGED:
     {
@@ -1015,9 +1016,6 @@ static size_t pack_message( HWND hwnd, UINT message, WPARAM wparam, LPARAM lpara
         push_data( data, header, header->dbch_size );
         return 0;
     }
-    case WM_WINE_SETWINDOWPOS:
-        push_data( data, (WINDOWPOS *)lparam, sizeof(WINDOWPOS) );
-        return 0;
     case WM_WINE_KEYBOARD_LL_HOOK:
     {
         struct hook_extra_info *h_extra = (struct hook_extra_info *)lparam;
@@ -3444,7 +3442,7 @@ void WINAPI PostQuitMessage( INT exit_code )
 /***********************************************************************
  *		PeekMessageW  (USER32.@)
  */
-BOOL WINAPI PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
+BOOL WINAPI DECLSPEC_HOTPATCH PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
 {
     MSG msg;
 
@@ -3476,7 +3474,7 @@ BOOL WINAPI PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT f
 /***********************************************************************
  *		PeekMessageA  (USER32.@)
  */
-BOOL WINAPI PeekMessageA( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags )
+BOOL WINAPI DECLSPEC_HOTPATCH PeekMessageA( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags )
 {
     if (get_pending_wmchar( msg, first, last, (flags & PM_REMOVE) )) return TRUE;
     if (!PeekMessageW( msg, hwnd, first, last, flags )) return FALSE;
@@ -3488,7 +3486,7 @@ BOOL WINAPI PeekMessageA( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
 /***********************************************************************
  *		GetMessageW  (USER32.@)
  */
-BOOL WINAPI GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT last )
+BOOL WINAPI DECLSPEC_HOTPATCH GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT last )
 {
     HANDLE server_queue = get_server_queue_handle();
     unsigned int mask = QS_POSTMESSAGE | QS_SENDMESSAGE;  /* Always selected */
@@ -3521,7 +3519,7 @@ BOOL WINAPI GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT last )
 /***********************************************************************
  *		GetMessageA  (USER32.@)
  */
-BOOL WINAPI GetMessageA( MSG *msg, HWND hwnd, UINT first, UINT last )
+BOOL WINAPI DECLSPEC_HOTPATCH GetMessageA( MSG *msg, HWND hwnd, UINT first, UINT last )
 {
     if (get_pending_wmchar( msg, first, last, TRUE )) return TRUE;
     GetMessageW( msg, hwnd, first, last );

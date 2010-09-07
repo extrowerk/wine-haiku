@@ -704,6 +704,27 @@ tmp = arr.sort();
 ok(arr === tmp, "tmp !== arr");
 ok(arr[0]===1 && arr[1]==="aa" && arr[2]===undefined, "arr is sorted incorectly");
 
+tmp = [["bb","aa"],["ab","aa"]].sort().toString();
+ok(tmp === "ab,aa,bb,aa", "sort() = " + tmp);
+
+tmp = [["bb","aa"],"ab"].sort().toString();
+ok(tmp === "ab,bb,aa", "sort() = " + tmp);
+
+tmp = [["bb","aa"],"cc"].sort().toString();
+ok(tmp === "bb,aa,cc", "sort() = " + tmp);
+
+tmp = [2,"1"].sort().toString();
+ok(tmp === "1,2", "sort() = " + tmp);
+
+tmp = ["2",1].sort().toString();
+ok(tmp === "1,2", "sort() = " + tmp);
+
+tmp = [,,0,"z"].sort().toString();
+ok(tmp === "0,z,,", "sort() = " + tmp);
+
+tmp = ["a,b",["a","a"],["a","c"]].sort().toString();
+ok(tmp === "a,a,a,b,a,c", "sort() = " + tmp);
+
 arr = ["1", "2", "3"];
 arr.length = 1;
 ok(arr.length === 1, "arr.length = " + arr.length);
@@ -1751,16 +1772,55 @@ ok(err.message === "message", "err.message !== 'message'");
 ok(err.toString() === (invokeVersion < 2 ? "[object Error]" : "Error: message"), "err.toString() = " + err.toString());
 err = new Error(123);
 ok(err.number === 123, "err.number = " + err.number);
+err.number = 254;
+ok(err.number === 254, "err.number = " + err.number);
 err = new Error(0, "message");
 ok(err.number === 0, "err.number = " + err.number);
 ok(err.message === "message", "err.message = " + err.message);
 ok(err.description === "message", "err.description = " + err.description);
+err = new Error();
+ok(err.number === 0, "err.number = " + err.number);
+ok(err.description === "", "err.description = " + err.description);
+err.description = 5;
+ok(err.description === 5, "err.description = " + err.description);
+ok(err.message === "", "err.message = " + err.message);
+err.message = 4;
+ok(err.message === 4, "err.message = " + err.message);
+
+ok(!("number" in Error), "number is in Error");
 
 tmp = new Object();
 tmp.toString = function() { return "test"; };
 
 tmp = Error.prototype.toString.call(tmp);
 ok(tmp === "[object Error]", "Error.prototype.toString.call(tmp) = " + tmp);
+
+if(invokeVersion >= 2) {
+    obj = new Object();
+    obj.name = "test";
+    tmp = Error.prototype.toString.call(obj);
+    ok(tmp === "test", "Error.prototype.toString.call(obj) = " + tmp);
+
+    obj = new Object();
+    obj.name = 6;
+    obj.message = false;
+    tmp = Error.prototype.toString.call(obj);
+    ok(tmp === "6: false", "Error.prototype.toString.call(obj) = " + tmp);
+
+    obj = new Object();
+    obj.message = "test";
+    tmp = Error.prototype.toString.call(obj);
+    ok(tmp === "test", "Error.prototype.toString.call(obj) = " + tmp);
+
+    obj = new Object();
+    obj.name = "";
+    obj.message = "test";
+    tmp = Error.prototype.toString.call(obj);
+    ok(tmp === "test", "Error.prototype.toString.call(obj) = " + tmp);
+}
+
+tmp = Error.prototype.toString.call(testObj);
+ok(tmp === "[object Error]", "Error.prototype.toString.call(testObj) = " + tmp);
 
 err = new Error();
 err.name = null;
@@ -1828,6 +1888,12 @@ exception_test(function() {eval("'unterminated")}, "SyntaxError", -2146827273);
 exception_test(function() {eval("nonexistingfunc()")}, "TypeError", -2146823281);
 exception_test(function() {RegExp(/a/, "g");}, "RegExpError", -2146823271);
 exception_test(function() {encodeURI('\udcaa');}, "URIError", -2146823264);
+exception_test(function() {(new Object()) instanceof 3;}, "TypeError", -2146823286);
+exception_test(function() {(new Object()) instanceof null;}, "TypeError", -2146823286);
+exception_test(function() {(new Object()) instanceof nullDisp;}, "TypeError", -2146823286);
+exception_test(function() {"test" in 3;}, "TypeError", -2146823281);
+exception_test(function() {"test" in null;}, "TypeError", -2146823281);
+exception_test(function() {"test" in nullDisp;}, "TypeError", -2146823281);
 
 function testThisExcept(func, number) {
     exception_test(function() {func.call(new Object())}, "TypeError", number);

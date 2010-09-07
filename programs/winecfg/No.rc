@@ -2,7 +2,7 @@
  * WineCfg resources
  * Norwegian Bokmål Language Support
  *
- * Copyright 2005-2009 Alexander N. Sørnes <alex@thehandofagony.com>
+ * Copyright 2005-2010 Alexander N. Sørnes <alex@thehandofagony.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -28,7 +28,7 @@
 
 LANGUAGE LANG_NORWEGIAN, SUBLANG_NORWEGIAN_BOKMAL
 
-IDR_WINECFG MENU DISCARDABLE
+IDR_WINECFG MENU
 BEGIN
     POPUP ""
     BEGIN
@@ -53,13 +53,13 @@ BEGIN
     EDITTEXT        IDC_ABT_ORG, 75, 185, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
 END
 
-IDD_APPCFG DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_APPCFG DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Programminnstillinger ",IDC_STATIC, 8,4,244,210
     LTEXT           "Wine kan etterligne forskjellige Windows-versjoner for hvert program. Denne fanen er koblet med bibliotek- og grafikkfanene, sånn at du kan endre innstillinger for hele systemet eller enkelte programmer der også.",
-                    IDC_STATIC,15,20,227,30
+                    IDC_STATIC,15,20,229,30
     CONTROL         "Programmer",IDC_APP_LISTVIEW,"SysListView32",WS_BORDER | WS_TABSTOP | LVS_LIST | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
                     15,50,230,120
     PUSHBUTTON	    "Legg til progr&am...",IDC_APP_ADDAPP, 90,174,75,14
@@ -68,7 +68,7 @@ BEGIN
     COMBOBOX        IDC_WINVER,83,194,163,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP    
 END
 
-IDD_GRAPHCFG DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_GRAPHCFG DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
@@ -95,7 +95,7 @@ BEGIN
     LTEXT       "Forhåndsvisning av tekst med 10 punkters Tahoma",IDC_RES_FONT_PREVIEW,15,181,230,28
 END
 
-IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_DLLCFG DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
@@ -104,14 +104,14 @@ BEGIN
                     ,IDC_STATIC,16,16,220,32
     LTEXT           "Ny overstyring for bibliotek:",IDC_STATIC,16,58,100,8
     COMBOBOX        IDC_DLLCOMBO,16,68,140,14,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP | CBS_SORT | CBS_LOWERCASE
-    PUSHBUTTON      "&Legg til",IDC_DLLS_ADDDLL, 164,68,82,13,BS_DEFPUSHBUTTON 
+    PUSHBUTTON      "&Legg til",IDC_DLLS_ADDDLL, 164,68,82,13
     LTEXT           "Gjeldende overstyringer:",IDC_STATIC,16,86,100,8
     LISTBOX         IDC_DLLS_LIST,16,96,140,112,WS_BORDER | WS_TABSTOP | WS_VSCROLL
     PUSHBUTTON      "R&ediger",IDC_DLLS_EDITDLL,164,96,82,14
     PUSHBUTTON      "Fje&rn",IDC_DLLS_REMOVEDLL,164,114,82,14 
 END
 
-IDD_LOADORDER DIALOG DISCARDABLE 80, 90, 110, 92
+IDD_LOADORDER DIALOG 80, 90, 110, 92
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 CAPTION "Rediger overstyring"
 FONT 8, "MS Shell Dlg"
@@ -126,7 +126,7 @@ BEGIN
     PUSHBUTTON      "Avbryt",IDCANCEL,57,74,45,14,WS_GROUP
 END
 
-IDD_DRIVECHOOSE DIALOG DISCARDABLE  60, 70, 170, 60
+IDD_DRIVECHOOSE DIALOG  60, 70, 170, 60
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 CAPTION "Velg stasjonsbokstav"
 FONT 8, "MS Shell Dlg"
@@ -136,12 +136,12 @@ BEGIN
     PUSHBUTTON      "Avbryt",IDCANCEL,105,30,45,14,WS_GROUP
 END
 
-IDD_DRIVECFG DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_DRIVECFG DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Stasjonkartlegging ",IDC_STATIC,8,4,244,195
-    LTEXT           "Failed to connect to the mount manager, the drive configuration cannot be edited.", IDC_STATIC_MOUNTMGR_ERROR, 15,30,190,76
+    LTEXT           "Klarte ikke koble til monteringsbehandleren; diskstasjonene kan derfor ikke redigeres.", IDC_STATIC_MOUNTMGR_ERROR, 15,30,190,76
     CONTROL         "Listevisning",IDC_LIST_DRIVES,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                     LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,18,232,76
     PUSHBUTTON      "&Legg til...",IDC_BUTTON_ADD,15,98,45,14
@@ -157,7 +157,7 @@ BEGIN
     COMBOBOX        IDC_COMBO_TYPE,41,135,77,60,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 
     PUSHBUTTON      "Avan&sert visning",IDC_BUTTON_SHOW_HIDE_ADVANCED,186,135,60,13
-    LTEXT           "De&vice:",IDC_STATIC_DEVICE,15,153,26,9
+    LTEXT           "En&het:",IDC_STATIC_DEVICE,15,153,26,9
     EDITTEXT        IDC_EDIT_DEVICE,41,150,160,13,ES_AUTOHSCROLL | WS_TABSTOP
     PUSHBUTTON      "&Bla...",IDC_BUTTON_BROWSE_DEVICE,206,150,40,13
 
@@ -169,7 +169,7 @@ BEGIN
     CONTROL         "Vis .-filer",IDC_SHOW_DOT_FILES,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,205,230,8
 END
 
-IDD_AUDIOCFG DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_AUDIOCFG DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
@@ -187,7 +187,7 @@ BEGIN
     COMBOBOX        IDC_DSOUND_BITS,220,195,30,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 END
 
-IDD_DESKTOP_INTEGRATION DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_DESKTOP_INTEGRATION DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
@@ -215,7 +215,7 @@ BEGIN
     PUSHBUTTON      "Bla",IDC_BROWSE_SFPATH,215,195,30,13,WS_DISABLED
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
     IDS_TAB_APPLICATIONS    "Programmer"
     IDS_TAB_DLLS            "Biblioteker"
@@ -232,12 +232,12 @@ BEGIN
     IDS_WINECFG_TITLE_APP   "Oppsett av Wine for «%s»"
     IDS_THEMEFILE           "Temafiler (*.msstyles; *.theme)"
     IDS_THEMEFILE_SELECT    "Velg en temafil"
-    IDS_AUDIO_MISSING       "Ingen lyddriver er oppgitt i registeret.\n\nEn anbefalt driver er valgt for deg;\nbruk den eller velg en annen,\n\nog trykk «Bruk» for at endringene skal tre i kraft."
+    IDS_AUDIO_MISSING       "Ingen lyddriver er oppgitt i registeret.\n\nEn anbefalt driver er valgt for deg;\nbruk den eller velg en annen,\nog trykk «Bruk» for at endringene skal tre i kraft."
     IDS_SHELL_FOLDER        "Mappe"
     IDS_LINKS_TO            "Peker til"
 END
     
-    STRINGTABLE DISCARDABLE
+    STRINGTABLE
     BEGIN
     IDS_DLL_WARNING         "Endring av lastingsrekkefølgen for dette biblioteket anbefales ikke.\nEr du sikker på at du vil gjøre det?"
     IDS_DLL_WARNING_CAPTION "Advarsel: systembibliotek"
@@ -252,13 +252,13 @@ END
     IDS_SELECT_EXECUTABLE   "Velg en programfil"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
     IDS_SHADER_MODE_HARDWARE    "Maskinvare"
     IDS_SHADER_MODE_NONE        "Ingen"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
     IDS_DRIVE_UNKNOWN           "Automatisk"
     IDS_DRIVE_FIXED             "Lokal harddisk"
@@ -273,7 +273,7 @@ BEGIN
     IDS_NO_DRIVE_C              "Du har ikke en C-stasjon. Det er ikke så bra..\n\nHusk å trykke «Legg til» i stasjonsfanen for å lage en.\n"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
     IDS_ACCEL_FULL              "Full"
     IDS_ACCEL_STANDARD          "Standard"
@@ -298,7 +298,7 @@ BEGIN
     IDS_WARNING                 "Advarsel"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
     IDC_SYSPARAMS_BUTTON            "Kontrollerbakgrunn"
     IDC_SYSPARAMS_BUTTON_TEXT       "Kontrollertekst"

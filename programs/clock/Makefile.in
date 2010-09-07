@@ -4,7 +4,7 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = clock.exe
 APPMODE   = -mwindows
-IMPORTS   = comdlg32 shell32 user32 gdi32 kernel32
+IMPORTS   = comdlg32 shell32 user32 gdi32
 EXTRADEFS = -DWINE_NO_UNICODE_MACROS
 
 C_SRCS = \
@@ -20,6 +20,7 @@ RC_SRCS = \
 	Es.rc \
 	Fi.rc \
 	Fr.rc \
+	He.rc \
 	Hu.rc \
 	It.rc \
 	Ja.rc \
@@ -36,6 +37,7 @@ RC_SRCS = \
 	Sv.rc \
 	Th.rc \
 	Tr.rc \
+	Uk.rc \
 	Wa.rc \
 	Zh.rc
 

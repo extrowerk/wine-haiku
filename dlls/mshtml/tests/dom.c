@@ -2852,6 +2852,47 @@ static void _test_style_set_csstext(unsigned line, IHTMLStyle *style, const char
     SysFreeString(tmp);
 }
 
+static void test_elem_bounding_client_rect(IUnknown *unk)
+{
+    IHTMLRect *rect, *rect2;
+    IHTMLElement2 *elem2;
+    LONG l;
+    HRESULT hres;
+
+    elem2 = get_elem2_iface(unk);
+    hres = IHTMLElement2_getBoundingClientRect(elem2, &rect);
+    hres = IHTMLElement2_getBoundingClientRect(elem2, &rect2);
+    IHTMLElement2_Release(elem2);
+    ok(hres == S_OK, "getBoundingClientRect failed: %08x\n", hres);
+    ok(rect != NULL, "rect == NULL\n");
+    ok(rect != rect2, "rect == rect2\n");
+    IHTMLRect_Release(rect2);
+
+    test_disp((IUnknown*)rect, &IID_IHTMLRect, "[object]");
+
+    l = 0xdeadbeef;
+    hres = IHTMLRect_get_top(rect, &l);
+    ok(hres == S_OK, "get_top failed: %08x\n", hres);
+    ok(l != 0xdeadbeef, "l = 0xdeadbeef\n");
+
+    l = 0xdeadbeef;
+    hres = IHTMLRect_get_left(rect, &l);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+    ok(l != 0xdeadbeef, "l = 0xdeadbeef\n");
+
+    l = 0xdeadbeef;
+    hres = IHTMLRect_get_bottom(rect, &l);
+    ok(hres == S_OK, "get_bottom failed: %08x\n", hres);
+    ok(l != 0xdeadbeef, "l = 0xdeadbeef\n");
+
+    l = 0xdeadbeef;
+    hres = IHTMLRect_get_right(rect, &l);
+    ok(hres == S_OK, "get_right failed: %08x\n", hres);
+    ok(l != 0xdeadbeef, "l = 0xdeadbeef\n");
+
+    IHTMLRect_Release(rect);
+}
+
 static void test_elem_col_item(IHTMLElementCollection *col, const char *n,
         const elem_type_t *elem_types, LONG len)
 {
@@ -5862,6 +5903,7 @@ static void test_elems(IHTMLDocument2 *doc)
         test_elem_set_title((IUnknown*)select, "Title");
         test_elem_title((IUnknown*)select, "Title");
         test_elem_offset((IUnknown*)select);
+        test_elem_bounding_client_rect((IUnknown*)select);
 
         node = get_first_child((IUnknown*)select);
         ok(node != NULL, "node == NULL\n");
@@ -6792,8 +6834,7 @@ static void run_domtest(const char *str, domtest_t test)
     test(doc);
 
     ref = IHTMLDocument2_Release(doc);
-    ok(!ref ||
-       ref == 1, /* Vista */
+    ok(!ref || broken(ref == 1), /* Vista */
        "ref = %d\n", ref);
 }
 

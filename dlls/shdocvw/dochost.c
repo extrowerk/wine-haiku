@@ -311,7 +311,7 @@ void create_doc_view_hwnd(DocHost *This)
         doc_view_atom = RegisterClassExW(&wndclass);
     }
 
-    GetClientRect(This->frame_hwnd, &rect); /* FIXME */
+    This->container_vtbl->GetDocObjRect(This, &rect);
     This->hwnd = CreateWindowExW(0, wszShell_DocObject_View,
          wszShell_DocObject_View,
          WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_TABSTOP,
@@ -783,13 +783,15 @@ static const IPropertyNotifySinkVtbl PropertyNotifySinkVtbl = {
     PropertyNotifySink_OnRequestEdit
 };
 
-void DocHost_Init(DocHost *This, IDispatch *disp)
+void DocHost_Init(DocHost *This, IDispatch *disp, const IDocHostContainerVtbl* container)
 {
     This->lpDocHostUIHandlerVtbl = &DocHostUIHandler2Vtbl;
     This->lpOleCommandTargetVtbl = &OleCommandTargetVtbl;
     This->lpIPropertyNotifySinkVtbl = &PropertyNotifySinkVtbl;
 
     This->disp = disp;
+
+    This->container_vtbl = container;
 
     This->client_disp = NULL;
 
@@ -820,5 +822,5 @@ void DocHost_Release(DocHost *This)
 
     ConnectionPointContainer_Destroy(&This->cps);
 
-    CoTaskMemFree(This->url);
+    heap_free(This->url);
 }

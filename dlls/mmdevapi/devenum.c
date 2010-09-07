@@ -29,7 +29,6 @@
 #endif
 
 #define NONAMELESSUNION
-#define CINTERFACE
 #define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
@@ -755,6 +754,8 @@ static int blacklist(const char *dev) {
     if (blacklist_pulse && !strncmp(dev, "PulseAudio ", 11))
         return 1;
     if (!strncmp(dev, "ALSA ", 5) && strstr(dev, "hw:"))
+        return 1;
+    if (!strncmp(dev, "PortAudio ", 10))
         return 1;
     return 0;
 }

@@ -122,47 +122,49 @@ extern IUnknown         *create_doc_Implementation(void);
 extern IUnknown         *create_doc_fragment( xmlNodePtr fragment );
 extern IUnknown         *create_doc_entity_ref( xmlNodePtr entity );
 
-extern HRESULT queryresult_create( xmlNodePtr, LPWSTR, IXMLDOMNodeList ** );
+extern HRESULT queryresult_create( xmlNodePtr, LPCWSTR, IXMLDOMNodeList ** );
 
 /* data accessors */
 xmlNodePtr xmlNodePtr_from_domnode( IXMLDOMNode *iface, xmlElementType type );
 
 /* helpers */
-extern xmlChar *xmlChar_from_wchar( LPWSTR str );
+extern xmlChar *xmlChar_from_wchar( LPCWSTR str );
 
 extern LONG xmldoc_add_ref( xmlDocPtr doc );
 extern LONG xmldoc_release( xmlDocPtr doc );
 extern HRESULT xmldoc_add_orphan( xmlDocPtr doc, xmlNodePtr node );
 extern HRESULT xmldoc_remove_orphan( xmlDocPtr doc, xmlNodePtr node );
+extern void xmldoc_link_xmldecl(xmlDocPtr doc, xmlNodePtr node);
+extern xmlNodePtr xmldoc_unlink_xmldecl(xmlDocPtr doc);
 
 extern HRESULT XMLElement_create( IUnknown *pUnkOuter, xmlNodePtr node, LPVOID *ppObj, BOOL own );
 
-extern xmlDocPtr parse_xml(char *ptr, int len);
 
 /* IXMLDOMNode Internal Structure */
 typedef struct _xmlnode
 {
     DispatchEx dispex;
     const struct IXMLDOMNodeVtbl *lpVtbl;
-    IUnknown *pUnkOuter;
-    LONG ref;
+    IXMLDOMNode *iface;
     xmlNodePtr node;
 } xmlnode;
-
-static inline xmlnode *impl_from_IXMLDOMNode( IXMLDOMNode *iface )
-{
-    return (xmlnode *)((char*)iface - FIELD_OFFSET(xmlnode, lpVtbl));
-}
 
 static inline IXMLDOMNode *IXMLDOMNode_from_impl(xmlnode *This)
 {
     return (IXMLDOMNode*)&This->lpVtbl;
 }
 
-extern void init_xmlnode(xmlnode*,xmlNodePtr,IUnknown*,dispex_static_data_t*);
+extern void init_xmlnode(xmlnode*,xmlNodePtr,IXMLDOMNode*,dispex_static_data_t*);
 extern void destroy_xmlnode(xmlnode*);
+extern BOOL node_query_interface(xmlnode*,REFIID,void**);
+extern xmlnode *get_node_obj(IXMLDOMNode*);
 
-extern HRESULT DOMDocument_create_from_xmldoc(xmlDocPtr xmldoc, IXMLDOMDocument2 **document);
+extern HRESULT node_get_nodeName(xmlnode*,BSTR*);
+extern HRESULT node_get_content(xmlnode*,VARIANT*);
+extern HRESULT node_put_value(xmlnode*,VARIANT*);
+extern HRESULT node_get_parent(xmlnode*,IXMLDOMNode**);
+
+extern HRESULT DOMDocument_create_from_xmldoc(xmlDocPtr xmldoc, IXMLDOMDocument3 **document);
 
 static inline BSTR bstr_from_xmlChar(const xmlChar *str)
 {
@@ -178,6 +180,22 @@ static inline BSTR bstr_from_xmlChar(const xmlChar *str)
         ret = SysAllocStringLen(NULL, 0);
 
     return ret;
+}
+
+static inline HRESULT return_bstr(const WCHAR *value, BSTR *p)
+{
+    if(!p)
+        return E_INVALIDARG;
+
+    if(value) {
+        *p = SysAllocString(value);
+        if(!*p)
+            return E_OUTOFMEMORY;
+    }else {
+        *p = NULL;
+    }
+
+    return S_OK;
 }
 
 #endif

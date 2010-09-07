@@ -2735,7 +2735,7 @@ static void split_domain_account( const LSA_UNICODE_STRING *str, LSA_UNICODE_STR
     }
 }
 
-static BOOL match_domain( ULONG idx, LSA_UNICODE_STRING *domain )
+static BOOL match_domain( ULONG idx, const LSA_UNICODE_STRING *domain )
 {
     ULONG len = strlenW( ACCOUNT_SIDS[idx].domain );
 
@@ -2745,7 +2745,7 @@ static BOOL match_domain( ULONG idx, LSA_UNICODE_STRING *domain )
     return FALSE;
 }
 
-static BOOL match_account( ULONG idx, LSA_UNICODE_STRING *account )
+static BOOL match_account( ULONG idx, const LSA_UNICODE_STRING *account )
 {
     ULONG len = strlenW( ACCOUNT_SIDS[idx].account );
 
@@ -2764,7 +2764,7 @@ static BOOL match_account( ULONG idx, LSA_UNICODE_STRING *account )
 /*
  * Helper function for LookupAccountNameW
  */
-BOOL lookup_local_wellknown_name( LSA_UNICODE_STRING *account_and_domain,
+BOOL lookup_local_wellknown_name( const LSA_UNICODE_STRING *account_and_domain,
                                   PSID Sid, LPDWORD cbSid,
                                   LPWSTR ReferencedDomainName,
                                   LPDWORD cchReferencedDomainName,
@@ -2827,7 +2827,7 @@ BOOL lookup_local_wellknown_name( LSA_UNICODE_STRING *account_and_domain,
     return ret;
 }
 
-BOOL lookup_local_user_name( LSA_UNICODE_STRING *account_and_domain,
+BOOL lookup_local_user_name( const LSA_UNICODE_STRING *account_and_domain,
                              PSID Sid, LPDWORD cbSid,
                              LPWSTR ReferencedDomainName,
                              LPDWORD cchReferencedDomainName,
@@ -5272,15 +5272,24 @@ DWORD WINAPI GetNamedSecurityInfoW( LPWSTR name, SE_OBJECT_TYPE type,
     PACL* sacl, PSECURITY_DESCRIPTOR* descriptor )
 {
     DWORD needed, offset;
-    SECURITY_DESCRIPTOR_RELATIVE *relative;
+    SECURITY_DESCRIPTOR_RELATIVE *relative = NULL;
     BYTE *buffer;
 
     TRACE( "%s %d %d %p %p %p %p %p\n", debugstr_w(name), type, info, owner,
            group, dacl, sacl, descriptor );
 
-    if (!name || !descriptor) return ERROR_INVALID_PARAMETER;
+    /* A NULL descriptor is allowed if any one of the other pointers is not NULL */
+    if (!name || !(owner||group||dacl||sacl||descriptor) ) return ERROR_INVALID_PARAMETER;
 
-    needed = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
+    /* If no descriptor, we have to check that there's a pointer for the requested information */
+    if( !descriptor && (
+        ((info & OWNER_SECURITY_INFORMATION) && !owner)
+    ||  ((info & GROUP_SECURITY_INFORMATION) && !group)
+    ||  ((info & DACL_SECURITY_INFORMATION)  && !dacl)
+    ||  ((info & SACL_SECURITY_INFORMATION)  && !sacl)  ))
+        return ERROR_INVALID_PARAMETER;
+
+    needed = !descriptor ? 0 : sizeof(SECURITY_DESCRIPTOR_RELATIVE);
     if (info & OWNER_SECURITY_INFORMATION)
         needed += sizeof(sidWorld);
     if (info & GROUP_SECURITY_INFORMATION)
@@ -5290,25 +5299,36 @@ DWORD WINAPI GetNamedSecurityInfoW( LPWSTR name, SE_OBJECT_TYPE type,
     if (info & SACL_SECURITY_INFORMATION)
         needed += WINE_SIZE_OF_WORLD_ACCESS_ACL;
 
-    /* must be freed by caller */
-    *descriptor = HeapAlloc( GetProcessHeap(), 0, needed );
-    if (!*descriptor) return ERROR_NOT_ENOUGH_MEMORY;
-
-    if (!InitializeSecurityDescriptor( *descriptor, SECURITY_DESCRIPTOR_REVISION ))
+    if(descriptor)
     {
-        HeapFree( GetProcessHeap(), 0, *descriptor );
-        return ERROR_INVALID_SECURITY_DESCR;
-    }
+        /* must be freed by caller */
+        *descriptor = HeapAlloc( GetProcessHeap(), 0, needed );
+        if (!*descriptor) return ERROR_NOT_ENOUGH_MEMORY;
 
-    relative = *descriptor;
-    relative->Control |= SE_SELF_RELATIVE;
-    buffer = (BYTE *)relative;
-    offset = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
+        if (!InitializeSecurityDescriptor( *descriptor, SECURITY_DESCRIPTOR_REVISION ))
+        {
+            HeapFree( GetProcessHeap(), 0, *descriptor );
+            return ERROR_INVALID_SECURITY_DESCR;
+        }
+
+        relative = *descriptor;
+        relative->Control |= SE_SELF_RELATIVE;
+
+        buffer = (BYTE *)relative;
+        offset = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
+    }
+    else
+    {
+        buffer = HeapAlloc( GetProcessHeap(), 0, needed );
+        if (!buffer) return ERROR_NOT_ENOUGH_MEMORY;
+        offset = 0;
+    }
 
     if (info & OWNER_SECURITY_INFORMATION)
     {
         memcpy( buffer + offset, &sidWorld, sizeof(sidWorld) );
-        relative->Owner = offset;
+        if(relative)
+            relative->Owner = offset;
         if (owner)
             *owner = buffer + offset;
         offset += sizeof(sidWorld);
@@ -5316,28 +5336,36 @@ DWORD WINAPI GetNamedSecurityInfoW( LPWSTR name, SE_OBJECT_TYPE type,
     if (info & GROUP_SECURITY_INFORMATION)
     {
         memcpy( buffer + offset, &sidWorld, sizeof(sidWorld) );
-        relative->Group = offset;
+        if(relative)
+            relative->Group = offset;
         if (group)
             *group = buffer + offset;
         offset += sizeof(sidWorld);
     }
     if (info & DACL_SECURITY_INFORMATION)
     {
-        relative->Control |= SE_DACL_PRESENT;
         GetWorldAccessACL( (PACL)(buffer + offset) );
-        relative->Dacl = offset;
+        if(relative)
+        {
+            relative->Control |= SE_DACL_PRESENT;
+            relative->Dacl = offset;
+        }
         if (dacl)
             *dacl = (PACL)(buffer + offset);
         offset += WINE_SIZE_OF_WORLD_ACCESS_ACL;
     }
     if (info & SACL_SECURITY_INFORMATION)
     {
-        relative->Control |= SE_SACL_PRESENT;
         GetWorldAccessACL( (PACL)(buffer + offset) );
-        relative->Sacl = offset;
+        if(relative)
+        {
+            relative->Control |= SE_SACL_PRESENT;
+            relative->Sacl = offset;
+        }
         if (sacl)
             *sacl = (PACL)(buffer + offset);
     }
+
     return ERROR_SUCCESS;
 }
 
@@ -5418,7 +5446,30 @@ BOOL WINAPI SaferCreateLevel(DWORD ScopeId, DWORD LevelId, DWORD OpenFlags,
                              SAFER_LEVEL_HANDLE* LevelHandle, LPVOID lpReserved)
 {
     FIXME("(%u, %x, %u, %p, %p) stub\n", ScopeId, LevelId, OpenFlags, LevelHandle, lpReserved);
-    return FALSE;
+
+    *LevelHandle = (SAFER_LEVEL_HANDLE)0xdeadbeef;
+    return TRUE;
+}
+
+/******************************************************************************
+ * SaferComputeTokenFromLevel   [ADVAPI32.@]
+ */
+BOOL WINAPI SaferComputeTokenFromLevel(SAFER_LEVEL_HANDLE handle, HANDLE token, PHANDLE access_token,
+                                       DWORD flags, LPVOID reserved)
+{
+    FIXME("(%p, %p, %p, %x, %p) stub\n", handle, token, access_token, flags, reserved);
+
+    *access_token = (HANDLE)0xdeadbeef;
+    return TRUE;
+}
+
+/******************************************************************************
+ * SaferCloseLevel   [ADVAPI32.@]
+ */
+BOOL WINAPI SaferCloseLevel(SAFER_LEVEL_HANDLE handle)
+{
+    FIXME("(%p) stub\n", handle);
+    return TRUE;
 }
 
 DWORD WINAPI TreeResetNamedSecurityInfoW( LPWSTR pObjectName,

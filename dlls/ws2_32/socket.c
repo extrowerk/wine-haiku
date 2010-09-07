@@ -169,6 +169,24 @@
 WINE_DEFAULT_DEBUG_CHANNEL(winsock);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
+
+/*
+ * The actual definition of WSASendTo/WSARecvFrom, wrapped in a different
+ * function name, so that internal calls from ws2_32 itself will not trigger
+ * programs like Garena, which hooks WSASendTo/WSARecvFrom calls.
+ */
+static int WS2_sendto( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
+                       LPDWORD lpNumberOfBytesSent, DWORD dwFlags,
+                       const struct WS_sockaddr *to, int tolen,
+                       LPWSAOVERLAPPED lpOverlapped,
+                       LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine );
+
+static int WS2_recvfrom( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
+                         LPDWORD lpNumberOfBytesRecvd, LPDWORD lpFlags,
+                         struct WS_sockaddr *lpFrom,
+                         LPINT lpFromlen, LPWSAOVERLAPPED lpOverlapped,
+                         LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine );
+
 /* critical section to protect some non-reentrant net function */
 static CRITICAL_SECTION csWSgetXXXbyYYY;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -615,6 +633,7 @@ static inline DWORD NtStatusToWSAError( const DWORD status )
     case STATUS_CANT_WAIT:                  wserr = WSAEWOULDBLOCK;        break;
     case STATUS_BUFFER_OVERFLOW:            wserr = WSAEMSGSIZE;           break;
     case STATUS_NOT_SUPPORTED:              wserr = WSAEOPNOTSUPP;         break;
+    case STATUS_HOST_UNREACHABLE:           wserr = WSAEHOSTUNREACH;       break;
 
     default:
         wserr = RtlNtStatusToDosError( status );
@@ -1171,7 +1190,7 @@ static unsigned int ws_sockaddr_ws2u(const struct WS_sockaddr* wsaddr, int wsadd
         uin->sir_family = AF_IRDA;
         if (!strncmp( win->irdaServiceName, "LSAP-SEL", strlen( "LSAP-SEL" ) ))
         {
-            unsigned int lsap_sel;
+            unsigned int lsap_sel = 0;
 
             sscanf( win->irdaServiceName, "LSAP-SEL%u", &lsap_sel );
             uin->sir_lsap_sel = lsap_sel;
@@ -1784,6 +1803,33 @@ int WINAPI WS_closesocket(SOCKET s)
     return SOCKET_ERROR;
 }
 
+static int do_connect(int fd, const struct WS_sockaddr* name, int namelen)
+{
+    union generic_unix_sockaddr uaddr;
+    unsigned int uaddrlen = ws_sockaddr_ws2u(name, namelen, &uaddr);
+
+    if (!uaddrlen)
+        return WSAEFAULT;
+
+    if (name->sa_family == WS_AF_INET)
+    {
+        struct sockaddr_in *in4 = (struct sockaddr_in*) &uaddr;
+        if (memcmp(&in4->sin_addr, magic_loopback_addr, 4) == 0)
+        {
+            /* Trying to connect to magic replace-loopback address,
+                * assuming we really want to connect to localhost */
+            TRACE("Trying to connect to magic IP address, using "
+                    "INADDR_LOOPBACK instead.\n");
+            in4->sin_addr.s_addr = htonl(WS_INADDR_LOOPBACK);
+        }
+    }
+
+    if (connect(fd, &uaddr.addr, uaddrlen) == 0)
+        return 0;
+
+    return wsaErrno();
+}
+
 /***********************************************************************
  *		connect		(WS2_32.4)
  */
@@ -1795,37 +1841,15 @@ int WINAPI WS_connect(SOCKET s, const struct WS_sockaddr* name, int namelen)
 
     if (fd != -1)
     {
-        union generic_unix_sockaddr uaddr;
-        unsigned int uaddrlen = ws_sockaddr_ws2u(name, namelen, &uaddr);
+        int ret = do_connect(fd, name, namelen);
+        if (ret == 0)
+            goto connect_success;
 
-        if (!uaddrlen)
-        {
-            SetLastError(WSAEFAULT);
-        }
-        else
-        {
-            if (name->sa_family == WS_AF_INET)
-            {
-                struct sockaddr_in *in4 = (struct sockaddr_in*) &uaddr;
-                if (memcmp(&in4->sin_addr, magic_loopback_addr, 4) == 0)
-                {
-                    /* Trying to connect to magic replace-loopback address,
-                     * assuming we really want to connect to localhost */
-                    TRACE("Trying to connect to magic IP address, using "
-                         "INADDR_LOOPBACK instead.\n");
-                    in4->sin_addr.s_addr = htonl(WS_INADDR_LOOPBACK);
-                }
-            }
-
-            if (connect(fd, &uaddr.addr, uaddrlen) == 0)
-                goto connect_success;
-        }
-
-        if (errno == EINPROGRESS)
+        if (ret == WSAEINPROGRESS)
         {
             /* tell wineserver that a connection is in progress */
             _enable_event(SOCKET2HANDLE(s), FD_CONNECT|FD_READ|FD_WRITE,
-                          FD_CONNECT|FD_READ|FD_WRITE,
+                          FD_CONNECT,
                           FD_WINE_CONNECTED|FD_WINE_LISTENING);
             if (_is_blocking(s))
             {
@@ -1849,7 +1873,7 @@ int WINAPI WS_connect(SOCKET s, const struct WS_sockaddr* name, int namelen)
         }
         else
         {
-            SetLastError(wsaErrno());
+            SetLastError(ret);
         }
         release_sock_fd( s, fd );
     }
@@ -1873,6 +1897,111 @@ int WINAPI WSAConnect( SOCKET s, const struct WS_sockaddr* name, int namelen,
     if ( lpCallerData || lpCalleeData || lpSQOS || lpGQOS )
         FIXME("unsupported parameters!\n");
     return WS_connect( s, name, namelen );
+}
+
+/***********************************************************************
+ *             ConnectEx
+ */
+static BOOL WINAPI WS2_ConnectEx(SOCKET s, const struct WS_sockaddr* name, int namelen,
+                          PVOID sendBuf, DWORD sendBufLen, LPDWORD sent, LPOVERLAPPED ov)
+{
+    int fd, ret, status;
+
+    if (!ov)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    fd = get_sock_fd( s, FILE_READ_DATA, NULL );
+    if (fd == -1)
+    {
+        SetLastError( WSAENOTSOCK );
+        return FALSE;
+    }
+
+    TRACE("socket %04lx, ptr %p %s, length %d, sendptr %p, len %d, ov %p\n",
+          s, name, debugstr_sockaddr(name), namelen, sendBuf, sendBufLen, ov);
+
+    /* FIXME: technically the socket has to be bound */
+    ret = do_connect(fd, name, namelen);
+    if (ret == 0)
+    {
+        WSABUF wsabuf;
+
+        _enable_event(SOCKET2HANDLE(s), FD_CONNECT|FD_READ|FD_WRITE,
+                            FD_WINE_CONNECTED|FD_READ|FD_WRITE,
+                            FD_CONNECT|FD_WINE_LISTENING);
+
+        wsabuf.len = sendBufLen;
+        wsabuf.buf = (char*) sendBuf;
+
+        /* WSASend takes care of completion if need be */
+        if (WSASend(s, &wsabuf, sendBuf ? 1 : 0, sent, 0, ov, NULL) != SOCKET_ERROR)
+            goto connection_success;
+    }
+    else if (ret == WSAEINPROGRESS)
+    {
+        struct ws2_async *wsa;
+        ULONG_PTR cvalue = (((ULONG_PTR)ov->hEvent & 1) == 0) ? (ULONG_PTR)ov : 0;
+
+        _enable_event(SOCKET2HANDLE(s), FD_CONNECT|FD_READ|FD_WRITE,
+                      FD_CONNECT,
+                      FD_WINE_CONNECTED|FD_WINE_LISTENING);
+
+        /* Indirectly call WSASend */
+        if (!(wsa = HeapAlloc( GetProcessHeap(), 0, sizeof(*wsa) )))
+        {
+            SetLastError(WSAEFAULT);
+        }
+        else
+        {
+            IO_STATUS_BLOCK *iosb = (IO_STATUS_BLOCK *)ov;
+            iosb->u.Status = STATUS_PENDING;
+            iosb->Information = 0;
+
+            wsa->hSocket     = SOCKET2HANDLE(s);
+            wsa->addr        = NULL;
+            wsa->addrlen.val = 0;
+            wsa->flags       = 0;
+            wsa->n_iovecs    = sendBuf ? 1 : 0;
+            wsa->first_iovec = 0;
+            wsa->completion_func = NULL;
+            wsa->iovec[0].iov_base = sendBuf;
+            wsa->iovec[0].iov_len  = sendBufLen;
+
+            SERVER_START_REQ( register_async )
+            {
+                req->type           = ASYNC_TYPE_WRITE;
+                req->async.handle   = wine_server_obj_handle( wsa->hSocket );
+                req->async.callback = wine_server_client_ptr( WS2_async_send );
+                req->async.iosb     = wine_server_client_ptr( iosb );
+                req->async.arg      = wine_server_client_ptr( wsa );
+                req->async.event    = wine_server_obj_handle( ov->hEvent );
+                req->async.cvalue   = cvalue;
+                status = wine_server_call( req );
+            }
+            SERVER_END_REQ;
+
+            if (status != STATUS_PENDING) HeapFree(GetProcessHeap(), 0, wsa);
+
+            /* If the connect already failed */
+            if (status == STATUS_PIPE_DISCONNECTED)
+                status = _get_sock_error(s, FD_CONNECT_BIT);
+            SetLastError( NtStatusToWSAError(status) );
+        }
+    }
+    else
+    {
+        SetLastError(ret);
+    }
+
+    release_sock_fd( s, fd );
+    return FALSE;
+
+connection_success:
+    release_sock_fd( s, fd );
+    return TRUE;
 }
 
 
@@ -2718,7 +2847,8 @@ INT WINAPI WSAIoctl(SOCKET s,
 
         if ( IsEqualGUID(&connectex_guid, lpvInBuffer) )
         {
-            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented ConnectEx\n");
+            *(LPFN_CONNECTEX *)lpbOutBuffer = WS2_ConnectEx;
+            return 0;
         }
         else if ( IsEqualGUID(&disconnectex_guid, lpvInBuffer) )
         {
@@ -2921,7 +3051,7 @@ int WINAPI WS_recv(SOCKET s, char *buf, int len, int flags)
     wsabuf.len = len;
     wsabuf.buf = buf;
 
-    if ( WSARecvFrom(s, &wsabuf, 1, &n, &dwFlags, NULL, NULL, NULL, NULL) == SOCKET_ERROR )
+    if ( WS2_recvfrom(s, &wsabuf, 1, &n, &dwFlags, NULL, NULL, NULL, NULL) == SOCKET_ERROR )
         return SOCKET_ERROR;
     else
         return n;
@@ -2939,7 +3069,7 @@ int WINAPI WS_recvfrom(SOCKET s, char *buf, INT len, int flags,
     wsabuf.len = len;
     wsabuf.buf = buf;
 
-    if ( WSARecvFrom(s, &wsabuf, 1, &n, &dwFlags, from, fromlen, NULL, NULL) == SOCKET_ERROR )
+    if ( WS2_recvfrom(s, &wsabuf, 1, &n, &dwFlags, from, fromlen, NULL, NULL) == SOCKET_ERROR )
         return SOCKET_ERROR;
     else
         return n;
@@ -3101,15 +3231,13 @@ int WINAPI WS_select(int nfds, WS_fd_set *ws_readfds,
 static void WS_AddCompletion( SOCKET sock, ULONG_PTR CompletionValue, NTSTATUS CompletionStatus,
                               ULONG Information )
 {
-    NTSTATUS status;
-
     SERVER_START_REQ( add_fd_completion )
     {
         req->handle      = wine_server_obj_handle( SOCKET2HANDLE(sock) );
         req->cvalue      = CompletionValue;
         req->status      = CompletionStatus;
         req->information = Information;
-        status = wine_server_call( req );
+        wine_server_call( req );
     }
     SERVER_END_REQ;
 }
@@ -3126,7 +3254,7 @@ int WINAPI WS_send(SOCKET s, const char *buf, int len, int flags)
     wsabuf.len = len;
     wsabuf.buf = (char*) buf;
 
-    if ( WSASendTo( s, &wsabuf, 1, &n, flags, NULL, 0, NULL, NULL) == SOCKET_ERROR )
+    if ( WS2_sendto( s, &wsabuf, 1, &n, flags, NULL, 0, NULL, NULL) == SOCKET_ERROR )
         return SOCKET_ERROR;
     else
         return n;
@@ -3140,7 +3268,7 @@ INT WINAPI WSASend( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
                     LPWSAOVERLAPPED lpOverlapped,
                     LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine )
 {
-    return WSASendTo( s, lpBuffers, dwBufferCount, lpNumberOfBytesSent, dwFlags,
+    return WS2_sendto( s, lpBuffers, dwBufferCount, lpNumberOfBytesSent, dwFlags,
                       NULL, 0, lpOverlapped, lpCompletionRoutine );
 }
 
@@ -3153,14 +3281,11 @@ INT WINAPI WSASendDisconnect( SOCKET s, LPWSABUF lpBuffers )
 }
 
 
-/***********************************************************************
- *		WSASendTo		(WS2_32.74)
- */
-INT WINAPI WSASendTo( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
-                      LPDWORD lpNumberOfBytesSent, DWORD dwFlags,
-                      const struct WS_sockaddr *to, int tolen,
-                      LPWSAOVERLAPPED lpOverlapped,
-                      LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine )
+static int WS2_sendto( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
+                       LPDWORD lpNumberOfBytesSent, DWORD dwFlags,
+                       const struct WS_sockaddr *to, int tolen,
+                       LPWSAOVERLAPPED lpOverlapped,
+                       LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine )
 {
     unsigned int i, options;
     int n, fd, err;
@@ -3336,6 +3461,21 @@ error:
 }
 
 /***********************************************************************
+ *		WSASendTo		(WS2_32.74)
+ */
+INT WINAPI WSASendTo( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
+                      LPDWORD lpNumberOfBytesSent, DWORD dwFlags,
+                      const struct WS_sockaddr *to, int tolen,
+                      LPWSAOVERLAPPED lpOverlapped,
+                      LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine )
+{
+    return WS2_sendto( s, lpBuffers, dwBufferCount,
+                lpNumberOfBytesSent, dwFlags,
+                to, tolen,
+                lpOverlapped, lpCompletionRoutine );
+}
+
+/***********************************************************************
  *		sendto		(WS2_32.20)
  */
 int WINAPI WS_sendto(SOCKET s, const char *buf, int len, int flags,
@@ -3347,7 +3487,7 @@ int WINAPI WS_sendto(SOCKET s, const char *buf, int len, int flags,
     wsabuf.len = len;
     wsabuf.buf = (char*) buf;
 
-    if ( WSASendTo(s, &wsabuf, 1, &n, flags, to, tolen, NULL, NULL) == SOCKET_ERROR )
+    if ( WS2_sendto(s, &wsabuf, 1, &n, flags, to, tolen, NULL, NULL) == SOCKET_ERROR )
         return SOCKET_ERROR;
     else
         return n;
@@ -3357,7 +3497,7 @@ int WINAPI WS_sendto(SOCKET s, const char *buf, int len, int flags,
  *		setsockopt		(WS2_32.21)
  */
 int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
-                                  const char *optval, int optlen)
+                         const char *optval, int optlen)
 {
     int fd;
     int woptval;
@@ -3368,7 +3508,7 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
           s, level, optname, optval, optlen);
 
     /* some broken apps pass the value directly instead of a pointer to it */
-    if(IS_INTRESOURCE(optval))
+    if(optlen && IS_INTRESOURCE(optval))
     {
         SetLastError(WSAEFAULT);
         return SOCKET_ERROR;
@@ -3444,6 +3584,12 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
          * on unix systems, so just drop it. */
         case WS_SO_EXCLUSIVEADDRUSE:
             TRACE("Ignoring SO_EXCLUSIVEADDRUSE, is always set.\n");
+            return 0;
+
+        /* After a ConnectEx call succeeds, the socket can't be used with half of the
+         * normal winsock functions on windows. We don't have that problem. */
+        case WS_SO_UPDATE_CONNECT_CONTEXT:
+            TRACE("Ignoring SO_UPDATE_CONNECT_CONTEXT, since our sockets are normal\n");
             return 0;
 
         /* SO_OPENTYPE does not require a valid socket handle. */
@@ -4931,17 +5077,14 @@ int WINAPI WSARecv(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
                    LPWSAOVERLAPPED lpOverlapped,
                    LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine)
 {
-    return WSARecvFrom(s, lpBuffers, dwBufferCount, NumberOfBytesReceived, lpFlags,
+    return WS2_recvfrom(s, lpBuffers, dwBufferCount, NumberOfBytesReceived, lpFlags,
                        NULL, NULL, lpOverlapped, lpCompletionRoutine);
 }
 
-/***********************************************************************
- *              WSARecvFrom             (WS2_32.69)
- */
-INT WINAPI WSARecvFrom( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
-                        LPDWORD lpNumberOfBytesRecvd, LPDWORD lpFlags, struct WS_sockaddr *lpFrom,
-                        LPINT lpFromlen, LPWSAOVERLAPPED lpOverlapped,
-                        LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine )
+static int WS2_recvfrom( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
+                         LPDWORD lpNumberOfBytesRecvd, LPDWORD lpFlags, struct WS_sockaddr *lpFrom,
+                         LPINT lpFromlen, LPWSAOVERLAPPED lpOverlapped,
+                         LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine )
 
 {
     unsigned int i, options;
@@ -5092,6 +5235,21 @@ error:
     WARN(" -> ERROR %d\n", err);
     WSASetLastError( err );
     return SOCKET_ERROR;
+}
+
+/***********************************************************************
+ *              WSARecvFrom             (WS2_32.69)
+ */
+INT WINAPI WSARecvFrom( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
+                        LPDWORD lpNumberOfBytesRecvd, LPDWORD lpFlags, struct WS_sockaddr *lpFrom,
+                        LPINT lpFromlen, LPWSAOVERLAPPED lpOverlapped,
+                        LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine )
+
+{
+    return WS2_recvfrom( s, lpBuffers, dwBufferCount,
+                lpNumberOfBytesRecvd, lpFlags,
+                lpFrom, lpFromlen,
+                lpOverlapped, lpCompletionRoutine );
 }
 
 /***********************************************************************

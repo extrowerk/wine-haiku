@@ -181,28 +181,43 @@ static const IDispatchVtbl OLEPictureImpl_IDispatch_VTable;
 static const IPersistStreamVtbl OLEPictureImpl_IPersistStream_VTable;
 static const IConnectionPointContainerVtbl OLEPictureImpl_IConnectionPointContainer_VTable;
 
+/* pixels to HIMETRIC units conversion */
+static inline OLE_XSIZE_HIMETRIC xpixels_to_himetric(INT pixels, HDC hdc)
+{
+    return MulDiv(pixels, 2540, GetDeviceCaps(hdc, LOGPIXELSX));
+}
+
+static inline OLE_YSIZE_HIMETRIC ypixels_to_himetric(INT pixels, HDC hdc)
+{
+    return MulDiv(pixels, 2540, GetDeviceCaps(hdc, LOGPIXELSY));
+}
+
 /***********************************************************************
  * Implementation of the OLEPictureImpl class.
  */
 
-static void OLEPictureImpl_SetBitmap(OLEPictureImpl*This) {
+static void OLEPictureImpl_SetBitmap(OLEPictureImpl *This)
+{
   BITMAP bm;
   HDC hdcRef;
 
   TRACE("bitmap handle %p\n", This->desc.u.bmp.hbitmap);
-  if(GetObjectA(This->desc.u.bmp.hbitmap, sizeof(bm), &bm) != sizeof(bm)) {
+  if(GetObjectW(This->desc.u.bmp.hbitmap, sizeof(bm), &bm) != sizeof(bm)) {
     ERR("GetObject fails\n");
     return;
   }
   This->origWidth = bm.bmWidth;
   This->origHeight = bm.bmHeight;
+
   /* The width and height are stored in HIMETRIC units (0.01 mm),
      so we take our pixel width divide by pixels per inch and
      multiply by 25.4 * 100 */
   /* Should we use GetBitmapDimension if available? */
   hdcRef = CreateCompatibleDC(0);
-  This->himetricWidth =(bm.bmWidth *2540)/GetDeviceCaps(hdcRef, LOGPIXELSX);
-  This->himetricHeight=(bm.bmHeight*2540)/GetDeviceCaps(hdcRef, LOGPIXELSY);
+
+  This->himetricWidth  = xpixels_to_himetric(bm.bmWidth, hdcRef);
+  This->himetricHeight = ypixels_to_himetric(bm.bmHeight, hdcRef);
+
   DeleteDC(hdcRef);
 }
 
@@ -216,7 +231,7 @@ static void OLEPictureImpl_SetIcon(OLEPictureImpl * This)
         BITMAP bm;
 
         TRACE("bitmap handle for icon is %p\n", infoIcon.hbmColor);
-        if(GetObjectA(infoIcon.hbmColor ? infoIcon.hbmColor : infoIcon.hbmMask, sizeof(bm), &bm) != sizeof(bm)) {
+        if(GetObjectW(infoIcon.hbmColor ? infoIcon.hbmColor : infoIcon.hbmMask, sizeof(bm), &bm) != sizeof(bm)) {
             ERR("GetObject fails on icon bitmap\n");
             return;
         }
@@ -225,8 +240,10 @@ static void OLEPictureImpl_SetIcon(OLEPictureImpl * This)
         This->origHeight = infoIcon.hbmColor ? bm.bmHeight : bm.bmHeight / 2;
         /* see comment on HIMETRIC on OLEPictureImpl_SetBitmap() */
         hdcRef = GetDC(0);
-        This->himetricWidth = (This->origWidth *2540)/GetDeviceCaps(hdcRef, LOGPIXELSX);
-        This->himetricHeight= (This->origHeight *2540)/GetDeviceCaps(hdcRef, LOGPIXELSY);
+
+        This->himetricWidth  = xpixels_to_himetric(This->origWidth, hdcRef);
+        This->himetricHeight = ypixels_to_himetric(This->origHeight, hdcRef);
+
         ReleaseDC(0, hdcRef);
 
         DeleteObject(infoIcon.hbmMask);
@@ -421,22 +438,14 @@ static HRESULT WINAPI OLEPictureImpl_QueryInterface(
   void**  ppvObject)
 {
   OLEPictureImpl *This = (OLEPictureImpl *)iface;
+
   TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), ppvObject);
 
-  /*
-   * Perform a sanity check on the parameters.
-   */
-  if ( (This==0) || (ppvObject==0) )
+  if (!ppvObject)
     return E_INVALIDARG;
 
-  /*
-   * Initialize the return parameter.
-   */
   *ppvObject = 0;
 
-  /*
-   * Compare the riid with the interface IDs implemented by this object.
-   */
   if (IsEqualIID(&IID_IUnknown, riid) || IsEqualIID(&IID_IPicture, riid))
     *ppvObject = This;
   else if (IsEqualIID(&IID_IDispatch, riid))
@@ -448,20 +457,13 @@ static HRESULT WINAPI OLEPictureImpl_QueryInterface(
   else if (IsEqualIID(&IID_IConnectionPointContainer, riid))
     *ppvObject = &This->lpvtblIConnectionPointContainer;
 
-  /*
-   * Check that we obtained an interface.
-   */
-  if ((*ppvObject)==0)
+  if (!*ppvObject)
   {
     FIXME("() : asking for un supported interface %s\n",debugstr_guid(riid));
     return E_NOINTERFACE;
   }
 
-  /*
-   * Query Interface always increases the reference count by one when it is
-   * successful
-   */
-  OLEPictureImpl_AddRef((IPicture*)This);
+  IPicture_AddRef(iface);
 
   return S_OK;
 }
@@ -477,7 +479,7 @@ static void OLEPicture_SendNotify(OLEPictureImpl* this, DISPID dispID)
   IEnumConnections *pEnum;
   CONNECTDATA CD;
 
-  if (IConnectionPoint_EnumConnections(this->pCP, &pEnum))
+  if (IConnectionPoint_EnumConnections(this->pCP, &pEnum) != S_OK)
       return;
   while(IEnumConnections_Next(pEnum, 1, &CD, NULL) == S_OK) {
     IPropertyNotifySink *sink;
@@ -1241,8 +1243,8 @@ static HRESULT OLEPictureImpl_LoadIcon(OLEPictureImpl *This, BYTE *xbuf, ULONG x
 	This->origWidth = cifd->idEntries[i].bWidth;
 	This->origHeight = cifd->idEntries[i].bHeight;
 	hdcRef = CreateCompatibleDC(0);
-	This->himetricWidth =(cifd->idEntries[i].bWidth *2540)/GetDeviceCaps(hdcRef, LOGPIXELSX);
-	This->himetricHeight=(cifd->idEntries[i].bHeight*2540)/GetDeviceCaps(hdcRef, LOGPIXELSY);
+	This->himetricWidth = xpixels_to_himetric(cifd->idEntries[i].bWidth, hdcRef);
+	This->himetricHeight= ypixels_to_himetric(cifd->idEntries[i].bHeight, hdcRef);
 	DeleteDC(hdcRef);
 	return S_OK;
     }
@@ -1318,9 +1320,9 @@ static HRESULT OLEPictureImpl_LoadAPM(OLEPictureImpl *This,
  *
  * Currently implemented: BITMAP, ICON, JPEG, GIF, WMF, EMF
  */
-static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface,IStream*pStm) {
-  HRESULT	hr = E_FAIL;
-  BOOL		headerisdata = FALSE;
+static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface, IStream *pStm) {
+  HRESULT	hr;
+  BOOL		headerisdata;
   BOOL		statfailed = FALSE;
   ULONG		xread, toread;
   ULONG 	headerread;
@@ -1348,8 +1350,8 @@ static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface,IStream*pStm) {
    * Also handle streams where we do not have a working "Stat" method by
    * reading all data until the end of the stream.
    */
-  hr=IStream_Stat(pStm,&statstg,STATFLAG_NONAME);
-  if (hr) {
+  hr = IStream_Stat(pStm,&statstg,STATFLAG_NONAME);
+  if (hr != S_OK) {
       TRACE("stat failed with hres %x, proceeding to read all data.\n",hr);
       statfailed = TRUE;
       /* we will read at least 8 byte ... just right below */
@@ -1360,8 +1362,8 @@ static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface,IStream*pStm) {
   headerread = 0;
   headerisdata = FALSE;
   do {
-      hr=IStream_Read(pStm,header,8,&xread);
-      if (hr || xread!=8) {
+      hr = IStream_Read(pStm, header, 8, &xread);
+      if (hr != S_OK || xread!=8) {
           ERR("Failure while reading picture header (hr is %x, nread is %d).\n",hr,xread);
           return (hr?hr:E_FAIL);
       }
@@ -1406,11 +1408,11 @@ static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface,IStream*pStm) {
       while (1) {
           while (xread < origsize) {
               hr = IStream_Read(pStm,xbuf+xread,origsize-xread,&nread);
-              xread+=nread;
-              if (hr || !nread)
+              xread += nread;
+              if (hr != S_OK || !nread)
                   break;
           }
-          if (!nread || hr) /* done, or error */
+          if (!nread || hr != S_OK) /* done, or error */
               break;
           if (xread == origsize) {
               origsize += sizeinc;
@@ -1418,7 +1420,7 @@ static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface,IStream*pStm) {
               xbuf = HeapReAlloc (GetProcessHeap(), HEAP_ZERO_MEMORY, xbuf, origsize);
           }
       }
-      if (hr)
+      if (hr != S_OK)
           TRACE("hr in no-stat loader case is %08x\n", hr);
       TRACE("loaded %d bytes.\n", xread);
       This->datalen = xread;
@@ -1435,8 +1437,8 @@ static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface,IStream*pStm) {
       while (xread < This->datalen) {
           ULONG nread;
           hr = IStream_Read(pStm,xbuf+xread,This->datalen-xread,&nread);
-          xread+=nread;
-          if (hr || !nread)
+          xread += nread;
+          if (hr != S_OK || !nread)
               break;
       }
       if (xread != This->datalen)
@@ -2140,25 +2142,16 @@ static const IConnectionPointContainerVtbl OLEPictureImpl_IConnectionPointContai
  * OleCreatePictureIndirect (OLEAUT32.419)
  */
 HRESULT WINAPI OleCreatePictureIndirect(LPPICTDESC lpPictDesc, REFIID riid,
-		            BOOL fOwn, LPVOID *ppvObj )
+		            BOOL Own, void **ppvObj )
 {
-  OLEPictureImpl* newPict = NULL;
-  HRESULT      hr         = S_OK;
+  OLEPictureImpl* newPict;
+  HRESULT hr;
 
-  TRACE("(%p,%s,%d,%p)\n", lpPictDesc, debugstr_guid(riid), fOwn, ppvObj);
-
-  /*
-   * Sanity check
-   */
-  if (ppvObj==0)
-    return E_POINTER;
+  TRACE("(%p,%s,%d,%p)\n", lpPictDesc, debugstr_guid(riid), Own, ppvObj);
 
   *ppvObj = NULL;
 
-  /*
-   * Try to construct a new instance of the class.
-   */
-  newPict = OLEPictureImpl_Construct(lpPictDesc, fOwn);
+  newPict = OLEPictureImpl_Construct(lpPictDesc, Own);
 
   if (newPict == NULL)
     return E_OUTOFMEMORY;
@@ -2192,10 +2185,10 @@ HRESULT WINAPI OleLoadPicture( LPSTREAM lpstream, LONG lSize, BOOL fRunmode,
 	lpstream, lSize, fRunmode, debugstr_guid(riid), ppvObj);
 
   hr = OleCreatePictureIndirect(NULL,riid,!fRunmode,(LPVOID*)&newpic);
-  if (hr)
+  if (hr != S_OK)
     return hr;
   hr = IPicture_QueryInterface(newpic,&IID_IPersistStream, (LPVOID*)&ps);
-  if (hr) {
+  if (hr != S_OK) {
       ERR("Could not get IPersistStream iface from Ole Picture?\n");
       IPicture_Release(newpic);
       *ppvObj = NULL;
@@ -2211,7 +2204,7 @@ HRESULT WINAPI OleLoadPicture( LPSTREAM lpstream, LONG lSize, BOOL fRunmode,
       return hr;
   }
   hr = IPicture_QueryInterface(newpic,riid,ppvObj);
-  if (hr)
+  if (hr != S_OK)
       ERR("Failed to get interface %s from IPicture.\n",debugstr_guid(riid));
   IPicture_Release(newpic);
   return hr;
@@ -2231,10 +2224,10 @@ HRESULT WINAPI OleLoadPictureEx( LPSTREAM lpstream, LONG lSize, BOOL fRunmode,
 	lpstream, lSize, fRunmode, debugstr_guid(riid), xsiz, ysiz, flags, ppvObj);
 
   hr = OleCreatePictureIndirect(NULL,riid,!fRunmode,(LPVOID*)&newpic);
-  if (hr)
+  if (hr != S_OK)
     return hr;
   hr = IPicture_QueryInterface(newpic,&IID_IPersistStream, (LPVOID*)&ps);
-  if (hr) {
+  if (hr != S_OK) {
       ERR("Could not get IPersistStream iface from Ole Picture?\n");
       IPicture_Release(newpic);
       *ppvObj = NULL;
@@ -2250,7 +2243,7 @@ HRESULT WINAPI OleLoadPictureEx( LPSTREAM lpstream, LONG lSize, BOOL fRunmode,
       return hr;
   }
   hr = IPicture_QueryInterface(newpic,riid,ppvObj);
-  if (hr)
+  if (hr != S_OK)
       ERR("Failed to get interface %s from IPicture.\n",debugstr_guid(riid));
   IPicture_Release(newpic);
   return hr;

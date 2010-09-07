@@ -249,29 +249,47 @@ NTSTATUS WINAPI NtQueryInformationToken(
 	ULONG tokeninfolength,
 	PULONG retlen )
 {
-    ULONG len;
+    static const ULONG info_len [] =
+    {
+        0,
+        0,    /* TokenUser */
+        0,    /* TokenGroups */
+        0,    /* TokenPrivileges */
+        0,    /* TokenOwner */
+        0,    /* TokenPrimaryGroup */
+        0,    /* TokenDefaultDacl */
+        sizeof(TOKEN_SOURCE), /* TokenSource */
+        sizeof(TOKEN_TYPE),  /* TokenType */
+        sizeof(SECURITY_IMPERSONATION_LEVEL), /* TokenImpersonationLevel */
+        sizeof(TOKEN_STATISTICS), /* TokenStatistics */
+        0,    /* TokenRestrictedSids */
+        0,    /* TokenSessionId */
+        0,    /* TokenGroupsAndPrivileges */
+        0,    /* TokenSessionReference */
+        0,    /* TokenSandBoxInert */
+        0,    /* TokenAuditPolicy */
+        0,    /* TokenOrigin */
+        0,    /* TokenElevationType */
+        0,    /* TokenLinkedToken */
+        sizeof(TOKEN_ELEVATION), /* TokenElevation */
+        0,    /* TokenHasRestrictions */
+        0,    /* TokenAccessInformation */
+        0,    /* TokenVirtualizationAllowed */
+        0,    /* TokenVirtualizationEnabled */
+        0,    /* TokenIntegrityLevel */
+        0,    /* TokenUIAccess */
+        0,    /* TokenMandatoryPolicy */
+        0     /* TokenLogonSid */
+    };
+
+    ULONG len = 0;
     NTSTATUS status = STATUS_SUCCESS;
 
     TRACE("(%p,%d,%p,%d,%p)\n",
           token,tokeninfoclass,tokeninfo,tokeninfolength,retlen);
 
-    switch (tokeninfoclass)
-    {
-    case TokenSource:
-        len = sizeof(TOKEN_SOURCE);
-        break;
-    case TokenType:
-        len = sizeof (TOKEN_TYPE);
-        break;
-    case TokenImpersonationLevel:
-        len = sizeof(SECURITY_IMPERSONATION_LEVEL);
-        break;
-    case TokenStatistics:
-        len = sizeof(TOKEN_STATISTICS);
-        break;
-    default:
-        len = 0;
-    }
+    if (tokeninfoclass < MaxTokenInfoClass)
+        len = info_len[tokeninfoclass];
 
     if (retlen) *retlen = len;
 
@@ -488,6 +506,13 @@ NTSTATUS WINAPI NtQueryInformationToken(
             }
         }
         SERVER_END_REQ;
+        break;
+    case TokenElevation:
+        {
+            TOKEN_ELEVATION *elevation = tokeninfo;
+            FIXME("QueryInformationToken( ..., TokenElevation, ...) semi-stub\n");
+            elevation->TokenIsElevated = TRUE;
+        }
         break;
     default:
         {
@@ -897,6 +922,8 @@ void fill_cpu_info(void)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_PPC;
 #elif defined(__ALPHA__)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_ALPHA;
+#elif defined(__sparc__)
+    cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_SPARC;
 #else
 #error Unknown CPU
 #endif
@@ -1942,6 +1969,18 @@ NTSTATUS WINAPI NtAccessCheckAndAuditAlarm(PUNICODE_STRING SubsystemName, HANDLE
     FIXME("(%s, %p, %s, %p, 0x%08x, %p, %d, %p, %p, %p), stub\n", debugstr_us(SubsystemName), HandleId,
           debugstr_us(ObjectTypeName), SecurityDescriptor, DesiredAccess, GenericMapping, ObjectCreation,
           GrantedAccess, AccessStatus, GenerateOnClose);
+
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ *  NtSystemDebugControl   (NTDLL.@)
+ *  ZwSystemDebugControl   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSystemDebugControl(SYSDBG_COMMAND command, PVOID inbuffer, ULONG inbuflength, PVOID outbuffer,
+                                     ULONG outbuflength, PULONG retlength)
+{
+    FIXME("(%d, %p, %d, %p, %d, %p), stub\n", command, inbuffer, inbuflength, outbuffer, outbuflength, retlength);
 
     return STATUS_NOT_IMPLEMENTED;
 }

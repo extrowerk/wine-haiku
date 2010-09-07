@@ -125,8 +125,8 @@ static void drawStridedSlow(IWineD3DDevice *iface, const struct wined3d_context 
         element = &si->elements[WINED3D_FFP_DIFFUSE];
         diffuse = element->data + streamOffset[element->stream_idx];
 
-        if (num_untracked_materials && element->format_desc->format != WINED3DFMT_B8G8R8A8_UNORM)
-            FIXME("Implement diffuse color tracking from %s\n", debug_d3dformat(element->format_desc->format));
+        if (num_untracked_materials && element->format->id != WINED3DFMT_B8G8R8A8_UNORM)
+            FIXME("Implement diffuse color tracking from %s\n", debug_d3dformat(element->format->id));
     }
     else
     {
@@ -141,13 +141,13 @@ static void drawStridedSlow(IWineD3DDevice *iface, const struct wined3d_context 
         /* special case where the fog density is stored in the specular alpha channel */
         if (This->stateBlock->renderState[WINED3DRS_FOGENABLE]
                 && (This->stateBlock->renderState[WINED3DRS_FOGVERTEXMODE] == WINED3DFOG_NONE
-                    || si->elements[WINED3D_FFP_POSITION].format_desc->format == WINED3DFMT_R32G32B32A32_FLOAT)
+                    || si->elements[WINED3D_FFP_POSITION].format->id == WINED3DFMT_R32G32B32A32_FLOAT)
                 && This->stateBlock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE)
         {
             if (gl_info->supported[EXT_FOG_COORD])
             {
-                if (element->format_desc->format == WINED3DFMT_B8G8R8A8_UNORM) specular_fog = TRUE;
-                else FIXME("Implement fog coordinates from %s\n", debug_d3dformat(element->format_desc->format));
+                if (element->format->id == WINED3DFMT_B8G8R8A8_UNORM) specular_fog = TRUE;
+                else FIXME("Implement fog coordinates from %s\n", debug_d3dformat(element->format->id));
             }
             else
             {
@@ -243,7 +243,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, const struct wined3d_context 
             ptr = texCoords[coord_idx] + (SkipnStrides * si->elements[WINED3D_FFP_TEXCOORD0 + coord_idx].stride);
 
             texture_idx = This->texUnitMap[texture];
-            multi_texcoord_funcs[si->elements[WINED3D_FFP_TEXCOORD0 + coord_idx].format_desc->emit_idx](
+            multi_texcoord_funcs[si->elements[WINED3D_FFP_TEXCOORD0 + coord_idx].format->emit_idx](
                     GL_TEXTURE0_ARB + texture_idx, ptr);
         }
 
@@ -251,7 +251,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, const struct wined3d_context 
         if (diffuse) {
             const void *ptrToCoords = diffuse + SkipnStrides * si->elements[WINED3D_FFP_DIFFUSE].stride;
 
-            diffuse_funcs[si->elements[WINED3D_FFP_DIFFUSE].format_desc->emit_idx](ptrToCoords);
+            diffuse_funcs[si->elements[WINED3D_FFP_DIFFUSE].format->emit_idx](ptrToCoords);
             if (num_untracked_materials)
             {
                 DWORD diffuseColor = ((const DWORD *)ptrToCoords)[0];
@@ -274,7 +274,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, const struct wined3d_context 
         if (specular) {
             const void *ptrToCoords = specular + SkipnStrides * si->elements[WINED3D_FFP_SPECULAR].stride;
 
-            specular_funcs[si->elements[WINED3D_FFP_SPECULAR].format_desc->emit_idx](ptrToCoords);
+            specular_funcs[si->elements[WINED3D_FFP_SPECULAR].format->emit_idx](ptrToCoords);
 
             if (specular_fog)
             {
@@ -286,13 +286,13 @@ static void drawStridedSlow(IWineD3DDevice *iface, const struct wined3d_context 
         /* Normal -------------------------------- */
         if (normal != NULL) {
             const void *ptrToCoords = normal + SkipnStrides * si->elements[WINED3D_FFP_NORMAL].stride;
-            normal_funcs[si->elements[WINED3D_FFP_NORMAL].format_desc->emit_idx](ptrToCoords);
+            normal_funcs[si->elements[WINED3D_FFP_NORMAL].format->emit_idx](ptrToCoords);
         }
 
         /* Position -------------------------------- */
         if (position) {
             const void *ptrToCoords = position + SkipnStrides * si->elements[WINED3D_FFP_POSITION].stride;
-            position_funcs[si->elements[WINED3D_FFP_POSITION].format_desc->emit_idx](ptrToCoords);
+            position_funcs[si->elements[WINED3D_FFP_POSITION].format->emit_idx](ptrToCoords);
         }
 
         /* For non indexed mode, step onto next parts */
@@ -306,7 +306,8 @@ static void drawStridedSlow(IWineD3DDevice *iface, const struct wined3d_context 
 }
 
 /* GL locking is done by the caller */
-static inline void send_attribute(IWineD3DDeviceImpl *This, WINED3DFORMAT format, const UINT index, const void *ptr)
+static inline void send_attribute(IWineD3DDeviceImpl *This,
+        enum wined3d_format_id format, const UINT index, const void *ptr)
 {
     const struct wined3d_gl_info *gl_info = &This->adapter->gl_info;
 
@@ -467,7 +468,7 @@ static void drawStridedSlowVs(IWineD3DDevice *iface, const struct wined3d_stream
                   si->elements[i].stride * SkipnStrides +
                   stateblock->streamOffset[si->elements[i].stream_idx];
 
-            send_attribute(This, si->elements[i].format_desc->format, i, ptr);
+            send_attribute(This, si->elements[i].format->id, i, ptr);
         }
         SkipnStrides++;
     }
@@ -538,7 +539,7 @@ static inline void drawStridedInstanced(IWineD3DDevice *iface, const struct wine
                 ptr += (ULONG_PTR)buffer_get_sysmem(vb, &This->adapter->gl_info);
             }
 
-            send_attribute(This, si->elements[instancedData[j]].format_desc->format, instancedData[j], ptr);
+            send_attribute(This, si->elements[instancedData[j]].format->id, instancedData[j], ptr);
         }
 
         glDrawElements(glPrimitiveType, numberOfVertices, idxSize == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
@@ -583,11 +584,11 @@ void drawPrimitive(IWineD3DDevice *iface, UINT index_count, UINT StartIdx, UINT 
         /* Invalidate the back buffer memory so LockRect will read it the next time */
         for (i = 0; i < This->adapter->gl_info.limits.buffers; ++i)
         {
-            IWineD3DSurface *target = (IWineD3DSurface *)This->render_targets[i];
+            IWineD3DSurfaceImpl *target = This->render_targets[i];
             if (target)
             {
-                IWineD3DSurface_LoadLocation(target, SFLAG_INDRAWABLE, NULL);
-                IWineD3DSurface_ModifyLocation(target, SFLAG_INDRAWABLE, TRUE);
+                surface_load_location(target, SFLAG_INDRAWABLE, NULL);
+                surface_modify_location(target, SFLAG_INDRAWABLE, TRUE);
             }
         }
     }
@@ -639,12 +640,14 @@ void drawPrimitive(IWineD3DDevice *iface, UINT index_count, UINT StartIdx, UINT 
                 surface_modify_ds_location(This->depth_stencil, location,
                         This->depth_stencil->ds_current_size.cx,
                         This->depth_stencil->ds_current_size.cy);
-                IWineD3DSurface_ModifyLocation((IWineD3DSurface *)This->depth_stencil, SFLAG_INDRAWABLE, TRUE);
+                surface_modify_location(This->depth_stencil, SFLAG_INDRAWABLE, TRUE);
             }
         }
     }
 
-    if (!context->gl_info->supported[WINED3D_GL_VERSION_2_0] && context->render_offscreen
+    if ((!context->gl_info->supported[WINED3D_GL_VERSION_2_0]
+            || (!glPointParameteri && !context->gl_info->supported[NV_POINT_SPRITE]))
+            && context->render_offscreen
             && This->stateBlock->renderState[WINED3DRS_POINTSPRITEENABLE]
             && This->stateBlock->gl_primitive_type == GL_POINTS)
     {
@@ -741,7 +744,7 @@ void drawPrimitive(IWineD3DDevice *iface, UINT index_count, UINT StartIdx, UINT 
 static void normalize_normal(float *n) {
     float length = n[0] * n[0] + n[1] * n[1] + n[2] * n[2];
     if (length == 0.0f) return;
-    length = sqrt(length);
+    length = sqrtf(length);
     n[0] = n[0] / length;
     n[1] = n[1] / length;
     n[2] = n[2] / length;
@@ -826,9 +829,9 @@ HRESULT tesselate_rectpatch(IWineD3DDeviceImpl *This,
     for(j = 0; j < info->Height; j++) {
         for(i = 0; i < info->Width; i++) {
             const float *v = (const float *)(data + vtxStride * i + vtxStride * info->Stride * j);
-            if(fabs(v[0]) > max_x) max_x = fabs(v[0]);
-            if(fabs(v[1]) > max_y) max_y = fabs(v[1]);
-            if(fabs(v[2]) > max_z) max_z = fabs(v[2]);
+            if(fabs(v[0]) > max_x) max_x = fabsf(v[0]);
+            if(fabs(v[1]) > max_y) max_y = fabsf(v[1]);
+            if(fabs(v[2]) > max_z) max_z = fabsf(v[2]);
             if(v[2] < neg_z) neg_z = v[2];
         }
     }

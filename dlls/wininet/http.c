@@ -179,7 +179,7 @@ struct gzip_stream_t {
     BOOL end_of_data;
 };
 
-typedef struct _authorizationData
+typedef struct _basicAuthorizationData
 {
     struct list entry;
 
@@ -187,9 +187,24 @@ typedef struct _authorizationData
     LPWSTR lpszwRealm;
     LPSTR  lpszAuthorization;
     UINT   AuthorizationLen;
+} basicAuthorizationData;
+
+typedef struct _authorizationData
+{
+    struct list entry;
+
+    LPWSTR host;
+    LPWSTR scheme;
+    LPWSTR domain;
+    UINT   domain_len;
+    LPWSTR user;
+    UINT   user_len;
+    LPWSTR password;
+    UINT   password_len;
 } authorizationData;
 
 static struct list basicAuthorizationCache = LIST_INIT(basicAuthorizationCache);
+static struct list authorizationCache = LIST_INIT(authorizationCache);
 
 static CRITICAL_SECTION authcache_cs;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -570,13 +585,13 @@ static void destroy_authinfo( struct HttpAuthInfo *authinfo )
 
 static UINT retrieve_cached_basic_authorization(LPWSTR host, LPWSTR realm, LPSTR *auth_data)
 {
-    authorizationData *ad;
+    basicAuthorizationData *ad;
     UINT rc = 0;
 
     TRACE("Looking for authorization for %s:%s\n",debugstr_w(host),debugstr_w(realm));
 
     EnterCriticalSection(&authcache_cs);
-    LIST_FOR_EACH_ENTRY(ad, &basicAuthorizationCache, authorizationData, entry)
+    LIST_FOR_EACH_ENTRY(ad, &basicAuthorizationCache, basicAuthorizationData, entry)
     {
         if (!strcmpiW(host,ad->lpszwHost) && !strcmpW(realm,ad->lpszwRealm))
         {
@@ -594,14 +609,14 @@ static UINT retrieve_cached_basic_authorization(LPWSTR host, LPWSTR realm, LPSTR
 static void cache_basic_authorization(LPWSTR host, LPWSTR realm, LPSTR auth_data, UINT auth_data_len)
 {
     struct list *cursor;
-    authorizationData* ad = NULL;
+    basicAuthorizationData* ad = NULL;
 
     TRACE("caching authorization for %s:%s = %s\n",debugstr_w(host),debugstr_w(realm),debugstr_an(auth_data,auth_data_len));
 
     EnterCriticalSection(&authcache_cs);
     LIST_FOR_EACH(cursor, &basicAuthorizationCache)
     {
-        authorizationData *check = LIST_ENTRY(cursor,authorizationData,entry);
+        basicAuthorizationData *check = LIST_ENTRY(cursor,basicAuthorizationData,entry);
         if (!strcmpiW(host,check->lpszwHost) && !strcmpW(realm,check->lpszwRealm))
         {
             ad = check;
@@ -619,7 +634,7 @@ static void cache_basic_authorization(LPWSTR host, LPWSTR realm, LPSTR auth_data
     }
     else
     {
-        ad = HeapAlloc(GetProcessHeap(),0,sizeof(authorizationData));
+        ad = HeapAlloc(GetProcessHeap(),0,sizeof(basicAuthorizationData));
         ad->lpszwHost = heap_strdupW(host);
         ad->lpszwRealm = heap_strdupW(realm);
         ad->lpszAuthorization = HeapAlloc(GetProcessHeap(),0,auth_data_len);
@@ -628,6 +643,95 @@ static void cache_basic_authorization(LPWSTR host, LPWSTR realm, LPSTR auth_data
         list_add_head(&basicAuthorizationCache,&ad->entry);
         TRACE("authorization cached\n");
     }
+    LeaveCriticalSection(&authcache_cs);
+}
+
+static BOOL retrieve_cached_authorization(LPWSTR host, LPWSTR scheme,
+        SEC_WINNT_AUTH_IDENTITY_W *nt_auth_identity)
+{
+    authorizationData *ad;
+
+    TRACE("Looking for authorization for %s:%s\n", debugstr_w(host), debugstr_w(scheme));
+
+    EnterCriticalSection(&authcache_cs);
+    LIST_FOR_EACH_ENTRY(ad, &authorizationCache, authorizationData, entry) {
+        if(!strcmpiW(host, ad->host) && !strcmpiW(scheme, ad->scheme)) {
+            TRACE("Authorization found in cache\n");
+
+            nt_auth_identity->User = heap_strdupW(ad->user);
+            nt_auth_identity->Password = heap_strdupW(ad->password);
+            nt_auth_identity->Domain = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*ad->domain_len);
+            if(!nt_auth_identity->User || !nt_auth_identity->Password ||
+                    (!nt_auth_identity->Domain && ad->domain_len)) {
+                HeapFree(GetProcessHeap(), 0, nt_auth_identity->User);
+                HeapFree(GetProcessHeap(), 0, nt_auth_identity->Password);
+                HeapFree(GetProcessHeap(), 0, nt_auth_identity->Domain);
+                break;
+            }
+
+            nt_auth_identity->Flags = SEC_WINNT_AUTH_IDENTITY_UNICODE;
+            nt_auth_identity->UserLength = ad->user_len;
+            nt_auth_identity->PasswordLength = ad->password_len;
+            memcpy(nt_auth_identity->Domain, ad->domain, sizeof(WCHAR)*ad->domain_len);
+            nt_auth_identity->DomainLength = ad->domain_len;
+            LeaveCriticalSection(&authcache_cs);
+            return TRUE;
+        }
+    }
+    LeaveCriticalSection(&authcache_cs);
+
+    return FALSE;
+}
+
+static void cache_authorization(LPWSTR host, LPWSTR scheme,
+        SEC_WINNT_AUTH_IDENTITY_W *nt_auth_identity)
+{
+    authorizationData *ad;
+    BOOL found = FALSE;
+
+    TRACE("Caching authorization for %s:%s\n", debugstr_w(host), debugstr_w(scheme));
+
+    EnterCriticalSection(&authcache_cs);
+    LIST_FOR_EACH_ENTRY(ad, &authorizationCache, authorizationData, entry)
+        if(!strcmpiW(host, ad->host) && !strcmpiW(scheme, ad->scheme)) {
+            found = TRUE;
+            break;
+        }
+
+    if(found) {
+        HeapFree(GetProcessHeap(), 0, ad->user);
+        HeapFree(GetProcessHeap(), 0, ad->password);
+        HeapFree(GetProcessHeap(), 0, ad->domain);
+    } else {
+        ad = HeapAlloc(GetProcessHeap(), 0, sizeof(authorizationData));
+        if(!ad) {
+            LeaveCriticalSection(&authcache_cs);
+            return;
+        }
+
+        ad->host = heap_strdupW(host);
+        ad->scheme = heap_strdupW(scheme);
+        list_add_head(&authorizationCache, &ad->entry);
+    }
+
+    ad->user = heap_strndupW(nt_auth_identity->User, nt_auth_identity->UserLength);
+    ad->password = heap_strndupW(nt_auth_identity->Password, nt_auth_identity->PasswordLength);
+    ad->domain = heap_strndupW(nt_auth_identity->Domain, nt_auth_identity->DomainLength);
+    ad->user_len = nt_auth_identity->UserLength;
+    ad->password_len = nt_auth_identity->PasswordLength;
+    ad->domain_len = nt_auth_identity->DomainLength;
+
+    if(!ad->host || !ad->scheme || !ad->user || !ad->password
+            || (nt_auth_identity->Domain && !ad->domain)) {
+        HeapFree(GetProcessHeap(), 0, ad->host);
+        HeapFree(GetProcessHeap(), 0, ad->scheme);
+        HeapFree(GetProcessHeap(), 0, ad->user);
+        HeapFree(GetProcessHeap(), 0, ad->password);
+        HeapFree(GetProcessHeap(), 0, ad->domain);
+        list_remove(&ad->entry);
+        HeapFree(GetProcessHeap(), 0, ad);
+    }
+
     LeaveCriticalSection(&authcache_cs);
 }
 
@@ -705,7 +809,11 @@ static BOOL HTTP_DoAuthorization( http_request_t *lpwhr, LPCWSTR pszAuthValue,
                 nt_auth_identity.DomainLength = domain ? user - domain - 1 : 0;
                 nt_auth_identity.Password = password;
                 nt_auth_identity.PasswordLength = strlenW(nt_auth_identity.Password);
+
+                cache_authorization(host, pAuthInfo->scheme, &nt_auth_identity);
             }
+            else if(retrieve_cached_authorization(host, pAuthInfo->scheme, &nt_auth_identity))
+                pAuthData = &nt_auth_identity;
             else
                 /* use default credentials */
                 pAuthData = NULL;
@@ -715,6 +823,13 @@ static BOOL HTTP_DoAuthorization( http_request_t *lpwhr, LPCWSTR pszAuthValue,
                                                    pAuthData, NULL,
                                                    NULL, &pAuthInfo->cred,
                                                    &exp);
+
+            if(pAuthData && !domain_and_username) {
+                HeapFree(GetProcessHeap(), 0, nt_auth_identity.User);
+                HeapFree(GetProcessHeap(), 0, nt_auth_identity.Domain);
+                HeapFree(GetProcessHeap(), 0, nt_auth_identity.Password);
+            }
+
             if (sec_status == SEC_E_OK)
             {
                 PSecPkgInfoW sec_pkg_info;
@@ -1424,6 +1539,20 @@ static DWORD HTTP_ResolveName(http_request_t *lpwhr)
     return ERROR_SUCCESS;
 }
 
+static BOOL HTTP_GetRequestURL(http_request_t *req, LPWSTR buf)
+{
+    LPHTTPHEADERW host_header;
+
+    static const WCHAR formatW[] = {'h','t','t','p',':','/','/','%','s','%','s',0};
+
+    host_header = HTTP_GetHeader(req, hostW);
+    if(!host_header)
+        return FALSE;
+
+    sprintfW(buf, formatW, host_header->lpszValue, req->lpszPath); /* FIXME */
+    return TRUE;
+}
+
 
 /***********************************************************************
  *           HTTPREQ_Destroy (internal)
@@ -1438,8 +1567,18 @@ static void HTTPREQ_Destroy(object_header_t *hdr)
 
     TRACE("\n");
 
-    if(lpwhr->hCacheFile)
+    if(lpwhr->hCacheFile) {
+        WCHAR url[INTERNET_MAX_URL_LENGTH];
+        FILETIME ft;
+
         CloseHandle(lpwhr->hCacheFile);
+
+        memset(&ft, 0, sizeof(FILETIME));
+        if(HTTP_GetRequestURL(lpwhr, url)) {
+            CommitUrlCacheEntryW(url, lpwhr->lpszCacheFile, ft, ft,
+                    NORMAL_CACHE_ENTRY, NULL, 0, NULL, 0);
+        }
+    }
 
     HeapFree(GetProcessHeap(), 0, lpwhr->lpszCacheFile);
 
@@ -1489,20 +1628,6 @@ static void HTTPREQ_CloseConnection(object_header_t *hdr)
 
     INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
                           INTERNET_STATUS_CONNECTION_CLOSED, 0, 0);
-}
-
-static BOOL HTTP_GetRequestURL(http_request_t *req, LPWSTR buf)
-{
-    LPHTTPHEADERW host_header;
-
-    static const WCHAR formatW[] = {'h','t','t','p',':','/','/','%','s','%','s',0};
-
-    host_header = HTTP_GetHeader(req, hostW);
-    if(!host_header)
-        return FALSE;
-
-    sprintfW(buf, formatW, host_header->lpszValue, req->lpszPath); /* FIXME */
-    return TRUE;
 }
 
 static BOOL HTTP_KeepAlive(http_request_t *lpwhr)
@@ -1968,6 +2093,9 @@ static DWORD read_gzip_data(http_request_t *req, BYTE *buf, int size, BOOL sync,
                 break;
         }
 
+        if(req->dwContentRead == req->dwContentLength)
+            break;
+
         buf_avail = req->dwContentLength == ~0 ? req->read_size : min(req->read_size, req->dwContentLength-req->dwContentRead);
 
         zstream->next_in = req->read_buf+req->read_pos;
@@ -2123,7 +2251,18 @@ done:
 static DWORD HTTPREQ_ReadFile(object_header_t *hdr, void *buffer, DWORD size, DWORD *read)
 {
     http_request_t *req = (http_request_t*)hdr;
-    return HTTPREQ_Read(req, buffer, size, read, TRUE);
+    DWORD res;
+
+    EnterCriticalSection( &req->read_section );
+    if(hdr->dwError == INTERNET_HANDLE_IN_USE)
+        hdr->dwError = ERROR_INTERNET_INTERNAL_ERROR;
+
+    res = HTTPREQ_Read(req, buffer, size, read, TRUE);
+    if(res == ERROR_SUCCESS)
+        res = hdr->dwError;
+    LeaveCriticalSection( &req->read_section );
+
+    return res;
 }
 
 static void HTTPREQ_AsyncReadFileExAProc(WORKREQUEST *workRequest)
@@ -2150,7 +2289,7 @@ static DWORD HTTPREQ_ReadFileExA(object_header_t *hdr, INTERNET_BUFFERSA *buffer
         DWORD flags, DWORD_PTR context)
 {
     http_request_t *req = (http_request_t*)hdr;
-    DWORD res;
+    DWORD res, size, read, error = ERROR_SUCCESS;
 
     if (flags & ~(IRF_ASYNC|IRF_NO_WAIT))
         FIXME("these dwFlags aren't implemented: 0x%x\n", flags & ~(IRF_ASYNC|IRF_NO_WAIT));
@@ -2160,7 +2299,7 @@ static DWORD HTTPREQ_ReadFileExA(object_header_t *hdr, INTERNET_BUFFERSA *buffer
 
     INTERNET_SendCallback(&req->hdr, req->hdr.dwContext, INTERNET_STATUS_RECEIVING_RESPONSE, NULL, 0);
 
-    if ((hdr->dwFlags & INTERNET_FLAG_ASYNC) && !get_avail_data(req))
+    if (hdr->dwFlags & INTERNET_FLAG_ASYNC)
     {
         WORKREQUEST workRequest;
 
@@ -2170,6 +2309,7 @@ static DWORD HTTPREQ_ReadFileExA(object_header_t *hdr, INTERNET_BUFFERSA *buffer
             {
                 res = HTTPREQ_Read(req, buffers->lpvBuffer, buffers->dwBufferLength,
                                    &buffers->dwBufferLength, FALSE);
+                size = buffers->dwBufferLength;
                 LeaveCriticalSection( &req->read_section );
                 goto done;
             }
@@ -2185,17 +2325,52 @@ static DWORD HTTPREQ_ReadFileExA(object_header_t *hdr, INTERNET_BUFFERSA *buffer
         return ERROR_IO_PENDING;
     }
 
-    res = HTTPREQ_Read(req, buffers->lpvBuffer, buffers->dwBufferLength, &buffers->dwBufferLength,
-            !(flags & IRF_NO_WAIT));
+    read = 0;
+    size = buffers->dwBufferLength;
+
+    EnterCriticalSection( &req->read_section );
+    if(hdr->dwError == ERROR_SUCCESS)
+        hdr->dwError = INTERNET_HANDLE_IN_USE;
+    else if(hdr->dwError == INTERNET_HANDLE_IN_USE)
+        hdr->dwError = ERROR_INTERNET_INTERNAL_ERROR;
+
+    while(1) {
+        res = HTTPREQ_Read(req, (char*)buffers->lpvBuffer+read, size-read,
+                &buffers->dwBufferLength, !(flags & IRF_NO_WAIT));
+        if(res == ERROR_SUCCESS)
+            read += buffers->dwBufferLength;
+        else
+            break;
+
+        if(!req->read_chunked || read==size || req->dwContentLength!=req->dwContentRead
+                || !req->dwContentLength || (req->gzip_stream && req->gzip_stream->end_of_data))
+            break;
+        LeaveCriticalSection( &req->read_section );
+
+        INTERNET_SendCallback(&req->hdr, req->hdr.dwContext, INTERNET_STATUS_RESPONSE_RECEIVED,
+                &buffers->dwBufferLength, sizeof(buffers->dwBufferLength));
+        INTERNET_SendCallback(&req->hdr, req->hdr.dwContext,
+                INTERNET_STATUS_RECEIVING_RESPONSE, NULL, 0);
+
+        EnterCriticalSection( &req->read_section );
+    }
+
+    if(hdr->dwError == INTERNET_HANDLE_IN_USE)
+        hdr->dwError = ERROR_SUCCESS;
+    else
+        error = hdr->dwError;
+
+    LeaveCriticalSection( &req->read_section );
+    size = buffers->dwBufferLength;
+    buffers->dwBufferLength = read;
 
 done:
     if (res == ERROR_SUCCESS) {
-        DWORD size = buffers->dwBufferLength;
         INTERNET_SendCallback(&req->hdr, req->hdr.dwContext, INTERNET_STATUS_RESPONSE_RECEIVED,
                 &size, sizeof(size));
     }
 
-    return res;
+    return res==ERROR_SUCCESS ? error : res;
 }
 
 static void HTTPREQ_AsyncReadFileExWProc(WORKREQUEST *workRequest)
@@ -2223,7 +2398,7 @@ static DWORD HTTPREQ_ReadFileExW(object_header_t *hdr, INTERNET_BUFFERSW *buffer
 {
 
     http_request_t *req = (http_request_t*)hdr;
-    DWORD res;
+    DWORD res, size, read, error = ERROR_SUCCESS;
 
     if (flags & ~(IRF_ASYNC|IRF_NO_WAIT))
         FIXME("these dwFlags aren't implemented: 0x%x\n", flags & ~(IRF_ASYNC|IRF_NO_WAIT));
@@ -2243,6 +2418,7 @@ static DWORD HTTPREQ_ReadFileExW(object_header_t *hdr, INTERNET_BUFFERSW *buffer
             {
                 res = HTTPREQ_Read(req, buffers->lpvBuffer, buffers->dwBufferLength,
                                    &buffers->dwBufferLength, FALSE);
+                size = buffers->dwBufferLength;
                 LeaveCriticalSection( &req->read_section );
                 goto done;
             }
@@ -2258,17 +2434,52 @@ static DWORD HTTPREQ_ReadFileExW(object_header_t *hdr, INTERNET_BUFFERSW *buffer
         return ERROR_IO_PENDING;
     }
 
-    res = HTTPREQ_Read(req, buffers->lpvBuffer, buffers->dwBufferLength, &buffers->dwBufferLength,
-            !(flags & IRF_NO_WAIT));
+    read = 0;
+    size = buffers->dwBufferLength;
+
+    EnterCriticalSection( &req->read_section );
+    if(hdr->dwError == ERROR_SUCCESS)
+        hdr->dwError = INTERNET_HANDLE_IN_USE;
+    else if(hdr->dwError == INTERNET_HANDLE_IN_USE)
+        hdr->dwError = ERROR_INTERNET_INTERNAL_ERROR;
+
+    while(1) {
+        res = HTTPREQ_Read(req, (char*)buffers->lpvBuffer+read, size-read,
+                &buffers->dwBufferLength, !(flags & IRF_NO_WAIT));
+        if(res == ERROR_SUCCESS)
+            read += buffers->dwBufferLength;
+        else
+            break;
+
+        if(!req->read_chunked || read==size || req->dwContentLength!=req->dwContentRead
+                || !req->dwContentLength || (req->gzip_stream && req->gzip_stream->end_of_data))
+            break;
+        LeaveCriticalSection( &req->read_section );
+
+        INTERNET_SendCallback(&req->hdr, req->hdr.dwContext, INTERNET_STATUS_RESPONSE_RECEIVED,
+                &buffers->dwBufferLength, sizeof(buffers->dwBufferLength));
+        INTERNET_SendCallback(&req->hdr, req->hdr.dwContext,
+                INTERNET_STATUS_RECEIVING_RESPONSE, NULL, 0);
+
+        EnterCriticalSection( &req->read_section );
+    }
+
+    if(hdr->dwError == INTERNET_HANDLE_IN_USE)
+        hdr->dwError = ERROR_SUCCESS;
+    else
+        error = hdr->dwError;
+
+    LeaveCriticalSection( &req->read_section );
+    size = buffers->dwBufferLength;
+    buffers->dwBufferLength = read;
 
 done:
     if (res == ERROR_SUCCESS) {
-        DWORD size = buffers->dwBufferLength;
         INTERNET_SendCallback(&req->hdr, req->hdr.dwContext, INTERNET_STATUS_RESPONSE_RECEIVED,
                 &size, sizeof(size));
     }
 
-    return res;
+    return res==ERROR_SUCCESS ? error : res;
 }
 
 static DWORD HTTPREQ_WriteFile(object_header_t *hdr, const void *buffer, DWORD size, DWORD *written)
@@ -3454,6 +3665,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
     do
     {
         DWORD len;
+        BOOL reusing_connection;
         char *ascii_req;
 
         loop_next = FALSE;
@@ -3504,6 +3716,11 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
         TRACE("Request header -> %s\n", debugstr_w(requestString) );
 
         /* Send the request and store the results */
+        if(NETCON_connected(&lpwhr->netConnection))
+            reusing_connection = TRUE;
+        else
+            reusing_connection = FALSE;
+
         if ((res = HTTP_OpenConnection(lpwhr)) != ERROR_SUCCESS)
             goto lend;
 
@@ -3545,6 +3762,13 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
                 goto lend;
     
             responseLen = HTTP_GetResponseHeaders(lpwhr, TRUE);
+            /* FIXME: We should know that connection is closed before sending
+             * headers. Otherwise wrong callbacks are executed */
+            if(!responseLen && reusing_connection) {
+                TRACE("Connection closed by server, reconnecting\n");
+                loop_next = TRUE;
+                continue;
+            }
     
             INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
                                 INTERNET_STATUS_RESPONSE_RECEIVED, &responseLen,
@@ -3563,7 +3787,9 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
             {
                 WCHAR *new_url, szNewLocation[INTERNET_MAX_URL_LENGTH];
                 dwBufferSize=sizeof(szNewLocation);
-                if ((dwStatusCode==HTTP_STATUS_REDIRECT || dwStatusCode==HTTP_STATUS_MOVED) &&
+                if ((dwStatusCode == HTTP_STATUS_REDIRECT ||
+                     dwStatusCode == HTTP_STATUS_MOVED ||
+                     dwStatusCode == HTTP_STATUS_REDIRECT_METHOD) &&
                     HTTP_HttpQueryInfoW(lpwhr,HTTP_QUERY_LOCATION,szNewLocation,&dwBufferSize,NULL) == ERROR_SUCCESS)
                 {
                     if (strcmpW(lpwhr->lpszVerb, szGET) && strcmpW(lpwhr->lpszVerb, szHEAD))
@@ -3608,6 +3834,12 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
                             break;
                         }
                     }
+
+                    if(!loop_next) {
+                        TRACE("Cleaning wrong authorization data\n");
+                        destroy_authinfo(lpwhr->pAuthInfo);
+                        lpwhr->pAuthInfo = NULL;
+                    }
                 }
                 if (dwStatusCode == HTTP_STATUS_PROXY_AUTH_REQ)
                 {
@@ -3623,6 +3855,12 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
                             loop_next = TRUE;
                             break;
                         }
+                    }
+
+                    if(!loop_next) {
+                        TRACE("Cleaning wrong proxy authorization data\n");
+                        destroy_authinfo(lpwhr->pProxyAuthInfo);
+                        lpwhr->pProxyAuthInfo = NULL;
                     }
                 }
             }
@@ -3672,7 +3910,7 @@ lend:
             HTTP_ReceiveRequestData(lpwhr, TRUE);
         else
         {
-            iar.dwResult = 0;
+            iar.dwResult = (res==ERROR_SUCCESS ? (DWORD_PTR)lpwhr->hdr.hInternet : 0);
             iar.dwError = res;
 
             INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
@@ -3756,7 +3994,7 @@ static DWORD HTTP_HttpEndRequestW(http_request_t *lpwhr, DWORD dwFlags, DWORD_PT
         }
     }
 
-    iar.dwResult = (DWORD_PTR)lpwhr->hdr.hInternet;
+    iar.dwResult = (res==ERROR_SUCCESS ? (DWORD_PTR)lpwhr->hdr.hInternet : 0);
     iar.dwError = res;
 
     INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
@@ -4457,9 +4695,6 @@ static INT HTTP_GetResponseHeaders(http_request_t *lpwhr, BOOL clear)
 
     TRACE("-->\n");
 
-    /* clear old response headers (eg. from a redirect response) */
-    if (clear) HTTP_clear_response_headers( lpwhr );
-
     if (!NETCON_connected(&lpwhr->netConnection))
         goto lend;
 
@@ -4471,6 +4706,13 @@ static INT HTTP_GetResponseHeaders(http_request_t *lpwhr, BOOL clear)
         buflen = MAX_REPLY_LEN;
         if (!read_line(lpwhr, bufferA, &buflen))
             goto lend;
+
+        /* clear old response headers (eg. from a redirect response) */
+        if (clear) {
+            HTTP_clear_response_headers( lpwhr );
+            clear = FALSE;
+        }
+
         rc += buflen;
         MultiByteToWideChar( CP_ACP, 0, bufferA, buflen, buffer, MAX_REPLY_LEN );
         /* check is this a status code line? */

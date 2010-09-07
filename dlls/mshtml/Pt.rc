@@ -23,7 +23,7 @@
 
 LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 {
     IDS_HTMLDISABLED    "A interpretação de HTML está desativada."
     IDS_HTMLDOCUMENT    "Documento HTML"
@@ -33,7 +33,7 @@ STRINGTABLE DISCARDABLE
 
 LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 {
     IDS_HTMLDISABLED    "A interpretação de HTML está desactivada."
     IDS_HTMLDOCUMENT    "Documento HTML"
@@ -44,14 +44,14 @@ STRINGTABLE DISCARDABLE
 
 LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
 
-ID_DWL_DIALOG DIALOG LOADONCALL MOVEABLE DISCARDABLE  0, 0, 260, 95
+ID_DWL_DIALOG DIALOG  0, 0, 260, 95
 STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Instalador Wine Gecko"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT "O Wine não pôde encontrar o pacote Gecko que é necessário para aplicações com HTML embutido" \
-          "funcionarem corretamente. O Wine pode automaticamente efetuar o download instalá-lo para você.\n\n" \
-          "Nota: é recomendável usar os pacotes da sua distribuição ao invés disso. \n\
+    LTEXT "O Wine não pôde encontrar o pacote Gecko que é necessário para aplicações com HTML embutido " \
+          "funcionarem corretamente. O Wine pode automaticamente efetuar o download e instalá-lo para você.\n\n" \
+          "Nota: é recomendável usar os pacotes da sua distribuição ao invés disso.\n\
 Veja http://wiki.winehq.org/Gecko para mais detalhes.",
           ID_DWL_STATUS, 10, 10, 240, 60, SS_LEFT
     CONTROL "Progresso", ID_DWL_PROGRESS, PROGRESS_CLASSA, WS_BORDER|PBS_SMOOTH, 10, 50, 240, 12
@@ -61,14 +61,15 @@ Veja http://wiki.winehq.org/Gecko para mais detalhes.",
 
 LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE
 
-ID_DWL_DIALOG DIALOG LOADONCALL MOVEABLE DISCARDABLE  0, 0, 260, 95
+ID_DWL_DIALOG DIALOG  0, 0, 260, 95
 STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Instalador Wine Gecko"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT "Wine could not find a Gecko package which is needed for applications embedding HTML " \
-          "to work correctly. Wine can automatically download and install it for you.\n\n" \
-          "Note: it's recommended to use distro packages instead. See http://wiki.winehq.org/Gecko for details.",
+    LTEXT "O Wine não conseguiu encontrar o pacote Gecko que é necessário para aplicações com HTML embutido " \
+          "funcionarem corretamente. O Wine pode automaticamente efetuar o download e instalá-lo por si.\n\n" \
+          "Nota: é recomendável usar os pacotes da sua distribuição em vez disso.\n\
+Veja http://wiki.winehq.org/Gecko para mais detalhes.",
           ID_DWL_STATUS, 10, 10, 240, 50, SS_LEFT
     CONTROL "Progresso", ID_DWL_PROGRESS, PROGRESS_CLASSA, WS_BORDER|PBS_SMOOTH, 10, 50, 240, 12
     DEFPUSHBUTTON "&Instalar", ID_DWL_INSTALL, 200, 70, 50, 15, WS_GROUP | WS_TABSTOP
@@ -78,7 +79,7 @@ FONT 8, "MS Shell Dlg"
 
 LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
 
-IDD_HYPERLINK DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 250, 65
+IDD_HYPERLINK DIALOG 0, 0, 250, 65
 STYLE DS_CENTER | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Hiperlink"
 FONT 8, "MS Shell Dlg"
@@ -94,7 +95,7 @@ FONT 8, "MS Shell Dlg"
 
 LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE
 
-IDD_HYPERLINK DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 250, 65
+IDD_HYPERLINK DIALOG 0, 0, 250, 65
 STYLE DS_CENTER | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Hiperligação"
 FONT 8, "MS Shell Dlg"

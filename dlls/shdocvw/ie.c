@@ -47,6 +47,8 @@ static HRESULT WINAPI InternetExplorer_QueryInterface(IWebBrowser2 *iface, REFII
     }else if(IsEqualGUID(&IID_IConnectionPointContainer, riid)) {
         TRACE("(%p)->(IID_IConnectionPointContainer %p)\n", This, ppv);
         *ppv = CONPTCONT(&This->doc_host.cps);
+    }else if(HlinkFrame_QI(&This->hlink_frame, riid, ppv)) {
+        return S_OK;
     }
 
     if(*ppv) {
@@ -394,8 +396,10 @@ static HRESULT WINAPI InternetExplorer_get_StatusText(IWebBrowser2 *iface, BSTR 
 static HRESULT WINAPI InternetExplorer_put_StatusText(IWebBrowser2 *iface, BSTR StatusText)
 {
     InternetExplorer *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(StatusText));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(StatusText));
+
+    return update_ie_statustext(This, StatusText);
 }
 
 static HRESULT WINAPI InternetExplorer_get_ToolBar(IWebBrowser2 *iface, int *Value)
@@ -422,8 +426,17 @@ static HRESULT WINAPI InternetExplorer_get_MenuBar(IWebBrowser2 *iface, VARIANT_
 static HRESULT WINAPI InternetExplorer_put_MenuBar(IWebBrowser2 *iface, VARIANT_BOOL Value)
 {
     InternetExplorer *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%x)\n", This, Value);
-    return E_NOTIMPL;
+    HMENU menu = NULL;
+
+    TRACE("(%p)->(%x)\n", This, Value);
+
+    if(Value)
+        menu = This->menu;
+
+    if(!SetMenu(This->frame_hwnd, menu))
+        return HRESULT_FROM_WIN32(GetLastError());
+
+    return S_OK;
 }
 
 static HRESULT WINAPI InternetExplorer_get_FullScreen(IWebBrowser2 *iface, VARIANT_BOOL *pbFullScreen)

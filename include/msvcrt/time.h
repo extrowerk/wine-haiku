@@ -89,7 +89,9 @@ extern char *_tzname;
 unsigned    __cdecl _getsystime(struct tm*);
 unsigned    __cdecl _setsystime(struct tm*,unsigned);
 char*       __cdecl _strdate(char*);
+errno_t     __cdecl _strdate_s(char*,size_t);
 char*       __cdecl _strtime(char*);
+errno_t     __cdecl _strtime_s(char*,size_t);
 void        __cdecl _tzset(void);
 
 char*       __cdecl asctime(const struct tm*);
@@ -129,7 +131,9 @@ size_t   __cdecl wcsftime(wchar_t*,size_t,const wchar_t*,const struct tm*);
 wchar_t* __cdecl _wctime32(const __time32_t*);
 wchar_t* __cdecl _wctime64(const __time64_t*);
 wchar_t* __cdecl _wstrdate(wchar_t*);
+errno_t  __cdecl _wstrdate_s(wchar_t*,size_t);
 wchar_t* __cdecl _wstrtime(wchar_t*);
+errno_t  __cdecl _wstrtime_s(wchar_t*,size_t);
 
 #ifndef _USE_32BIT_TIME_T
 static inline wchar_t* _wctime(const time_t *t) { return _wctime64(t); }

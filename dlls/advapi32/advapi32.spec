@@ -65,8 +65,8 @@
 @ stdcall CommandLineFromMsiDescriptor(wstr ptr ptr)
 # @ stub ComputeAccessTokenFromCodeAuthzLevel
 @ stdcall ControlService(long long ptr)
-@ stdcall ControlTraceA(double str ptr long)
-@ stdcall ControlTraceW(double wstr ptr long)
+@ stdcall ControlTraceA(int64 str ptr long)
+@ stdcall ControlTraceW(int64 wstr ptr long)
 # @ stub ConvertAccessToSecurityDescriptorA
 # @ stub ConvertAccessToSecurityDescriptorW
 # @ stub ConvertSDToStringSDRootDomainA
@@ -200,7 +200,7 @@
 @ stub ElfRegisterEventSourceW
 # @ stub ElfReportEventA
 @ stub ElfReportEventW
-@ stdcall EnableTrace(long long long ptr double)
+@ stdcall EnableTrace(long long long ptr int64)
 @ stdcall EncryptFileA(str)
 @ stdcall EncryptFileW(wstr)
 # @ stub EncryptedFileKeyInfo
@@ -220,8 +220,8 @@
 @ stdcall FileEncryptionStatusA(str ptr)
 @ stdcall FileEncryptionStatusW(wstr ptr)
 @ stdcall FindFirstFreeAce(ptr ptr)
-# @ stub FlushTraceA
-# @ stub FlushTraceW
+@ stdcall FlushTraceA(int64 str ptr)
+@ stdcall FlushTraceW(int64 wstr ptr)
 # @ stub FreeEncryptedFileKeyInfo
 # @ stub FreeEncryptionCertificateHashList
 # @ stub FreeInheritedFromArray
@@ -540,8 +540,8 @@
 @ stdcall ReportEventA (long long long long ptr long long str ptr)
 @ stdcall ReportEventW (long long long long ptr long long wstr ptr)
 @ stdcall RevertToSelf()
-# @ stub SaferCloseLevel
-# @ stub SaferComputeTokenFromLevel
+@ stdcall SaferCloseLevel(ptr)
+@ stdcall SaferComputeTokenFromLevel(ptr ptr ptr long ptr)
 @ stdcall SaferCreateLevel(long long long ptr ptr)
 # @ stub SaferGetLevelInformation
 @ stdcall SaferGetPolicyInformation(long long long ptr ptr ptr)
@@ -637,7 +637,7 @@
 @ stdcall SystemFunction036(ptr long) # RtlGenRandom
 @ stdcall SystemFunction040(ptr long long) # RtlEncryptMemory
 @ stdcall SystemFunction041(ptr long long) # RtlDecryptMemory
-@ stdcall TraceEvent(double ptr)
+@ stdcall TraceEvent(int64 ptr)
 @ stub TraceEventInstance
 @ stub TraceMessage
 @ stub TraceMessageVa
@@ -648,7 +648,7 @@
 # @ stub UninstallApplication
 @ stdcall UnlockServiceDatabase (ptr)
 # @ stub UnregisterIdleTask
-@ stdcall UnregisterTraceGuids(double)
+@ stdcall UnregisterTraceGuids(int64)
 @ stub UpdateTraceA
 @ stub UpdateTraceW
 @ stub WdmWmiServiceMain

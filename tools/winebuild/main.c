@@ -142,13 +142,13 @@ static void set_dll_file_name( const char *name, DLLSPEC *spec )
 /* set the dll name from the file name */
 static void init_dll_name( DLLSPEC *spec )
 {
-    if (!spec->file_name)
+    if (!spec->file_name && output_file_name)
     {
         char *p;
         spec->file_name = xstrdup( output_file_name );
         if ((p = strrchr( spec->file_name, '.' ))) *p = 0;
     }
-    if (!spec->dll_name)  /* set default name from file name */
+    if (!spec->dll_name && spec->file_name)  /* set default name from file name */
     {
         char *p;
         spec->dll_name = xstrdup( spec->file_name );
@@ -243,7 +243,6 @@ static const char usage_str[] =
 "       --fake-module         Create a fake binary module\n"
 "   -h, --help                Display this help message\n"
 "   -H, --heap=SIZE           Set the heap size for a Win16 dll\n"
-"   -i, --ignore=SYM[,SYM]    Ignore specified symbols when resolving imports\n"
 "   -I DIR                    Ignored for C flags compatibility\n"
 "   -k, --kill-at             Kill stdcall decorations in generated .def files\n"
 "   -K, FLAGS                 Compiler flags (only -KPIC is supported)\n"
@@ -251,7 +250,7 @@ static const char usage_str[] =
 "       --ld-cmd=LD           Command to use for linking (default: ld)\n"
 "   -l, --library=LIB         Import the specified library\n"
 "   -L, --library-path=DIR    Look for imports libraries in DIR\n"
-"   -m32, -m64                Force building 32-bit resp. 64-bit code\n"
+"   -m16, -m32, -m64          Force building 16-bit, 32-bit resp. 64-bit code\n"
 "   -M, --main-module=MODULE  Set the name of the main module for a Win16 dll\n"
 "       --nm-cmd=NM           Command to use to get undefined symbols (default: nm)\n"
 "       --nxcompat=y|n        Set the NX compatibility flag (default: yes)\n"
@@ -291,7 +290,7 @@ enum long_options_values
     LONG_OPT_VERSION
 };
 
-static const char short_options[] = "C:D:E:F:H:I:K:L:M:N:b:d:e:f:hi:kl:m:o:r:u:vw";
+static const char short_options[] = "C:D:E:F:H:I:K:L:M:N:b:d:e:f:hkl:m:o:r:u:vw";
 
 static const struct option long_options[] =
 {
@@ -318,7 +317,6 @@ static const struct option long_options[] =
     { "filename",      1, 0, 'F' },
     { "help",          0, 0, 'h' },
     { "heap",          1, 0, 'H' },
-    { "ignore",        1, 0, 'i' },
     { "kill-at",       0, 0, 'k' },
     { "library",       1, 0, 'l' },
     { "library-path",  1, 0, 'L' },
@@ -382,9 +380,10 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             lib_path[nb_lib_paths++] = xstrdup( optarg );
             break;
         case 'm':
-            if (strcmp( optarg, "32" ) && strcmp( optarg, "64" ))
-                fatal_error( "Invalid -m option '%s', expected -m32 or -m64\n", optarg );
-            if (!strcmp( optarg, "32" )) force_pointer_size = 4;
+            if (strcmp( optarg, "16" ) && strcmp( optarg, "32" ) && strcmp( optarg, "64" ))
+                fatal_error( "Invalid -m option '%s', expected -m16, -m32 or -m64\n", optarg );
+            if (!strcmp( optarg, "16" )) spec->type = SPEC_WIN16;
+            else if (!strcmp( optarg, "32" )) force_pointer_size = 4;
             else force_pointer_size = 8;
             break;
         case 'M':
@@ -411,18 +410,6 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             break;
         case 'h':
             usage(0);
-            break;
-        case 'i':
-            {
-                char *str = xstrdup( optarg );
-                char *token = strtok( str, "," );
-                while (token)
-                {
-                    add_ignore_symbol( token );
-                    token = strtok( NULL, "," );
-                }
-                free( str );
-            }
             break;
         case 'k':
             kill_at = 1;

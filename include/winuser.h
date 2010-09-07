@@ -711,6 +711,7 @@ typedef struct tagWINDOWPLACEMENT
 #define BS_USERBUTTON          0x00000008L
 #define BS_AUTORADIOBUTTON     0x00000009L
 #define BS_OWNERDRAW           0x0000000BL
+#define BS_TYPEMASK            0x0000000FL
 #define BS_LEFTTEXT            0x00000020L
 #define BS_RIGHTBUTTON         BS_LEFTTEXT
 
@@ -1500,6 +1501,9 @@ WINUSERAPI BOOL     WINAPI SetSysColors(INT,const INT*,const COLORREF*);
 /* Used for EnumDisplaySettingsEx */
 #define ENUM_CURRENT_SETTINGS  ((DWORD) -1)
 #define ENUM_REGISTRY_SETTINGS ((DWORD) -2)
+
+#define EDS_RAWMODE       0x00000002
+#define EDS_ROTATEDMODE   0x00000004
 
 /* Used for PrintWindow */
 #define PW_CLIENTONLY   0x00000001

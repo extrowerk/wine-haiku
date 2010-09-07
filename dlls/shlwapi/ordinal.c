@@ -3246,29 +3246,72 @@ BOOL WINAPI PlaySoundWrapW(LPCWSTR pszSound, HMODULE hmod, DWORD fdwSound)
 
 /*************************************************************************
  *      @	[SHLWAPI.294]
+ *
+ * Retrieve a key value from an INI file.  See GetPrivateProfileString for
+ * more information.
+ *
+ * PARAMS
+ *  appName   [I] The section in the INI file that contains the key
+ *  keyName   [I] The key to be retrieved
+ *  out       [O] The buffer into which the key's value will be copied
+ *  outLen    [I] The length of the `out' buffer
+ *  filename  [I] The location of the INI file
+ *
+ * RETURNS
+ *  Length of string copied into `out'.
  */
-BOOL WINAPI SHGetIniStringW(LPCWSTR str1, LPCWSTR str2, LPWSTR pStr, DWORD some_len, LPCWSTR lpStr2)
+DWORD WINAPI SHGetIniStringW(LPCWSTR appName, LPCWSTR keyName, LPWSTR out,
+        DWORD outLen, LPCWSTR filename)
 {
-    FIXME("(%s,%s,%p,%08x,%s): stub!\n", debugstr_w(str1), debugstr_w(str2),
-        pStr, some_len, debugstr_w(lpStr2));
-    return TRUE;
+    INT ret;
+    WCHAR *buf;
+
+    TRACE("(%s,%s,%p,%08x,%s)\n", debugstr_w(appName), debugstr_w(keyName),
+        out, outLen, debugstr_w(filename));
+
+    if(outLen == 0)
+        return 0;
+
+    buf = HeapAlloc(GetProcessHeap(), 0, outLen * sizeof(WCHAR));
+    if(!buf){
+        *out = 0;
+        return 0;
+    }
+
+    ret = GetPrivateProfileStringW(appName, keyName, NULL, buf, outLen, filename);
+    if(ret)
+        strcpyW(out, buf);
+    else
+        *out = 0;
+
+    HeapFree(GetProcessHeap(), 0, buf);
+
+    return strlenW(out);
 }
 
 /*************************************************************************
  *      @	[SHLWAPI.295]
  *
- * Called by ICQ2000b install via SHDOCVW:
- * str1: "InternetShortcut"
- * x: some unknown pointer
- * str2: "http://free.aol.com/tryaolfree/index.adp?139269"
- * str3: "C:\\WINDOWS\\Desktop.new2\\Free AOL & Unlimited Internet.url"
+ * Set a key value in an INI file.  See WritePrivateProfileString for
+ * more information.
  *
- * In short: this one maybe creates a desktop link :-)
+ * PARAMS
+ *  appName   [I] The section in the INI file that contains the key
+ *  keyName   [I] The key to be set
+ *  str       [O] The value of the key
+ *  filename  [I] The location of the INI file
+ *
+ * RETURNS
+ *   Success: TRUE
+ *   Failure: FALSE
  */
-BOOL WINAPI SHSetIniStringW(LPWSTR str1, LPVOID x, LPWSTR str2, LPWSTR str3)
+BOOL WINAPI SHSetIniStringW(LPCWSTR appName, LPCWSTR keyName, LPCWSTR str,
+        LPCWSTR filename)
 {
-    FIXME("(%s, %p, %s, %s), stub.\n", debugstr_w(str1), x, debugstr_w(str2), debugstr_w(str3));
-    return TRUE;
+    TRACE("(%s, %p, %s, %s)\n", debugstr_w(appName), keyName, debugstr_w(str),
+            debugstr_w(filename));
+
+    return WritePrivateProfileStringW(appName, keyName, str, filename);
 }
 
 /*************************************************************************
@@ -3694,24 +3737,19 @@ BOOL WINAPI GetOpenFileNameWrapW(LPOPENFILENAMEW ofn)
  */
 HRESULT WINAPI SHIShellFolder_EnumObjects(LPSHELLFOLDER lpFolder, HWND hwnd, SHCONTF flags, IEnumIDList **ppenum)
 {
-    IPersist *persist;
-    HRESULT hr;
+    /* Windows attempts to get an IPersist interface and, if that fails, an
+     * IPersistFolder interface on the folder passed-in here.  If one of those
+     * interfaces is available, it then calls GetClassID on the folder... and
+     * then calls IShellFolder_EnumObjects no matter what, even crashing if
+     * lpFolder isn't actually an IShellFolder object.  The purpose of getting
+     * the ClassID is unknown, so we don't do it here.
+     *
+     * For discussion and detailed tests, see:
+     * "shlwapi: Be less strict on which type of IShellFolder can be enumerated"
+     * wine-devel mailing list, 3 Jun 2010
+     */
 
-    hr = IShellFolder_QueryInterface(lpFolder, &IID_IPersist, (LPVOID)&persist);
-    if(SUCCEEDED(hr))
-    {
-        CLSID clsid;
-        hr = IPersist_GetClassID(persist, &clsid);
-        if(SUCCEEDED(hr))
-        {
-            if(IsEqualCLSID(&clsid, &CLSID_ShellFSFolder))
-                hr = IShellFolder_EnumObjects(lpFolder, hwnd, flags, ppenum);
-            else
-                hr = E_FAIL;
-        }
-        IPersist_Release(persist);
-    }
-    return hr;
+    return IShellFolder_EnumObjects(lpFolder, hwnd, flags, ppenum);
 }
 
 /* INTERNAL: Map from HLS color space to RGB */
@@ -4363,12 +4401,42 @@ BOOL WINAPI SHSkipJunction(IBindCtx *pbc, const CLSID *pclsid)
 }
 
 /***********************************************************************
- *		SHGetShellKey (SHLWAPI.@)
+ *		SHGetShellKey (SHLWAPI.491)
  */
 HKEY WINAPI SHGetShellKey(DWORD flags, LPCWSTR sub_key, BOOL create)
 {
-    FIXME("(0x%08x, %s, %d): stub\n", flags, debugstr_w(sub_key), create);
-    return (HKEY)0x50;
+    enum _shellkey_flags {
+        SHKEY_Explorer  = 0x00,
+        SHKEY_Root_HKCU = 0x01
+    };
+
+    static const WCHAR explorerW[] = {'S','o','f','t','w','a','r','e','\\',
+        'M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\',
+        'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+        'E','x','p','l','o','r','e','r',0};
+    HKEY hroot, hkey = NULL;
+
+    TRACE("(0x%08x, %s, %d)\n", flags, debugstr_w(sub_key), create);
+
+    switch (flags)
+    {
+    case SHKEY_Explorer | SHKEY_Root_HKCU:
+        RegOpenKeyExW(HKEY_CURRENT_USER, explorerW, 0, MAXIMUM_ALLOWED, &hroot);
+        break;
+    case 0:
+        return NULL;
+    default:
+        FIXME("unsupported flags (0x%08x)\n", flags);
+        return (HKEY)0xdeadbeef;
+    }
+
+    if (create)
+        RegCreateKeyExW(hroot, sub_key, 0, NULL, 0, MAXIMUM_ALLOWED, NULL, &hkey, NULL);
+    else
+        RegOpenKeyExW(hroot, sub_key, 0, MAXIMUM_ALLOWED, &hkey);
+
+    RegCloseKey(hroot);
+    return hkey;
 }
 
 /***********************************************************************
@@ -4437,12 +4505,22 @@ HRESULT WINAPI IUnknown_OnFocusChangeIS(LPUNKNOWN lpUnknown, LPUNKNOWN pFocusObj
 }
 
 /***********************************************************************
- *		SHGetValueW (SHLWAPI.@)
+ *		SKGetValueW (SHLWAPI.516)
  */
-HRESULT WINAPI SKGetValueW(DWORD a, LPWSTR b, LPWSTR c, DWORD d, DWORD e, DWORD f)
+HRESULT WINAPI SKGetValueW(DWORD flags, LPCWSTR subkey, LPCWSTR value, DWORD *type,
+    void *data, DWORD *count)
 {
-    FIXME("(%x, %s, %s, %x, %x, %x): stub\n", a, debugstr_w(b), debugstr_w(c), d, e, f);
-    return E_FAIL;
+    DWORD ret;
+    HKEY hkey;
+
+    TRACE("(0x%x, %s, %s, %p, %p, %p)\n", flags, debugstr_w(subkey),
+        debugstr_w(value), type, data, count);
+
+    hkey = SHGetShellKey(flags, subkey, FALSE);
+    ret = SHQueryValueExW(hkey, value, NULL, type, data, count);
+    RegCloseKey(hkey);
+
+    return HRESULT_FROM_WIN32(ret);
 }
 
 typedef HRESULT (WINAPI *DllGetVersion_func)(DLLVERSIONINFO *);

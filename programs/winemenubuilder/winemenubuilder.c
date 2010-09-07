@@ -90,17 +90,13 @@
 #include <tlhelp32.h>
 #include <intshcut.h>
 #include <shlwapi.h>
+#include <initguid.h>
+#include <wincodec.h>
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/library.h"
 #include "wine/list.h"
-#include "wine.xpm"
-
-#ifdef HAVE_PNG_H
-#undef FAR
-#include <png.h>
-#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(menubuilder);
 
@@ -173,716 +169,9 @@ static char *xdg_data_dir;
 static char *xdg_desktop_dir;
 
 static WCHAR* assoc_query(ASSOCSTR assocStr, LPCWSTR name, LPCWSTR extra);
-static char *extract_icon(LPCWSTR path, int index, const char *destFilename, BOOL bWait);
+static HRESULT open_icon(LPCWSTR filename, int index, BOOL bWait, IStream **ppStream);
 
-/* Icon extraction routines
- *
- * FIXME: should use PrivateExtractIcons and friends
- * FIXME: should not use stdio
- */
-
-#define MASK(x,y) (pAND[(x) / 8 + (nHeight - (y) - 1) * nANDWidthBytes] & (1 << (7 - (x) % 8)))
-
-/* PNG-specific code */
-#ifdef SONAME_LIBPNG
-
-static void *libpng_handle;
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f
-MAKE_FUNCPTR(png_create_info_struct);
-MAKE_FUNCPTR(png_create_write_struct);
-MAKE_FUNCPTR(png_destroy_write_struct);
-MAKE_FUNCPTR(png_get_error_ptr);
-MAKE_FUNCPTR(png_init_io);
-MAKE_FUNCPTR(png_set_bgr);
-MAKE_FUNCPTR(png_set_error_fn);
-MAKE_FUNCPTR(png_set_text);
-MAKE_FUNCPTR(png_set_IHDR);
-MAKE_FUNCPTR(png_write_end);
-MAKE_FUNCPTR(png_write_info);
-MAKE_FUNCPTR(png_write_row);
-#undef MAKE_FUNCPTR
-
-static void *load_libpng(void)
-{
-    if ((libpng_handle = wine_dlopen(SONAME_LIBPNG, RTLD_NOW, NULL, 0)) != NULL)
-    {
-#define LOAD_FUNCPTR(f) \
-    if((p##f = wine_dlsym(libpng_handle, #f, NULL, 0)) == NULL) { \
-        libpng_handle = NULL; \
-        return NULL; \
-    }
-        LOAD_FUNCPTR(png_create_info_struct);
-        LOAD_FUNCPTR(png_create_write_struct);
-        LOAD_FUNCPTR(png_destroy_write_struct);
-        LOAD_FUNCPTR(png_get_error_ptr);
-        LOAD_FUNCPTR(png_init_io);
-        LOAD_FUNCPTR(png_set_bgr);
-        LOAD_FUNCPTR(png_set_error_fn);
-        LOAD_FUNCPTR(png_set_IHDR);
-        LOAD_FUNCPTR(png_set_text);
-        LOAD_FUNCPTR(png_write_end);
-        LOAD_FUNCPTR(png_write_info);
-        LOAD_FUNCPTR(png_write_row);
-#undef LOAD_FUNCPTR
-    }
-    return libpng_handle;
-}
-
-static void user_error_fn(png_structp png_ptr, png_const_charp error_message)
-{
-    jmp_buf *pjmpbuf;
-
-    /* This uses setjmp/longjmp just like the default. We can't use the
-     * default because there's no way to access the jmp buffer in the png_struct
-     * that works in 1.2 and 1.4 and allows us to dynamically load libpng. */
-    WINE_ERR("PNG error: %s\n", wine_dbgstr_an(error_message, -1));
-    pjmpbuf = ppng_get_error_ptr(png_ptr);
-    longjmp(*pjmpbuf, 1);
-}
-
-static void user_warning_fn(png_structp png_ptr, png_const_charp warning_message)
-{
-    WINE_WARN("PNG warning: %s\n", wine_dbgstr_an(warning_message, -1));
-}
-
-static BOOL SaveTrueColorIconResAsPNG(const BITMAPINFO *pIcon, const char *png_filename, LPCWSTR commentW)
-{
-    static const char comment_key[] = "Created from";
-    FILE *fp;
-    png_structp png_ptr;
-    png_infop info_ptr;
-    png_text comment;
-    int nXORWidthBytes, nANDWidthBytes, color_type = 0, i, j;
-    BYTE *row, *copy = NULL;
-    const BYTE *pXOR, *pAND = NULL;
-    int nWidth  = pIcon->bmiHeader.biWidth;
-    int nHeight = pIcon->bmiHeader.biHeight;
-    int nBpp    = pIcon->bmiHeader.biBitCount;
-    jmp_buf jmpbuf;
-
-    switch (nBpp)
-    {
-    case 32:
-        color_type |= PNG_COLOR_MASK_ALPHA;
-        /* fall through */
-    case 24:
-        color_type |= PNG_COLOR_MASK_COLOR;
-        break;
-    default:
-        return FALSE;
-    }
-
-    if (!libpng_handle && !load_libpng())
-    {
-        WINE_WARN("Unable to load libpng\n");
-        return FALSE;
-    }
-
-    if (!(fp = fopen(png_filename, "w")))
-    {
-        WINE_ERR("unable to open '%s' for writing: %s\n", png_filename, strerror(errno));
-        return FALSE;
-    }
-
-    nXORWidthBytes = 4 * ((nWidth * nBpp + 31) / 32);
-    nANDWidthBytes = 4 * ((nWidth + 31 ) / 32);
-    pXOR = (const BYTE*) pIcon + sizeof(BITMAPINFOHEADER) + pIcon->bmiHeader.biClrUsed * sizeof(RGBQUAD);
-    if (nHeight > nWidth)
-    {
-        nHeight /= 2;
-        pAND = pXOR + nHeight * nXORWidthBytes;
-    }
-
-    /* Apply mask if present */
-    if (pAND)
-    {
-        RGBQUAD bgColor;
-
-        /* copy bytes before modifying them */
-        copy = HeapAlloc( GetProcessHeap(), 0, nHeight * nXORWidthBytes );
-        memcpy( copy, pXOR, nHeight * nXORWidthBytes );
-        pXOR = copy;
-
-        /* image and mask are upside down reversed */
-        row = copy + (nHeight - 1) * nXORWidthBytes;
-
-        /* top left corner */
-        bgColor.rgbRed   = row[0];
-        bgColor.rgbGreen = row[1];
-        bgColor.rgbBlue  = row[2];
-        bgColor.rgbReserved = 0;
-
-        for (i = 0; i < nHeight; i++, row -= nXORWidthBytes)
-            for (j = 0; j < nWidth; j++, row += nBpp >> 3)
-                if (MASK(j, i))
-                {
-                    RGBQUAD *pixel = (RGBQUAD *)row;
-                    pixel->rgbBlue  = bgColor.rgbBlue;
-                    pixel->rgbGreen = bgColor.rgbGreen;
-                    pixel->rgbRed   = bgColor.rgbRed;
-                    if (nBpp == 32)
-                        pixel->rgbReserved = bgColor.rgbReserved;
-                }
-    }
-
-    comment.text = NULL;
-
-    if (!(png_ptr = ppng_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL)) ||
-        !(info_ptr = ppng_create_info_struct(png_ptr)))
-        goto error;
-
-    if (setjmp(jmpbuf))
-    {
-        /* All future errors jump here */
-        goto error;
-    }
-    ppng_set_error_fn(png_ptr, &jmpbuf, user_error_fn, user_warning_fn);
-
-    ppng_init_io(png_ptr, fp);
-    ppng_set_IHDR(png_ptr, info_ptr, nWidth, nHeight, 8,
-                  color_type,
-                  PNG_INTERLACE_NONE,
-                  PNG_COMPRESSION_TYPE_DEFAULT,
-                  PNG_FILTER_TYPE_DEFAULT);
-
-    /* Set comment */
-    comment.compression = PNG_TEXT_COMPRESSION_NONE;
-    comment.key = (png_charp)comment_key;
-    i = WideCharToMultiByte(CP_UNIXCP, 0, commentW, -1, NULL, 0, NULL, NULL);
-    comment.text = HeapAlloc(GetProcessHeap(), 0, i);
-    WideCharToMultiByte(CP_UNIXCP, 0, commentW, -1, comment.text, i, NULL, NULL);
-    comment.text_length = i - 1;
-    ppng_set_text(png_ptr, info_ptr, &comment, 1);
-
-
-    ppng_write_info(png_ptr, info_ptr);
-    ppng_set_bgr(png_ptr);
-    for (i = nHeight - 1; i >= 0 ; i--)
-        ppng_write_row(png_ptr, (png_bytep)pXOR + nXORWidthBytes * i);
-    ppng_write_end(png_ptr, info_ptr);
-
-    ppng_destroy_write_struct(&png_ptr, &info_ptr);
-    if (png_ptr) ppng_destroy_write_struct(&png_ptr, NULL);
-    fclose(fp);
-    HeapFree(GetProcessHeap(), 0, copy);
-    HeapFree(GetProcessHeap(), 0, comment.text);
-    return TRUE;
-
- error:
-    if (png_ptr) ppng_destroy_write_struct(&png_ptr, NULL);
-    fclose(fp);
-    unlink(png_filename);
-    HeapFree(GetProcessHeap(), 0, copy);
-    HeapFree(GetProcessHeap(), 0, comment.text);
-    return FALSE;
-}
-
-static BOOL SavePalettedIconResAsPNG(const BITMAPINFO *pIcon, const char *png_filename, LPCWSTR commentW)
-{
-    static const char comment_key[] = "Created from";
-    FILE *pngFile = NULL;
-    int i, j;
-    int nHeight;
-    int nXORWidthBytes;
-    int nANDWidthBytes;
-    BOOL b8BitColors;
-    int nColors;
-    const BYTE *pXOR;
-    const BYTE *pAND;
-    png_structp png_ptr;
-    png_infop info_ptr;
-    png_text comment;
-    jmp_buf jmpbuf;
-    unsigned char *row = NULL;
-    BOOL ret = FALSE;
-
-    comment.text = NULL;
-
-    if (!((pIcon->bmiHeader.biBitCount == 4) || (pIcon->bmiHeader.biBitCount == 8)))
-    {
-        WINE_FIXME("Unsupported color depth %d-bit\n", pIcon->bmiHeader.biBitCount);
-        goto done;
-    }
-
-    if (!(pngFile = fopen(png_filename, "w")))
-    {
-        WINE_TRACE("Unable to open '%s' for writing: %s\n", png_filename, strerror(errno));
-        goto done;
-    }
-
-    nHeight = pIcon->bmiHeader.biHeight / 2;
-    nXORWidthBytes = 4 * ((pIcon->bmiHeader.biWidth * pIcon->bmiHeader.biBitCount / 32)
-                          + ((pIcon->bmiHeader.biWidth * pIcon->bmiHeader.biBitCount % 32) > 0));
-    nANDWidthBytes = 4 * ((pIcon->bmiHeader.biWidth / 32)
-                          + ((pIcon->bmiHeader.biWidth % 32) > 0));
-    b8BitColors = pIcon->bmiHeader.biBitCount == 8;
-    nColors = pIcon->bmiHeader.biClrUsed ? pIcon->bmiHeader.biClrUsed
-        : 1 << pIcon->bmiHeader.biBitCount;
-    pXOR = (const BYTE*) pIcon + sizeof (BITMAPINFOHEADER) + (nColors * sizeof (RGBQUAD));
-    pAND = pXOR + nHeight * nXORWidthBytes;
-
-    row = HeapAlloc(GetProcessHeap(), 0, 4 * pIcon->bmiHeader.biWidth);
-    if (row == NULL)
-    {
-        WINE_ERR("out of memory\n");
-        goto done;
-    }
-
-    if (!libpng_handle && !load_libpng())
-    {
-        WINE_WARN("Unable to load libpng\n");
-        goto done;
-    }
-
-    if (!(png_ptr = ppng_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL)) ||
-        !(info_ptr = ppng_create_info_struct(png_ptr)))
-        goto done;
-
-    if (setjmp(jmpbuf))
-    {
-        /* All future errors jump here */
-        goto done;
-    }
-    ppng_set_error_fn(png_ptr, &jmpbuf, user_error_fn, user_warning_fn);
-
-    ppng_init_io(png_ptr, pngFile);
-    ppng_set_IHDR(png_ptr, info_ptr, pIcon->bmiHeader.biWidth, nHeight, 8,
-                  PNG_COLOR_TYPE_RGB_ALPHA,
-                  PNG_INTERLACE_NONE,
-                  PNG_COMPRESSION_TYPE_DEFAULT,
-                  PNG_FILTER_TYPE_DEFAULT);
-
-    /* Set comment */
-    comment.compression = PNG_TEXT_COMPRESSION_NONE;
-    comment.key = (png_charp)comment_key;
-    i = WideCharToMultiByte(CP_UNIXCP, 0, commentW, -1, NULL, 0, NULL, NULL);
-    comment.text = HeapAlloc(GetProcessHeap(), 0, i);
-    if (comment.text == NULL)
-    {
-        WINE_ERR("out of memory\n");
-        goto done;
-    }
-    WideCharToMultiByte(CP_UNIXCP, 0, commentW, -1, comment.text, i, NULL, NULL);
-    comment.text_length = i - 1;
-    ppng_set_text(png_ptr, info_ptr, &comment, 1);
-
-    ppng_write_info(png_ptr, info_ptr);
-    for (i = 0; i < nHeight; i++)
-    {
-        unsigned char *p = row;
-        for (j = 0; j < pIcon->bmiHeader.biWidth; j++)
-        {
-            if MASK(j,i)
-            {
-                *p++ = 0;
-                *p++ = 0;
-                *p++ = 0;
-                *p++ = 0;
-            }
-            else
-            {
-#define COLOR(x,y) (b8BitColors ? pXOR[(x) + (nHeight - (y) - 1) * nXORWidthBytes] : (x) % 2 ? pXOR[(x) / 2 + (nHeight - (y) - 1) * nXORWidthBytes] & 0xF : (pXOR[(x) / 2 + (nHeight - (y) - 1) * nXORWidthBytes] & 0xF0) >> 4)
-                *p++ = pIcon->bmiColors[COLOR(j,i)].rgbRed;
-                *p++ = pIcon->bmiColors[COLOR(j,i)].rgbGreen;
-                *p++ = pIcon->bmiColors[COLOR(j,i)].rgbBlue;
-                *p++ = 0xFF;
-#undef COLOR
-            }
-        }
-        ppng_write_row(png_ptr, (png_bytep)row);
-    }
-    ppng_write_end(png_ptr, info_ptr);
-    ret = TRUE;
-
-done:
-    ppng_destroy_write_struct(&png_ptr, &info_ptr);
-    if (pngFile != NULL)
-        fclose(pngFile);
-    HeapFree(GetProcessHeap(), 0, comment.text);
-    HeapFree(GetProcessHeap(), 0, row);
-    return ret;
-}
-
-static BOOL SaveIconResAsPNG(const BITMAPINFO *pIcon, const char *png_filename, LPCWSTR commentW)
-{
-    switch (pIcon->bmiHeader.biBitCount)
-    {
-    case 4:
-    case 8:
-        return SavePalettedIconResAsPNG(pIcon, png_filename, commentW);
-    case 24:
-    case 32:
-        return SaveTrueColorIconResAsPNG(pIcon, png_filename, commentW);
-    default:
-        WINE_FIXME("unsupported bpp %d, please report\n", pIcon->bmiHeader.biBitCount);
-        return FALSE;
-    }
-}
-#endif /* SONAME_LIBPNG */
-
-static BOOL SaveIconResAsXPM(const BITMAPINFO *pIcon, const char *szXPMFileName, LPCWSTR commentW)
-{
-    FILE *fXPMFile;
-    int nHeight;
-    int nXORWidthBytes;
-    int nANDWidthBytes;
-    BOOL b8BitColors;
-    int nColors;
-    const BYTE *pXOR;
-    const BYTE *pAND;
-    BOOL aColorUsed[256] = {0};
-    int nColorsUsed = 0;
-    int i,j;
-    char *comment;
-
-    if (!((pIcon->bmiHeader.biBitCount == 4) || (pIcon->bmiHeader.biBitCount == 8)))
-    {
-        WINE_FIXME("Unsupported color depth %d-bit\n", pIcon->bmiHeader.biBitCount);
-        return FALSE;
-    }
-
-    if (!(fXPMFile = fopen(szXPMFileName, "w")))
-    {
-        WINE_TRACE("unable to open '%s' for writing: %s\n", szXPMFileName, strerror(errno));
-        return FALSE;
-    }
-
-    i = WideCharToMultiByte(CP_UNIXCP, 0, commentW, -1, NULL, 0, NULL, NULL);
-    comment = HeapAlloc(GetProcessHeap(), 0, i);
-    WideCharToMultiByte(CP_UNIXCP, 0, commentW, -1, comment, i, NULL, NULL);
-
-    nHeight = pIcon->bmiHeader.biHeight / 2;
-    nXORWidthBytes = 4 * ((pIcon->bmiHeader.biWidth * pIcon->bmiHeader.biBitCount / 32)
-                          + ((pIcon->bmiHeader.biWidth * pIcon->bmiHeader.biBitCount % 32) > 0));
-    nANDWidthBytes = 4 * ((pIcon->bmiHeader.biWidth / 32)
-                          + ((pIcon->bmiHeader.biWidth % 32) > 0));
-    b8BitColors = pIcon->bmiHeader.biBitCount == 8;
-    nColors = pIcon->bmiHeader.biClrUsed ? pIcon->bmiHeader.biClrUsed
-        : 1 << pIcon->bmiHeader.biBitCount;
-    pXOR = (const BYTE*) pIcon + sizeof (BITMAPINFOHEADER) + (nColors * sizeof (RGBQUAD));
-    pAND = pXOR + nHeight * nXORWidthBytes;
-
-#define COLOR(x,y) (b8BitColors ? pXOR[(x) + (nHeight - (y) - 1) * nXORWidthBytes] : (x) % 2 ? pXOR[(x) / 2 + (nHeight - (y) - 1) * nXORWidthBytes] & 0xF : (pXOR[(x) / 2 + (nHeight - (y) - 1) * nXORWidthBytes] & 0xF0) >> 4)
-
-    for (i = 0; i < nHeight; i++) {
-        for (j = 0; j < pIcon->bmiHeader.biWidth; j++) {
-            if (!aColorUsed[COLOR(j,i)] && !MASK(j,i))
-            {
-                aColorUsed[COLOR(j,i)] = TRUE;
-                nColorsUsed++;
-            }
-        }
-    }
-
-    if (fprintf(fXPMFile, "/* XPM */\n/* %s */\nstatic char *icon[] = {\n", comment) <= 0)
-        goto error;
-    if (fprintf(fXPMFile, "\"%d %d %d %d\",\n",
-                (int) pIcon->bmiHeader.biWidth, nHeight, nColorsUsed + 1, 2) <=0)
-        goto error;
-
-    for (i = 0; i < nColors; i++) {
-        if (aColorUsed[i])
-            if (fprintf(fXPMFile, "\"%.2X c #%.2X%.2X%.2X\",\n", i, pIcon->bmiColors[i].rgbRed,
-                        pIcon->bmiColors[i].rgbGreen, pIcon->bmiColors[i].rgbBlue) <= 0)
-                goto error;
-    }
-    if (fprintf(fXPMFile, "\"   c None\"") <= 0)
-        goto error;
-
-    for (i = 0; i < nHeight; i++)
-    {
-        if (fprintf(fXPMFile, ",\n\"") <= 0)
-            goto error;
-        for (j = 0; j < pIcon->bmiHeader.biWidth; j++)
-        {
-            if MASK(j,i)
-                {
-                    if (fprintf(fXPMFile, "  ") <= 0)
-                        goto error;
-                }
-            else
-                if (fprintf(fXPMFile, "%.2X", COLOR(j,i)) <= 0)
-                    goto error;
-        }
-        if (fprintf(fXPMFile, "\"") <= 0)
-            goto error;
-    }
-    if (fprintf(fXPMFile, "};\n") <= 0)
-        goto error;
-
-#undef MASK
-#undef COLOR
-
-    HeapFree(GetProcessHeap(), 0, comment);
-    fclose(fXPMFile);
-    return TRUE;
-
- error:
-    HeapFree(GetProcessHeap(), 0, comment);
-    fclose(fXPMFile);
-    unlink( szXPMFileName );
-    return FALSE;
-}
-
-static BOOL CALLBACK EnumResNameProc(HMODULE hModule, LPCWSTR lpszType, LPWSTR lpszName, LONG_PTR lParam)
-{
-    ENUMRESSTRUCT *sEnumRes = (ENUMRESSTRUCT *) lParam;
-
-    if (!sEnumRes->nIndex--)
-    {
-        *sEnumRes->pResInfo = FindResourceW(hModule, lpszName, (LPCWSTR)RT_GROUP_ICON);
-        return FALSE;
-    }
-    else
-        return TRUE;
-}
-
-static BOOL extract_icon32(LPCWSTR szFileName, int nIndex, char *szXPMFileName)
-{
-    HMODULE hModule;
-    HRSRC hResInfo;
-    LPCWSTR lpName = NULL;
-    HGLOBAL hResData;
-    GRPICONDIR *pIconDir;
-    BITMAPINFO *pIcon;
-    ENUMRESSTRUCT sEnumRes;
-    int nMax = 0;
-    int nMaxBits = 0;
-    int i;
-    BOOL ret = FALSE;
-
-    hModule = LoadLibraryExW(szFileName, 0, LOAD_LIBRARY_AS_DATAFILE);
-    if (!hModule)
-    {
-        WINE_WARN("LoadLibraryExW (%s) failed, error %d\n",
-                 wine_dbgstr_w(szFileName), GetLastError());
-        return FALSE;
-    }
-
-    if (nIndex < 0)
-    {
-        hResInfo = FindResourceW(hModule, MAKEINTRESOURCEW(-nIndex), (LPCWSTR)RT_GROUP_ICON);
-        WINE_TRACE("FindResourceW (%s) called, return %p, error %d\n",
-                   wine_dbgstr_w(szFileName), hResInfo, GetLastError());
-    }
-    else
-    {
-        hResInfo=NULL;
-        sEnumRes.pResInfo = &hResInfo;
-        sEnumRes.nIndex = nIndex;
-        if (!EnumResourceNamesW(hModule, (LPCWSTR)RT_GROUP_ICON,
-                                EnumResNameProc, (LONG_PTR)&sEnumRes) &&
-            sEnumRes.nIndex != -1)
-        {
-            WINE_TRACE("EnumResourceNamesW failed, error %d\n", GetLastError());
-        }
-    }
-
-    if (hResInfo)
-    {
-        if ((hResData = LoadResource(hModule, hResInfo)))
-        {
-            if ((pIconDir = LockResource(hResData)))
-            {
-                for (i = 0; i < pIconDir->idCount; i++)
-                {
-		    if (pIconDir->idEntries[i].wBitCount >= nMaxBits)
-		    {
-			if ((pIconDir->idEntries[i].bHeight * pIconDir->idEntries[i].bWidth) >= nMax)
-			{
-			    lpName = MAKEINTRESOURCEW(pIconDir->idEntries[i].nID);
-			    nMax = pIconDir->idEntries[i].bHeight * pIconDir->idEntries[i].bWidth;
-			    nMaxBits = pIconDir->idEntries[i].wBitCount;
-			}
-		    }		    
-                }
-            }
-
-            FreeResource(hResData);
-        }
-    }
-    else
-    {
-        WINE_WARN("found no icon\n");
-        FreeLibrary(hModule);
-        return FALSE;
-    }
- 
-    if ((hResInfo = FindResourceW(hModule, lpName, (LPCWSTR)RT_ICON)))
-    {
-        if ((hResData = LoadResource(hModule, hResInfo)))
-        {
-            if ((pIcon = LockResource(hResData)))
-            {
-#ifdef SONAME_LIBPNG
-                if (SaveIconResAsPNG(pIcon, szXPMFileName, szFileName))
-                    ret = TRUE;
-                else
-#endif
-                {
-                    memcpy(szXPMFileName + strlen(szXPMFileName) - 3, "xpm", 3);
-                    if (SaveIconResAsXPM(pIcon, szXPMFileName, szFileName))
-                        ret = TRUE;
-                }
-            }
-
-            FreeResource(hResData);
-        }
-    }
-
-    FreeLibrary(hModule);
-    return ret;
-}
-
-static BOOL ExtractFromEXEDLL(LPCWSTR szFileName, int nIndex, char *szXPMFileName)
-{
-    if (!extract_icon32(szFileName, nIndex, szXPMFileName) /*&&
-        !extract_icon16(szFileName, szXPMFileName)*/)
-        return FALSE;
-    return TRUE;
-}
-
-static int ExtractFromICO(LPCWSTR szFileName, char *szXPMFileName)
-{
-    FILE *fICOFile = NULL;
-    ICONDIR iconDir;
-    ICONDIRENTRY *pIconDirEntry = NULL;
-    int nMax = 0, nMaxBits = 0;
-    int nIndex = 0;
-    void *pIcon = NULL;
-    int i;
-    char *filename = NULL;
-
-    filename = wine_get_unix_file_name(szFileName);
-    if (!(fICOFile = fopen(filename, "r")))
-    {
-        WINE_TRACE("unable to open '%s' for reading: %s\n", filename, strerror(errno));
-        goto error;
-    }
-
-    if (fread(&iconDir, sizeof (ICONDIR), 1, fICOFile) != 1 ||
-        (iconDir.idReserved != 0) || (iconDir.idType != 1))
-    {
-        WINE_WARN("Invalid ico file format\n");
-        goto error;
-    }
-
-    if ((pIconDirEntry = HeapAlloc(GetProcessHeap(), 0, iconDir.idCount * sizeof (ICONDIRENTRY))) == NULL)
-        goto error;
-    if (fread(pIconDirEntry, sizeof (ICONDIRENTRY), iconDir.idCount, fICOFile) != iconDir.idCount)
-        goto error;
-
-    for (i = 0; i < iconDir.idCount; i++)
-    {
-        WINE_TRACE("[%d]: %d x %d @ %d\n", i, pIconDirEntry[i].bWidth, pIconDirEntry[i].bHeight, pIconDirEntry[i].wBitCount);
-        if (pIconDirEntry[i].wBitCount >= nMaxBits &&
-            (pIconDirEntry[i].bHeight * pIconDirEntry[i].bWidth) >= nMax)
-        {
-            nIndex = i;
-            nMax = pIconDirEntry[i].bHeight * pIconDirEntry[i].bWidth;
-            nMaxBits = pIconDirEntry[i].wBitCount;
-        }
-    }
-    WINE_TRACE("Selected: %d\n", nIndex);
-
-    if ((pIcon = HeapAlloc(GetProcessHeap(), 0, pIconDirEntry[nIndex].dwBytesInRes)) == NULL)
-        goto error;
-    if (fseek(fICOFile, pIconDirEntry[nIndex].dwImageOffset, SEEK_SET))
-        goto error;
-    if (fread(pIcon, pIconDirEntry[nIndex].dwBytesInRes, 1, fICOFile) != 1)
-        goto error;
-
-
-    /* Prefer PNG over XPM */
-#ifdef SONAME_LIBPNG
-    if (!SaveIconResAsPNG(pIcon, szXPMFileName, szFileName))
-#endif
-    {
-        memcpy(szXPMFileName + strlen(szXPMFileName) - 3, "xpm", 3);
-        if (!SaveIconResAsXPM(pIcon, szXPMFileName, szFileName))
-            goto error;
-    }
-
-    HeapFree(GetProcessHeap(), 0, pIcon);
-    HeapFree(GetProcessHeap(), 0, pIconDirEntry);
-    fclose(fICOFile);
-    HeapFree(GetProcessHeap(), 0, filename);
-    return 1;
-
- error:
-    HeapFree(GetProcessHeap(), 0, pIcon);
-    HeapFree(GetProcessHeap(), 0, pIconDirEntry);
-    if (fICOFile) fclose(fICOFile);
-    HeapFree(GetProcessHeap(), 0, filename);
-    return 0;
-}
-
-static int ExtractFromFileType(LPCWSTR szFileName, char *szXPMFileName)
-{
-    int ret = 0;
-    WCHAR *extension;
-    WCHAR *icon = NULL;
-    WCHAR *comma;
-    WCHAR *executable = NULL;
-    int index = 0;
-    char *output_path = NULL;
-
-    extension = strrchrW(szFileName, '.');
-    if (extension == NULL)
-        goto end;
-
-    icon = assoc_query(ASSOCSTR_DEFAULTICON, extension, NULL);
-    if (icon)
-    {
-        comma = strrchrW(icon, ',');
-        if (comma)
-        {
-            *comma = 0;
-            index = atoiW(comma + 1);
-        }
-        output_path = extract_icon(icon, index, NULL, FALSE);
-        WINE_TRACE("defaulticon %s -> icon %s\n", wine_dbgstr_w(icon), wine_dbgstr_a(output_path));
-    }
-    else
-    {
-        executable = assoc_query(ASSOCSTR_EXECUTABLE, extension, NULL);
-        if (executable)
-            output_path = extract_icon(executable, 0, NULL, FALSE);
-        WINE_TRACE("executable %s -> icon %s\n", wine_dbgstr_w(executable), wine_dbgstr_a(output_path));
-    }
-    if (output_path)
-        ret = (rename(output_path, szXPMFileName) == 0);
-
-end:
-    HeapFree(GetProcessHeap(), 0, icon);
-    HeapFree(GetProcessHeap(), 0, executable);
-    HeapFree(GetProcessHeap(), 0, output_path);
-    return ret;
-}
-
-static BOOL create_default_icon( const char *filename, const char* comment )
-{
-    FILE *fXPM;
-    unsigned int i;
-
-    if (!(fXPM = fopen(filename, "w"))) return FALSE;
-    if (fprintf(fXPM, "/* XPM */\n/* %s */\nstatic char * icon[] = {", comment) <= 0)
-        goto error;
-    for (i = 0; i < sizeof(wine_xpm)/sizeof(wine_xpm[0]); i++) {
-        if (fprintf( fXPM, "\n\"%s\",", wine_xpm[i]) <= 0)
-            goto error;
-    }
-    if (fprintf( fXPM, "};\n" ) <=0)
-        goto error;
-    fclose( fXPM );
-    return TRUE;
- error:
-    fclose( fXPM );
-    unlink( filename );
-    return FALSE;
-
-}
-
+/* Utility routines */
 static unsigned short crc16(const char* string)
 {
     unsigned short crc = 0;
@@ -1010,13 +299,486 @@ static WCHAR* utf8_chars_to_wchars(LPCSTR string)
     return ret;
 }
 
+/* Icon extraction routines
+ *
+ * FIXME: should use PrivateExtractIcons and friends
+ * FIXME: should not use stdio
+ */
+
+static HRESULT convert_to_native_icon(IStream *icoFile, int *indeces, int numIndeces,
+                                      const CLSID *outputFormat, const char *outputFileName, LPCWSTR commentW)
+{
+    WCHAR *dosOutputFileName = NULL;
+    IWICImagingFactory *factory = NULL;
+    IWICBitmapDecoder *decoder = NULL;
+    IWICBitmapEncoder *encoder = NULL;
+    IStream *outputFile = NULL;
+    int i;
+    HRESULT hr = E_FAIL;
+
+    dosOutputFileName = wine_get_dos_file_name(outputFileName);
+    if (dosOutputFileName == NULL)
+    {
+        WINE_ERR("error converting %s to DOS file name\n", outputFileName);
+        goto end;
+    }
+    hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+        &IID_IWICImagingFactory, (void**)&factory);
+    if (FAILED(hr))
+    {
+        WINE_ERR("error 0x%08X creating IWICImagingFactory\n", hr);
+        goto end;
+    }
+    hr = IWICImagingFactory_CreateDecoderFromStream(factory, icoFile, NULL,
+        WICDecodeMetadataCacheOnDemand, &decoder);
+    if (FAILED(hr))
+    {
+        WINE_ERR("error 0x%08X creating IWICBitmapDecoder\n", hr);
+        goto end;
+    }
+    hr = CoCreateInstance(outputFormat, NULL, CLSCTX_INPROC_SERVER,
+        &IID_IWICBitmapEncoder, (void**)&encoder);
+    if (FAILED(hr))
+    {
+        WINE_ERR("error 0x%08X creating bitmap encoder\n", hr);
+        goto end;
+    }
+    hr = SHCreateStreamOnFileW(dosOutputFileName, STGM_CREATE | STGM_WRITE, &outputFile);
+    if (FAILED(hr))
+    {
+        WINE_ERR("error 0x%08X creating output file\n", hr);
+        goto end;
+    }
+    hr = IWICBitmapEncoder_Initialize(encoder, outputFile, GENERIC_WRITE);
+    if (FAILED(hr))
+    {
+        WINE_ERR("error 0x%08X initializing encoder\n", hr);
+        goto end;
+    }
+
+    for (i = 0; i < numIndeces; i++)
+    {
+        IWICBitmapFrameDecode *sourceFrame = NULL;
+        IWICBitmapSource *sourceBitmap = NULL;
+        IWICBitmapFrameEncode *dstFrame = NULL;
+        IPropertyBag2 *options = NULL;
+        UINT width, height;
+
+        hr = IWICBitmapDecoder_GetFrame(decoder, indeces[i], &sourceFrame);
+        if (FAILED(hr))
+        {
+            WINE_ERR("error 0x%08X getting frame %d\n", hr, indeces[i]);
+            goto endloop;
+        }
+        hr = WICConvertBitmapSource(&GUID_WICPixelFormat32bppBGRA, (IWICBitmapSource*)sourceFrame, &sourceBitmap);
+        if (FAILED(hr))
+        {
+            WINE_ERR("error 0x%08X converting bitmap to 32bppBGRA\n", hr);
+            goto endloop;
+        }
+        hr = IWICBitmapEncoder_CreateNewFrame(encoder, &dstFrame, &options);
+        if (FAILED(hr))
+        {
+            WINE_ERR("error 0x%08X creating encoder frame\n", hr);
+            goto endloop;
+        }
+        hr = IWICBitmapFrameEncode_Initialize(dstFrame, options);
+        if (FAILED(hr))
+        {
+            WINE_ERR("error 0x%08X initializing encoder frame\n", hr);
+            goto endloop;
+        }
+        hr = IWICBitmapSource_GetSize(sourceBitmap, &width, &height);
+        if (FAILED(hr))
+        {
+            WINE_ERR("error 0x%08X getting source bitmap size\n", hr);
+            goto endloop;
+        }
+        hr = IWICBitmapFrameEncode_SetSize(dstFrame, width, height);
+        if (FAILED(hr))
+        {
+            WINE_ERR("error 0x%08X setting destination bitmap size\n", hr);
+            goto endloop;
+        }
+        hr = IWICBitmapFrameEncode_SetResolution(dstFrame, 96, 96);
+        if (FAILED(hr))
+        {
+            WINE_ERR("error 0x%08X setting destination bitmap resolution\n", hr);
+            goto endloop;
+        }
+        hr = IWICBitmapFrameEncode_WriteSource(dstFrame, sourceBitmap, NULL);
+        if (FAILED(hr))
+        {
+            WINE_ERR("error 0x%08X copying bitmaps\n", hr);
+            goto endloop;
+        }
+        hr = IWICBitmapFrameEncode_Commit(dstFrame);
+        if (FAILED(hr))
+        {
+            WINE_ERR("error 0x%08X committing frame\n", hr);
+            goto endloop;
+        }
+    endloop:
+        if (sourceFrame)
+            IWICBitmapFrameDecode_Release(sourceFrame);
+        if (sourceBitmap)
+            IWICBitmapSource_Release(sourceBitmap);
+        if (dstFrame)
+            IWICBitmapFrameEncode_Release(dstFrame);
+    }
+
+    hr = IWICBitmapEncoder_Commit(encoder);
+    if (FAILED(hr))
+    {
+        WINE_ERR("error 0x%08X committing encoder\n", hr);
+        goto end;
+    }
+
+end:
+    HeapFree(GetProcessHeap(), 0, dosOutputFileName);
+    if (factory)
+        IWICImagingFactory_Release(factory);
+    if (decoder)
+        IWICBitmapDecoder_Release(decoder);
+    if (encoder)
+        IWICBitmapEncoder_Release(encoder);
+    if (outputFile)
+        IStream_Release(outputFile);
+    return hr;
+}
+
+static IStream *add_module_icons_to_stream(HMODULE hModule, GRPICONDIR *grpIconDir)
+{
+    int i;
+    SIZE_T iconsSize = 0;
+    BYTE *icons = NULL;
+    ICONDIRENTRY *iconDirEntries = NULL;
+    IStream *stream = NULL;
+    HRESULT hr = E_FAIL;
+    ULONG bytesWritten;
+    ICONDIR iconDir;
+    SIZE_T iconOffset;
+    int validEntries = 0;
+    LARGE_INTEGER zero;
+
+    for (i = 0; i < grpIconDir->idCount; i++)
+        iconsSize += grpIconDir->idEntries[i].dwBytesInRes;
+    icons = HeapAlloc(GetProcessHeap(), 0, iconsSize);
+    if (icons == NULL)
+    {
+        WINE_ERR("out of memory allocating icon\n");
+        goto end;
+    }
+
+    iconDirEntries = HeapAlloc(GetProcessHeap(), 0, grpIconDir->idCount*sizeof(ICONDIRENTRY));
+    if (iconDirEntries == NULL)
+    {
+        WINE_ERR("out of memory allocating icon dir entries\n");
+        goto end;
+    }
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    if (FAILED(hr))
+    {
+        WINE_ERR("error creating icon stream\n");
+        goto end;
+    }
+
+    iconOffset = 0;
+    for (i = 0; i < grpIconDir->idCount; i++)
+    {
+        HRSRC hResInfo;
+        LPCWSTR lpName = MAKEINTRESOURCEW(grpIconDir->idEntries[i].nID);
+        if ((hResInfo = FindResourceW(hModule, lpName, (LPCWSTR)RT_ICON)))
+        {
+            HGLOBAL hResData;
+            if ((hResData = LoadResource(hModule, hResInfo)))
+            {
+                BITMAPINFO *pIcon;
+                if ((pIcon = LockResource(hResData)))
+                {
+                    iconDirEntries[validEntries].bWidth = grpIconDir->idEntries[i].bWidth;
+                    iconDirEntries[validEntries].bHeight = grpIconDir->idEntries[i].bHeight;
+                    iconDirEntries[validEntries].bColorCount = grpIconDir->idEntries[i].bColorCount;
+                    iconDirEntries[validEntries].bReserved = grpIconDir->idEntries[i].bReserved;
+                    iconDirEntries[validEntries].wPlanes = grpIconDir->idEntries[i].wPlanes;
+                    iconDirEntries[validEntries].wBitCount = grpIconDir->idEntries[i].wBitCount;
+                    iconDirEntries[validEntries].dwBytesInRes = grpIconDir->idEntries[i].dwBytesInRes;
+                    iconDirEntries[validEntries].dwImageOffset = iconOffset;
+                    validEntries++;
+                    memcpy(&icons[iconOffset], pIcon, grpIconDir->idEntries[i].dwBytesInRes);
+                    iconOffset += grpIconDir->idEntries[i].dwBytesInRes;
+                }
+                FreeResource(hResData);
+            }
+        }
+    }
+
+    if (validEntries == 0)
+    {
+        WINE_ERR("no valid icon entries\n");
+        goto end;
+    }
+
+    iconDir.idReserved = 0;
+    iconDir.idType = 1;
+    iconDir.idCount = validEntries;
+    hr = IStream_Write(stream, &iconDir, sizeof(iconDir), &bytesWritten);
+    if (FAILED(hr) || bytesWritten != sizeof(iconDir))
+    {
+        WINE_ERR("error 0x%08X writing icon stream\n", hr);
+        goto end;
+    }
+    for (i = 0; i < validEntries; i++)
+        iconDirEntries[i].dwImageOffset += sizeof(ICONDIR) + validEntries*sizeof(ICONDIRENTRY);
+    hr = IStream_Write(stream, iconDirEntries, validEntries*sizeof(ICONDIRENTRY), &bytesWritten);
+    if (FAILED(hr) || bytesWritten != validEntries*sizeof(ICONDIRENTRY))
+    {
+        WINE_ERR("error 0x%08X writing icon dir entries to stream\n", hr);
+        goto end;
+    }
+    hr = IStream_Write(stream, icons, iconOffset, &bytesWritten);
+    if (FAILED(hr) || bytesWritten != iconOffset)
+    {
+        WINE_ERR("error 0x%08X writing icon images to stream\n", hr);
+        goto end;
+    }
+    zero.QuadPart = 0;
+    hr = IStream_Seek(stream, zero, STREAM_SEEK_SET, NULL);
+
+end:
+    HeapFree(GetProcessHeap(), 0, icons);
+    HeapFree(GetProcessHeap(), 0, iconDirEntries);
+    if (FAILED(hr) && stream != NULL)
+    {
+        IStream_Release(stream);
+        stream = NULL;
+    }
+    return stream;
+}
+
+static BOOL CALLBACK EnumResNameProc(HMODULE hModule, LPCWSTR lpszType, LPWSTR lpszName, LONG_PTR lParam)
+{
+    ENUMRESSTRUCT *sEnumRes = (ENUMRESSTRUCT *) lParam;
+
+    if (!sEnumRes->nIndex--)
+    {
+        *sEnumRes->pResInfo = FindResourceW(hModule, lpszName, (LPCWSTR)RT_GROUP_ICON);
+        return FALSE;
+    }
+    else
+        return TRUE;
+}
+
+static HRESULT open_module_icon(LPCWSTR szFileName, int nIndex, IStream **ppStream)
+{
+    HMODULE hModule;
+    HRSRC hResInfo;
+    HGLOBAL hResData;
+    GRPICONDIR *pIconDir;
+    ENUMRESSTRUCT sEnumRes;
+    HRESULT hr = E_FAIL;
+
+    hModule = LoadLibraryExW(szFileName, 0, LOAD_LIBRARY_AS_DATAFILE);
+    if (!hModule)
+    {
+        WINE_WARN("LoadLibraryExW (%s) failed, error %d\n",
+                 wine_dbgstr_w(szFileName), GetLastError());
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    if (nIndex < 0)
+    {
+        hResInfo = FindResourceW(hModule, MAKEINTRESOURCEW(-nIndex), (LPCWSTR)RT_GROUP_ICON);
+        WINE_TRACE("FindResourceW (%s) called, return %p, error %d\n",
+                   wine_dbgstr_w(szFileName), hResInfo, GetLastError());
+    }
+    else
+    {
+        hResInfo=NULL;
+        sEnumRes.pResInfo = &hResInfo;
+        sEnumRes.nIndex = nIndex;
+        if (!EnumResourceNamesW(hModule, (LPCWSTR)RT_GROUP_ICON,
+                                EnumResNameProc, (LONG_PTR)&sEnumRes) &&
+            sEnumRes.nIndex != -1)
+        {
+            WINE_TRACE("EnumResourceNamesW failed, error %d\n", GetLastError());
+        }
+    }
+
+    if (hResInfo)
+    {
+        if ((hResData = LoadResource(hModule, hResInfo)))
+        {
+            if ((pIconDir = LockResource(hResData)))
+            {
+                *ppStream = add_module_icons_to_stream(hModule, pIconDir);
+                if (*ppStream)
+                    hr = S_OK;
+            }
+
+            FreeResource(hResData);
+        }
+    }
+    else
+    {
+        WINE_WARN("found no icon\n");
+        FreeLibrary(hModule);
+        return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    }
+
+    FreeLibrary(hModule);
+    return hr;
+}
+
+static HRESULT read_ico_direntries(IStream *icoStream, ICONDIRENTRY **ppIconDirEntries, int *numEntries)
+{
+    ICONDIR iconDir;
+    ULONG bytesRead;
+    HRESULT hr;
+
+    *ppIconDirEntries = NULL;
+
+    hr = IStream_Read(icoStream, &iconDir, sizeof(ICONDIR), &bytesRead);
+    if (FAILED(hr) || bytesRead != sizeof(ICONDIR) ||
+        (iconDir.idReserved != 0) || (iconDir.idType != 1))
+    {
+        WINE_WARN("Invalid ico file format (hr=0x%08X, bytesRead=%d)\n", hr, bytesRead);
+        hr = E_FAIL;
+        goto end;
+    }
+    *numEntries = iconDir.idCount;
+
+    if ((*ppIconDirEntries = HeapAlloc(GetProcessHeap(), 0, sizeof(ICONDIRENTRY)*iconDir.idCount)) == NULL)
+    {
+        hr = E_OUTOFMEMORY;
+        goto end;
+    }
+    hr = IStream_Read(icoStream, *ppIconDirEntries, sizeof(ICONDIRENTRY)*iconDir.idCount, &bytesRead);
+    if (FAILED(hr) || bytesRead != sizeof(ICONDIRENTRY)*iconDir.idCount)
+    {
+        if (SUCCEEDED(hr)) hr = E_FAIL;
+        goto end;
+    }
+
+end:
+    if (FAILED(hr))
+        HeapFree(GetProcessHeap(), 0, *ppIconDirEntries);
+    return hr;
+}
+
+static HRESULT write_native_icon(IStream *iconStream, const char *icon_name, LPCWSTR szFileName)
+{
+    ICONDIRENTRY *pIconDirEntry = NULL;
+    int numEntries;
+    int nMax = 0, nMaxBits = 0;
+    int nIndex = 0;
+    int i;
+    LARGE_INTEGER position;
+    HRESULT hr;
+
+    hr = read_ico_direntries(iconStream, &pIconDirEntry, &numEntries);
+    if (FAILED(hr))
+        goto end;
+
+    for (i = 0; i < numEntries; i++)
+    {
+        WINE_TRACE("[%d]: %d x %d @ %d\n", i, pIconDirEntry[i].bWidth, pIconDirEntry[i].bHeight, pIconDirEntry[i].wBitCount);
+        if (pIconDirEntry[i].wBitCount >= nMaxBits &&
+            (pIconDirEntry[i].bHeight * pIconDirEntry[i].bWidth) >= nMax)
+        {
+            nIndex = i;
+            nMax = pIconDirEntry[i].bHeight * pIconDirEntry[i].bWidth;
+            nMaxBits = pIconDirEntry[i].wBitCount;
+        }
+    }
+    WINE_TRACE("Selected: %d\n", nIndex);
+
+    position.QuadPart = 0;
+    hr = IStream_Seek(iconStream, position, STREAM_SEEK_SET, NULL);
+    if (FAILED(hr))
+        goto end;
+    hr = convert_to_native_icon(iconStream, &nIndex, 1, &CLSID_WICPngEncoder, icon_name, szFileName);
+
+end:
+    HeapFree(GetProcessHeap(), 0, pIconDirEntry);
+    return hr;
+}
+
+static HRESULT open_file_type_icon(LPCWSTR szFileName, IStream **ppStream)
+{
+    WCHAR *extension;
+    WCHAR *icon = NULL;
+    WCHAR *comma;
+    WCHAR *executable = NULL;
+    int index = 0;
+    char *output_path = NULL;
+    HRESULT hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+
+    extension = strrchrW(szFileName, '.');
+    if (extension == NULL)
+        goto end;
+
+    icon = assoc_query(ASSOCSTR_DEFAULTICON, extension, NULL);
+    if (icon)
+    {
+        comma = strrchrW(icon, ',');
+        if (comma)
+        {
+            *comma = 0;
+            index = atoiW(comma + 1);
+        }
+        hr = open_icon(icon, index, FALSE, ppStream);
+    }
+    else
+    {
+        executable = assoc_query(ASSOCSTR_EXECUTABLE, extension, NULL);
+        if (executable)
+            hr = open_icon(executable, 0, FALSE, ppStream);
+    }
+
+end:
+    HeapFree(GetProcessHeap(), 0, icon);
+    HeapFree(GetProcessHeap(), 0, executable);
+    HeapFree(GetProcessHeap(), 0, output_path);
+    return hr;
+}
+
+static HRESULT open_default_icon(IStream **ppStream)
+{
+    static const WCHAR user32W[] = {'u','s','e','r','3','2',0};
+
+    return open_module_icon(user32W, -(INT_PTR)IDI_WINLOGO, ppStream);
+}
+
+static HRESULT open_icon(LPCWSTR filename, int index, BOOL bWait, IStream **ppStream)
+{
+    HRESULT hr;
+
+    hr = open_module_icon(filename, index, ppStream);
+    if (FAILED(hr))
+    {
+        static const WCHAR dot_icoW[] = {'.','i','c','o',0};
+        int len = strlenW(filename);
+        if (len >= 4 && strcmpiW(&filename[len - 4], dot_icoW) == 0)
+            hr = SHCreateStreamOnFileW(filename, STGM_READ, ppStream);
+    }
+    if (FAILED(hr))
+        hr = open_file_type_icon(filename, ppStream);
+    if (FAILED(hr) && !bWait)
+        hr = open_default_icon(ppStream);
+    return hr;
+}
+
 /* extract an icon from an exe or icon file; helper for IPersistFile_fnSave */
 static char *extract_icon( LPCWSTR path, int index, const char *destFilename, BOOL bWait )
 {
     unsigned short crc;
-    char *iconsdir = NULL, *ico_path = NULL, *ico_name, *xpm_path = NULL;
+    char *iconsdir = NULL, *ico_path = NULL, *ico_name, *png_path = NULL;
     char* s;
     int n;
+    IStream *stream = NULL;
+    HRESULT hr;
 
     /* Where should we save the icon? */
     WINE_TRACE("path=[%s] index=%d\n", wine_dbgstr_w(path), index);
@@ -1056,46 +818,37 @@ static char *extract_icon( LPCWSTR path, int index, const char *destFilename, BO
     /* Compute the source-path hash */
     crc=crc16(ico_path);
 
-    /* Try to treat the source file as an exe */
     if (destFilename)
-        xpm_path=heap_printf("%s/%s.png",iconsdir,destFilename);
+        png_path=heap_printf("%s/%s.png",iconsdir,destFilename);
     else
-        xpm_path=heap_printf("%s/%04x_%s.%d.png",iconsdir,crc,ico_name,index);
-    if (xpm_path == NULL)
+        png_path=heap_printf("%s/%04x_%s.%d.png",iconsdir,crc,ico_name,index);
+    if (png_path == NULL)
     {
         WINE_ERR("could not extract icon %s, out of memory\n", wine_dbgstr_a(ico_name));
         return NULL;
     }
 
-    if (ExtractFromEXEDLL( path, index, xpm_path ))
-        goto end;
-
-    /* Must be something else, ignore the index in that case */
-    if (destFilename)
-        sprintf(xpm_path,"%s/%s.png",iconsdir,destFilename);
-    else
-        sprintf(xpm_path,"%s/%04x_%s.png",iconsdir,crc,ico_name);
-    if (ExtractFromICO( path, xpm_path))
-        goto end;
-    if (ExtractFromFileType( path, xpm_path ))
-        goto end;
-    if (!bWait)
+    hr = open_icon( path, index, bWait, &stream );
+    if (SUCCEEDED(hr))
     {
-        if (destFilename)
-            sprintf(xpm_path,"%s/%s.xpm",iconsdir,destFilename);
-        else
-            sprintf(xpm_path,"%s/%04x_%s.xpm",iconsdir,crc,ico_name);
-        if (create_default_icon( xpm_path, ico_path ))
+        hr = write_native_icon( stream, png_path, path );
+        if (SUCCEEDED(hr))
             goto end;
+        else
+            WINE_ERR("writing native icon for %s index %d failed, hr=0x%08X\n", wine_dbgstr_w(path), index, hr);
     }
+    else
+        WINE_WARN("extracting icon %s index %d failed, hr=0x%08X\n", wine_dbgstr_w(path), index, hr);
 
-    HeapFree( GetProcessHeap(), 0, xpm_path );
-    xpm_path=NULL;
+    HeapFree( GetProcessHeap(), 0, png_path );
+    png_path=NULL;
 
  end:
     HeapFree(GetProcessHeap(), 0, iconsdir);
     HeapFree(GetProcessHeap(), 0, ico_path);
-    return xpm_path;
+    if (stream)
+        IStream_Release(stream);
+    return png_path;
 }
 
 static HKEY open_menus_reg_key(void)
@@ -2794,13 +2547,6 @@ static BOOL Process_Link( LPCWSTR linkname, BOOL bWait )
         return 1;
     }
 
-    r = CoInitialize( NULL );
-    if( FAILED( r ) )
-    {
-        WINE_ERR("CoInitialize failed\n");
-        return 1;
-    }
-
     r = CoCreateInstance( &CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
                           &IID_IShellLinkW, (LPVOID *) &sl );
     if( FAILED( r ) )
@@ -2836,8 +2582,6 @@ static BOOL Process_Link( LPCWSTR linkname, BOOL bWait )
     IPersistFile_Release( pf );
     IShellLinkW_Release( sl );
 
-    CoUninitialize();
-
     return !r;
 }
 
@@ -2861,13 +2605,6 @@ static BOOL Process_URL( LPCWSTR urlname, BOOL bWait )
     if (len==0 || len>MAX_PATH)
     {
         WINE_ERR("couldn't get full path of URL file\n");
-        return 1;
-    }
-
-    r = CoInitialize( NULL );
-    if( FAILED( r ) )
-    {
-        WINE_ERR("CoInitialize failed\n");
         return 1;
     }
 
@@ -2900,8 +2637,6 @@ static BOOL Process_URL( LPCWSTR urlname, BOOL bWait )
 
     IPersistFile_Release( pf );
     url->lpVtbl->Release( url );
-
-    CoUninitialize();
 
     return !r;
 }
@@ -3044,6 +2779,103 @@ static void cleanup_menus(void)
         WINE_ERR("error opening registry key, menu cleanup failed\n");
 }
 
+static void thumbnail_lnk(LPCWSTR lnkPath, LPCWSTR outputPath)
+{
+    char *utf8lnkPath = NULL;
+    char *utf8OutputPath = NULL;
+    WCHAR *winLnkPath = NULL;
+    IShellLinkW *shellLink = NULL;
+    IPersistFile *persistFile = NULL;
+    WCHAR szTmp[MAX_PATH];
+    WCHAR szPath[MAX_PATH];
+    WCHAR szArgs[INFOTIPSIZE];
+    WCHAR szIconPath[MAX_PATH];
+    int iconId;
+    IStream *stream = NULL;
+    HRESULT hr;
+
+    utf8lnkPath = wchars_to_utf8_chars(lnkPath);
+    if (utf8lnkPath == NULL)
+    {
+        WINE_ERR("out of memory converting paths\n");
+        goto end;
+    }
+
+    utf8OutputPath = wchars_to_utf8_chars(outputPath);
+    if (utf8OutputPath == NULL)
+    {
+        WINE_ERR("out of memory converting paths\n");
+        goto end;
+    }
+
+    winLnkPath = wine_get_dos_file_name(utf8lnkPath);
+    if (winLnkPath == NULL)
+    {
+        WINE_ERR("could not convert %s to DOS path\n", utf8lnkPath);
+        goto end;
+    }
+
+    hr = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
+                          &IID_IShellLinkW, (LPVOID*)&shellLink);
+    if (FAILED(hr))
+    {
+        WINE_ERR("could not create IShellLinkW, error 0x%08X\n", hr);
+        goto end;
+    }
+
+    hr = IShellLinkW_QueryInterface(shellLink, &IID_IPersistFile, (LPVOID)&persistFile);
+    if (FAILED(hr))
+    {
+        WINE_ERR("could not query IPersistFile, error 0x%08X\n", hr);
+        goto end;
+    }
+
+    hr = IPersistFile_Load(persistFile, winLnkPath, STGM_READ);
+    if (FAILED(hr))
+    {
+        WINE_ERR("could not read .lnk, error 0x%08X\n", hr);
+        goto end;
+    }
+
+    get_cmdline(shellLink, szTmp, MAX_PATH, szArgs, INFOTIPSIZE);
+    ExpandEnvironmentStringsW(szTmp, szPath, MAX_PATH);
+    szTmp[0] = 0;
+    IShellLinkW_GetIconLocation(shellLink, szTmp, MAX_PATH, &iconId);
+    ExpandEnvironmentStringsW(szTmp, szIconPath, MAX_PATH);
+
+    if(!szPath[0])
+    {
+        LPITEMIDLIST pidl = NULL;
+        IShellLinkW_GetIDList(shellLink, &pidl);
+        if (pidl && SHGetPathFromIDListW(pidl, szPath))
+            WINE_TRACE("pidl path  : %s\n", wine_dbgstr_w(szPath));
+    }
+
+    if (szIconPath[0])
+    {
+        hr = open_icon(szIconPath, iconId, FALSE, &stream);
+        if (SUCCEEDED(hr))
+            hr = write_native_icon(stream, utf8OutputPath, NULL);
+    }
+    else
+    {
+        hr = open_icon(szPath, iconId, FALSE, &stream);
+        if (SUCCEEDED(hr))
+            hr = write_native_icon(stream, utf8OutputPath, NULL);
+    }
+
+end:
+    HeapFree(GetProcessHeap(), 0, utf8lnkPath);
+    HeapFree(GetProcessHeap(), 0, utf8OutputPath);
+    HeapFree(GetProcessHeap(), 0, winLnkPath);
+    if (shellLink != NULL)
+        IShellLinkW_Release(shellLink);
+    if (persistFile != NULL)
+        IPersistFile_Release(persistFile);
+    if (stream != NULL)
+        IStream_Release(stream);
+}
+
 static WCHAR *next_token( LPWSTR *p )
 {
     LPWSTR token = NULL, t = *p;
@@ -3129,16 +2961,25 @@ int PASCAL wWinMain (HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sh
 {
     static const WCHAR dash_aW[] = {'-','a',0};
     static const WCHAR dash_rW[] = {'-','r',0};
+    static const WCHAR dash_tW[] = {'-','t',0};
     static const WCHAR dash_uW[] = {'-','u',0};
     static const WCHAR dash_wW[] = {'-','w',0};
 
     LPWSTR token = NULL, p;
     BOOL bWait = FALSE;
     BOOL bURL = FALSE;
+    HRESULT hr;
     int ret = 0;
 
     if (!init_xdg())
         return 1;
+
+    hr = CoInitialize(NULL);
+    if (FAILED(hr))
+    {
+        WINE_ERR("could not initialize COM, error 0x%08X\n", hr);
+        return 1;
+    }
 
     for( p = cmdline; p && *p; )
     {
@@ -3159,6 +3000,16 @@ int PASCAL wWinMain (HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sh
             bWait = TRUE;
         else if ( !strcmpW( token, dash_uW ) )
             bURL = TRUE;
+        else if ( !strcmpW( token, dash_tW ) )
+        {
+            WCHAR *lnkFile = next_token( &p );
+            if (lnkFile)
+            {
+                 WCHAR *outputFile = next_token( &p );
+                 if (outputFile)
+                     thumbnail_lnk(lnkFile, outputFile);
+            }
+        }
 	else if( token[0] == '-' )
 	{
 	    WINE_ERR( "unknown option %s\n", wine_dbgstr_w(token) );
@@ -3179,5 +3030,6 @@ int PASCAL wWinMain (HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sh
         }
     }
 
+    CoUninitialize();
     return ret;
 }

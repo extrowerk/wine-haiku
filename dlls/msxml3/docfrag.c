@@ -27,7 +27,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
-#include "msxml2.h"
+#include "msxml6.h"
 
 #include "msxml_private.h"
 
@@ -58,14 +58,15 @@ static HRESULT WINAPI domfrag_QueryInterface(
     TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppvObject);
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMDocumentFragment ) ||
+         IsEqualGUID( riid, &IID_IXMLDOMNode ) ||
          IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
         *ppvObject = iface;
     }
-    else if ( IsEqualGUID( riid, &IID_IXMLDOMNode ) )
+    else if(node_query_interface(&This->node, riid, ppvObject))
     {
-        *ppvObject = IXMLDOMNode_from_impl(&This->node);
+        return *ppvObject ? S_OK : E_NOINTERFACE;
     }
     else
     {
@@ -182,23 +183,37 @@ static HRESULT WINAPI domfrag_get_nodeName(
     BSTR* p )
 {
     domfrag *This = impl_from_IXMLDOMDocumentFragment( iface );
-    return IXMLDOMNode_get_nodeName( IXMLDOMNode_from_impl(&This->node), p );
+
+    static const WCHAR document_fragmentW[] =
+        {'#','d','o','c','u','m','e','n','t','-','f','r','a','g','m','e','n','t',0};
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return return_bstr(document_fragmentW, p);
 }
 
 static HRESULT WINAPI domfrag_get_nodeValue(
     IXMLDOMDocumentFragment *iface,
-    VARIANT* var1 )
+    VARIANT* value)
 {
     domfrag *This = impl_from_IXMLDOMDocumentFragment( iface );
-    return IXMLDOMNode_get_nodeValue( IXMLDOMNode_from_impl(&This->node), var1 );
+
+    FIXME("(%p)->(%p)\n", This, value);
+
+    if(!value)
+        return E_INVALIDARG;
+
+    V_VT(value) = VT_NULL;
+    return S_FALSE;
 }
 
 static HRESULT WINAPI domfrag_put_nodeValue(
     IXMLDOMDocumentFragment *iface,
-    VARIANT var1 )
+    VARIANT value)
 {
     domfrag *This = impl_from_IXMLDOMDocumentFragment( iface );
-    return IXMLDOMNode_put_nodeValue( IXMLDOMNode_from_impl(&This->node), var1 );
+    FIXME("(%p)->(v%d)\n", This, V_VT(&value));
+    return E_FAIL;
 }
 
 static HRESULT WINAPI domfrag_get_nodeType(
@@ -206,7 +221,11 @@ static HRESULT WINAPI domfrag_get_nodeType(
     DOMNodeType* domNodeType )
 {
     domfrag *This = impl_from_IXMLDOMDocumentFragment( iface );
-    return IXMLDOMNode_get_nodeType( IXMLDOMNode_from_impl(&This->node), domNodeType );
+
+    TRACE("(%p)->(%p)\n", This, domNodeType);
+
+    *domNodeType = NODE_DOCUMENT_FRAGMENT;
+    return S_OK;
 }
 
 static HRESULT WINAPI domfrag_get_parentNode(
@@ -214,7 +233,10 @@ static HRESULT WINAPI domfrag_get_parentNode(
     IXMLDOMNode** parent )
 {
     domfrag *This = impl_from_IXMLDOMDocumentFragment( iface );
-    return IXMLDOMNode_get_parentNode( IXMLDOMNode_from_impl(&This->node), parent );
+
+    TRACE("(%p)->(%p)\n", This, parent);
+
+    return node_get_parent(&This->node, parent);
 }
 
 static HRESULT WINAPI domfrag_get_childNodes(
@@ -526,7 +548,7 @@ IUnknown* create_doc_fragment( xmlNodePtr fragment )
     This->lpVtbl = &domfrag_vtbl;
     This->ref = 1;
 
-    init_xmlnode(&This->node, fragment, (IUnknown*)&This->lpVtbl, NULL);
+    init_xmlnode(&This->node, fragment, (IXMLDOMNode*)&This->lpVtbl, NULL);
 
     return (IUnknown*) &This->lpVtbl;
 }

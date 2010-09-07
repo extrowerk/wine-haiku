@@ -526,6 +526,9 @@ typedef DWORD FLONG;
 #define PROCESSOR_ARCHITECTURE_AMD64    9
 #define PROCESSOR_ARCHITECTURE_UNKNOWN	0xFFFF
 
+/* Wine extension */
+#define PROCESSOR_ARCHITECTURE_SPARC    20
+
 /* dwProcessorType */
 #define PROCESSOR_INTEL_386      386
 #define PROCESSOR_INTEL_486      486
@@ -2692,6 +2695,9 @@ typedef struct _IMAGE_VXD_HEADER {
 #define	IMAGE_FILE_MACHINE_M32R		0x9041
 #define	IMAGE_FILE_MACHINE_CEE		0xc0ee
 
+/* Wine extension */
+#define	IMAGE_FILE_MACHINE_SPARC	0x2000
+
 #define	IMAGE_SIZEOF_FILE_HEADER		20
 #define IMAGE_SIZEOF_ROM_OPTIONAL_HEADER	56
 #define IMAGE_SIZEOF_STD_OPTIONAL_HEADER	28
@@ -3800,6 +3806,12 @@ typedef PVOID PACCESS_TOKEN;
 typedef PVOID PSECURITY_DESCRIPTOR;
 typedef PVOID PSID;
 
+typedef enum _TOKEN_ELEVATION_TYPE {
+  TokenElevationTypeDefault = 1,
+  TokenElevationTypeFull,
+  TokenElevationTypeLimited
+} TOKEN_ELEVATION_TYPE, *PTOKEN_ELEVATION_TYPE;
+
 /*
  * TOKEN_INFORMATION_CLASS
  */
@@ -4361,7 +4373,7 @@ typedef struct _TOKEN_DEFAULT_DACL {
 } TOKEN_DEFAULT_DACL, *PTOKEN_DEFAULT_DACL;
 
 /*
- * TOKEN_SOURCEL
+ * TOKEN_SOURCE
  */
 
 #define TOKEN_SOURCE_LENGTH 8
@@ -4425,6 +4437,32 @@ typedef struct _TOKEN_STATISTICS {
   LUID  ModifiedId;
 } TOKEN_STATISTICS;
 #include <poppack.h>
+
+typedef struct _TOKEN_GROUPS_AND_PRIVILEGES {
+  DWORD                 SidCount;
+  DWORD                 SidLength;
+  PSID_AND_ATTRIBUTES   Sids;
+  DWORD                 RestrictedSidCount;
+  DWORD                 RestrictedSidLength;
+  PSID_AND_ATTRIBUTES   RestrictedSids;
+  DWORD                 PrivilegeCount;
+  DWORD                 PrivilegeLength;
+  PLUID_AND_ATTRIBUTES  Privileges;
+  LUID                  AuthenticationId;
+} TOKEN_GROUPS_AND_PRIVILEGES, * PTOKEN_GROUPS_AND_PRIVILEGES;
+
+typedef struct _TOKEN_ORIGIN {
+  LUID  OriginatingLogonSession;
+} TOKEN_ORIGIN, * PTOKEN_ORIGIN;
+
+typedef struct _TOKEN_LINKED_TOKEN {
+  HANDLE LinkedToken;
+} TOKEN_LINKED_TOKEN, * PTOKEN_LINKED_TOKEN;
+
+typedef struct _TOKEN_ELEVATION {
+  DWORD TokenIsElevated;
+} TOKEN_ELEVATION, * PTOKEN_ELEVATION;
+
 
 /*
  *	ACLs of NT
@@ -5475,6 +5513,114 @@ typedef enum _JOBOBJECTINFOCLASS
     JobObjectJobSetInformation,
     MaxJobObjectInfoClass
 } JOBOBJECTINFOCLASS;
+
+typedef enum _LOGICAL_PROCESSOR_RELATIONSHIP
+{
+    RelationProcessorCore    = 0,
+    RelationNumaNode         = 1,
+    RelationCache            = 2,
+    RelationProcessorPackage = 3,
+    RelationGroup            = 4,
+    RelationAll              = 0xffff
+} LOGICAL_PROCESSOR_RELATIONSHIP;
+
+typedef enum _PROCESSOR_CACHE_TYPE
+{
+    CacheUnified,
+    CacheInstruction,
+    CacheData,
+    CacheTrace
+} PROCESSOR_CACHE_TYPE;
+
+typedef struct _PROCESSOR_GROUP_INFO
+{
+    BYTE MaximumProcessorCount;
+    BYTE ActiveProcessorCount;
+    BYTE Reserved[38];
+    KAFFINITY ActiveProcessorMask;
+} PROCESSOR_GROUP_INFO, *PPROCESSOR_GROUP_INFO;
+
+typedef struct _CACHE_DESCRIPTOR
+{
+    BYTE Level;
+    BYTE Associativity;
+    WORD LineSize;
+    DWORD Size;
+    PROCESSOR_CACHE_TYPE Type;
+} CACHE_DESCRIPTOR, *PCACHE_DESCRIPTOR;
+
+typedef struct _GROUP_AFFINITY
+{
+    KAFFINITY Mask;
+    WORD Group;
+    WORD Reserved[3];
+} GROUP_AFFINITY, *PGROUP_AFFINITY;
+
+typedef struct _PROCESSOR_RELATIONSHIP
+{
+    BYTE Flags;
+    BYTE Reserved[21];
+    WORD GroupCount;
+    GROUP_AFFINITY GroupMask[ANYSIZE_ARRAY];
+} PROCESSOR_RELATIONSHIP, *PPROCESSOR_RELATIONSHIP;
+
+
+typedef struct _NUMA_NODE_RELATIONSHIP
+{
+    DWORD NodeNumber;
+    BYTE Reserved[20];
+    GROUP_AFFINITY GroupMask;
+} NUMA_NODE_RELATIONSHIP, *PNUMA_NODE_RELATIONSHIP;
+
+typedef struct _CACHE_RELATIONSHIP
+{
+    BYTE Level;
+    BYTE Associativity;
+    WORD LineSize;
+    PROCESSOR_CACHE_TYPE Type;
+    BYTE Reserved[20];
+    GROUP_AFFINITY GroupMask;
+} CACHE_RELATIONSHIP, *PCACHE_RELATIONSHIP;
+
+typedef struct _GROUP_RELATIONSHIP
+{
+    WORD MaximumGroupCount;
+    WORD ActiveGroupCount;
+    BYTE Reserved[20];
+    PROCESSOR_GROUP_INFO GroupInfo[ANYSIZE_ARRAY];
+} GROUP_RELATIONSHIP, *PGROUP_RELATIONSHIP;
+
+typedef struct _SYSTEM_LOGICAL_PROCESSOR_INFORMATION
+{
+    ULONG_PTR ProcessorMask;
+    LOGICAL_PROCESSOR_RELATIONSHIP Relationship;
+    union
+    {
+        struct
+        {
+            BYTE Flags;
+        } ProcessorCore;
+        struct
+        {
+            DWORD NodeNumber;
+        } NumaNode;
+        CACHE_DESCRIPTOR Cache;
+        ULONGLONG Reserved[2];
+    } DUMMYUNIONNAME;
+} SYSTEM_LOGICAL_PROCESSOR_INFORMATION, *PSYSTEM_LOGICAL_PROCESSOR_INFORMATION;
+
+typedef struct _SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX
+{
+    LOGICAL_PROCESSOR_RELATIONSHIP Relationship;
+    DWORD Size;
+    union
+    {
+        PROCESSOR_RELATIONSHIP Processor;
+        NUMA_NODE_RELATIONSHIP NumaNode;
+        CACHE_RELATIONSHIP Cache;
+        GROUP_RELATIONSHIP Group;
+    } DUMMYUNIONNAME;
+} SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX, *PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
 
 NTSYSAPI BOOLEAN NTAPI RtlGetProductInfo(DWORD,DWORD,DWORD,DWORD,PDWORD);
 

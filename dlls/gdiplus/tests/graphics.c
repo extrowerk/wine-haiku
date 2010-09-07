@@ -230,6 +230,139 @@ static void test_save_restore(void)
     ReleaseDC(hwnd, hdc);
 }
 
+static void test_GdipFillClosedCurve2(void)
+{
+    GpStatus status;
+    GpGraphics *graphics = NULL;
+    GpSolidFill *brush = NULL;
+    HDC hdc = GetDC( hwnd );
+    GpPointF points[3];
+
+    points[0].X = 0;
+    points[0].Y = 0;
+
+    points[1].X = 40;
+    points[1].Y = 20;
+
+    points[2].X = 10;
+    points[2].Y = 40;
+
+    /* make a graphics object and brush object */
+    ok(hdc != NULL, "Expected HDC to be initialized\n");
+
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+    ok(graphics != NULL, "Expected graphics to be initialized\n");
+
+    GdipCreateSolidFill((ARGB)0xdeadbeef, &brush);
+
+    /* InvalidParameter cases: null graphics, null brush, null points */
+    status = GdipFillClosedCurve2(NULL, NULL, NULL, 3, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve2(graphics, NULL, NULL, 3, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve2(NULL, (GpBrush*)brush, NULL, 3, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve2(NULL, NULL, points, 3, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve2(graphics, (GpBrush*)brush, NULL, 3, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve2(graphics, NULL, points, 3, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve2(NULL, (GpBrush*)brush, points, 3, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    /* InvalidParameter cases: invalid count */
+    status = GdipFillClosedCurve2(graphics, (GpBrush*)brush, points, -1, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve2(graphics, (GpBrush*)brush, points, 0, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    /* Valid test cases */
+    status = GdipFillClosedCurve2(graphics, (GpBrush*)brush, points, 1, 0.5, FillModeAlternate);
+    expect(Ok, status);
+
+    status = GdipFillClosedCurve2(graphics, (GpBrush*)brush, points, 2, 0.5, FillModeAlternate);
+    expect(Ok, status);
+
+    status = GdipFillClosedCurve2(graphics, (GpBrush*)brush, points, 3, 0.5, FillModeAlternate);
+    expect(Ok, status);
+
+    GdipDeleteGraphics(graphics);
+    GdipDeleteBrush((GpBrush*)brush);
+
+    ReleaseDC(hwnd, hdc);
+}
+
+static void test_GdipFillClosedCurve2I(void)
+{
+    GpStatus status;
+    GpGraphics *graphics = NULL;
+    GpSolidFill *brush = NULL;
+    HDC hdc = GetDC( hwnd );
+    GpPoint points[3];
+
+    points[0].X = 0;
+    points[0].Y = 0;
+
+    points[1].X = 40;
+    points[1].Y = 20;
+
+    points[2].X = 10;
+    points[2].Y = 40;
+
+    /* make a graphics object and brush object */
+    ok(hdc != NULL, "Expected HDC to be initialized\n");
+
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+    ok(graphics != NULL, "Expected graphics to be initialized\n");
+
+    GdipCreateSolidFill((ARGB)0xdeadbeef, &brush);
+
+    /* InvalidParameter cases: null graphics, null brush */
+    /* Note: GdipFillClosedCurveI and GdipFillClosedCurve2I hang in Windows
+             when points == NULL, so don't test this condition */
+    status = GdipFillClosedCurve2I(NULL, NULL, points, 3, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve2I(graphics, NULL, points, 3, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve2I(NULL, (GpBrush*)brush, points, 3, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    /* InvalidParameter cases: invalid count */
+    status = GdipFillClosedCurve2I(graphics, (GpBrush*)brush, points, 0, 0.5, FillModeAlternate);
+    expect(InvalidParameter, status);
+
+    /* OutOfMemory cases: large (unsigned) int */
+    status = GdipFillClosedCurve2I(graphics, (GpBrush*)brush, points, -1, 0.5, FillModeAlternate);
+    expect(OutOfMemory, status);
+
+    /* Valid test cases */
+    status = GdipFillClosedCurve2I(graphics, (GpBrush*)brush, points, 1, 0.5, FillModeAlternate);
+    expect(Ok, status);
+
+    status = GdipFillClosedCurve2I(graphics, (GpBrush*)brush, points, 2, 0.5, FillModeAlternate);
+    expect(Ok, status);
+
+    status = GdipFillClosedCurve2I(graphics, (GpBrush*)brush, points, 3, 0.5, FillModeAlternate);
+    expect(Ok, status);
+
+    GdipDeleteGraphics(graphics);
+    GdipDeleteBrush((GpBrush*)brush);
+
+    ReleaseDC(hwnd, hdc);
+}
+
 static void test_GdipDrawArc(void)
 {
     GpStatus status;
@@ -1047,6 +1180,139 @@ static void test_GdipDrawLinesI(void)
     ReleaseDC(hwnd, hdc);
 }
 
+static void test_GdipFillClosedCurve(void)
+{
+    GpStatus status;
+    GpGraphics *graphics = NULL;
+    GpSolidFill *brush = NULL;
+    HDC hdc = GetDC( hwnd );
+    GpPointF points[3];
+
+    points[0].X = 0;
+    points[0].Y = 0;
+
+    points[1].X = 40;
+    points[1].Y = 20;
+
+    points[2].X = 10;
+    points[2].Y = 40;
+
+    /* make a graphics object and brush object */
+    ok(hdc != NULL, "Expected HDC to be initialized\n");
+
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+    ok(graphics != NULL, "Expected graphics to be initialized\n");
+
+    GdipCreateSolidFill((ARGB)0xdeadbeef, &brush);
+
+    /* InvalidParameter cases: null graphics, null brush, null points */
+    status = GdipFillClosedCurve(NULL, NULL, NULL, 3);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve(graphics, NULL, NULL, 3);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve(NULL, (GpBrush*)brush, NULL, 3);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve(NULL, NULL, points, 3);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve(graphics, (GpBrush*)brush, NULL, 3);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve(graphics, NULL, points, 3);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve(NULL, (GpBrush*)brush, points, 3);
+    expect(InvalidParameter, status);
+
+    /* InvalidParameter cases: invalid count */
+    status = GdipFillClosedCurve(graphics, (GpBrush*)brush, points, -1);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurve(graphics, (GpBrush*)brush, points, 0);
+    expect(InvalidParameter, status);
+
+    /* Valid test cases */
+    status = GdipFillClosedCurve(graphics, (GpBrush*)brush, points, 1);
+    expect(Ok, status);
+
+    status = GdipFillClosedCurve(graphics, (GpBrush*)brush, points, 2);
+    expect(Ok, status);
+
+    status = GdipFillClosedCurve(graphics, (GpBrush*)brush, points, 3);
+    expect(Ok, status);
+
+    GdipDeleteGraphics(graphics);
+    GdipDeleteBrush((GpBrush*)brush);
+
+    ReleaseDC(hwnd, hdc);
+}
+
+static void test_GdipFillClosedCurveI(void)
+{
+    GpStatus status;
+    GpGraphics *graphics = NULL;
+    GpSolidFill *brush = NULL;
+    HDC hdc = GetDC( hwnd );
+    GpPoint points[3];
+
+    points[0].X = 0;
+    points[0].Y = 0;
+
+    points[1].X = 40;
+    points[1].Y = 20;
+
+    points[2].X = 10;
+    points[2].Y = 40;
+
+    /* make a graphics object and brush object */
+    ok(hdc != NULL, "Expected HDC to be initialized\n");
+
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+    ok(graphics != NULL, "Expected graphics to be initialized\n");
+
+    GdipCreateSolidFill((ARGB)0xdeadbeef, &brush);
+
+    /* InvalidParameter cases: null graphics, null brush */
+    /* Note: GdipFillClosedCurveI and GdipFillClosedCurve2I hang in Windows
+             when points == NULL, so don't test this condition */
+    status = GdipFillClosedCurveI(NULL, NULL, points, 3);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurveI(graphics, NULL, points, 3);
+    expect(InvalidParameter, status);
+
+    status = GdipFillClosedCurveI(NULL, (GpBrush*)brush, points, 3);
+    expect(InvalidParameter, status);
+
+    /* InvalidParameter cases: invalid count */
+    status = GdipFillClosedCurveI(graphics, (GpBrush*)brush, points, 0);
+    expect(InvalidParameter, status);
+
+    /* OutOfMemory cases: large (unsigned) int */
+    status = GdipFillClosedCurveI(graphics, (GpBrush*)brush, points, -1);
+    expect(OutOfMemory, status);
+
+    /* Valid test cases */
+    status = GdipFillClosedCurveI(graphics, (GpBrush*)brush, points, 1);
+    expect(Ok, status);
+
+    status = GdipFillClosedCurveI(graphics, (GpBrush*)brush, points, 2);
+    expect(Ok, status);
+
+    status = GdipFillClosedCurveI(graphics, (GpBrush*)brush, points, 3);
+    expect(Ok, status);
+
+    GdipDeleteGraphics(graphics);
+    GdipDeleteBrush((GpBrush*)brush);
+
+    ReleaseDC(hwnd, hdc);
+}
+
 static void test_Get_Release_DC(void)
 {
     GpStatus status;
@@ -1211,6 +1477,10 @@ static void test_Get_Release_DC(void)
     status = GdipFillClosedCurve2(graphics, (GpBrush*)brush, ptf, 5, 1.0, FillModeAlternate);
     expect(ObjectBusy, status); status = Ok;
     status = GdipFillClosedCurve2I(graphics, (GpBrush*)brush, pt, 5, 1.0, FillModeAlternate);
+    expect(ObjectBusy, status); status = Ok;
+    status = GdipFillClosedCurve(graphics, (GpBrush*)brush, ptf, 5);
+    expect(ObjectBusy, status); status = Ok;
+    status = GdipFillClosedCurveI(graphics, (GpBrush*)brush, pt, 5);
     expect(ObjectBusy, status); status = Ok;
     status = GdipFillEllipse(graphics, (GpBrush*)brush, 0.0, 0.0, 100.0, 100.0);
     expect(ObjectBusy, status); status = Ok;
@@ -1887,6 +2157,8 @@ static void test_fromMemoryBitmap(void)
     GpGraphics *graphics = NULL;
     GpBitmap *bitmap = NULL;
     BYTE bits[48] = {0};
+    HDC hdc=NULL;
+    COLORREF color;
 
     status = GdipCreateBitmapFromScan0(4, 4, 12, PixelFormat24bppRGB, bits, &bitmap);
     expect(Ok, status);
@@ -1901,6 +2173,50 @@ static void test_fromMemoryBitmap(void)
 
     /* drawing writes to the memory provided */
     todo_wine expect(0x68, bits[10]);
+
+    status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+    expect(Ok, status);
+
+    status = GdipGetDC(graphics, &hdc);
+    expect(Ok, status);
+    ok(hdc != NULL, "got NULL hdc\n");
+
+    color = GetPixel(hdc, 0, 0);
+    /* The HDC is write-only, and native fills with a solid color to figure out
+     * which pixels have changed. */
+    todo_wine expect(0x0c0b0d, color);
+
+    SetPixel(hdc, 0, 0, 0x797979);
+    SetPixel(hdc, 1, 0, 0x0c0b0d);
+
+    status = GdipReleaseDC(graphics, hdc);
+    expect(Ok, status);
+
+    GdipDeleteGraphics(graphics);
+
+    todo_wine expect(0x79, bits[0]);
+    todo_wine expect(0x68, bits[3]);
+
+    GdipDisposeImage((GpImage*)bitmap);
+
+    /* We get the same kind of write-only HDC for a "normal" bitmap */
+    status = GdipCreateBitmapFromScan0(4, 4, 12, PixelFormat24bppRGB, NULL, &bitmap);
+    expect(Ok, status);
+
+    status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+    expect(Ok, status);
+
+    status = GdipGetDC(graphics, &hdc);
+    expect(Ok, status);
+    ok(hdc != NULL, "got NULL hdc\n");
+
+    color = GetPixel(hdc, 0, 0);
+    todo_wine expect(0x0c0b0d, color);
+
+    status = GdipReleaseDC(graphics, hdc);
+    expect(Ok, status);
+
+    GdipDeleteGraphics(graphics);
 
     GdipDisposeImage((GpImage*)bitmap);
 }
@@ -2347,33 +2663,42 @@ static void test_GdipGetNearestColor(void)
 
     status = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat48bppRGB, NULL, &bitmap);
     expect(Ok, status);
-    status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
-    expect(Ok, status);
-    status = GdipGetNearestColor(graphics, &color);
-    expect(Ok, status);
-    expect(0xdeadbeef, color);
-    GdipDeleteGraphics(graphics);
-    GdipDisposeImage((GpImage*)bitmap);
+    if (status == Ok)
+    {
+        status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+        expect(Ok, status);
+        status = GdipGetNearestColor(graphics, &color);
+        expect(Ok, status);
+        expect(0xdeadbeef, color);
+        GdipDeleteGraphics(graphics);
+        GdipDisposeImage((GpImage*)bitmap);
+    }
 
     status = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat64bppARGB, NULL, &bitmap);
     expect(Ok, status);
-    status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
-    expect(Ok, status);
-    status = GdipGetNearestColor(graphics, &color);
-    expect(Ok, status);
-    expect(0xdeadbeef, color);
-    GdipDeleteGraphics(graphics);
-    GdipDisposeImage((GpImage*)bitmap);
+    if (status == Ok)
+    {
+        status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+        expect(Ok, status);
+        status = GdipGetNearestColor(graphics, &color);
+        expect(Ok, status);
+        expect(0xdeadbeef, color);
+        GdipDeleteGraphics(graphics);
+        GdipDisposeImage((GpImage*)bitmap);
+    }
 
     status = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat64bppPARGB, NULL, &bitmap);
     expect(Ok, status);
-    status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
-    expect(Ok, status);
-    status = GdipGetNearestColor(graphics, &color);
-    expect(Ok, status);
-    expect(0xdeadbeef, color);
-    GdipDeleteGraphics(graphics);
-    GdipDisposeImage((GpImage*)bitmap);
+    if (status == Ok)
+    {
+        status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+        expect(Ok, status);
+        status = GdipGetNearestColor(graphics, &color);
+        expect(Ok, status);
+        expect(0xdeadbeef, color);
+        GdipDeleteGraphics(graphics);
+        GdipDisposeImage((GpImage*)bitmap);
+    }
 
     status = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat16bppRGB565, NULL, &bitmap);
     expect(Ok, status);
@@ -2411,9 +2736,8 @@ static void test_string_functions(void)
     GpBrush *brush;
     ARGB color = 0xff000000;
     HDC hdc = GetDC( hwnd );
-    const WCHAR fontname[] = {'C','o','u','r','i','e','r',' ','N','e','w',0};
-    const WCHAR fontname2[] = {'C','o','u','r','i','e','r',0};
-    const WCHAR teststring[] = {'o','o',' ','o','\n','o',0};
+    const WCHAR fontname[] = {'T','a','h','o','m','a',0};
+    const WCHAR teststring[] = {'M','M',' ','M','\n','M',0};
     REAL char_width, char_height;
     INT codepointsfitted, linesfilled;
     GpStringFormat *format;
@@ -2428,14 +2752,6 @@ static void test_string_functions(void)
     ok(graphics != NULL, "Expected graphics to be initialized\n");
 
     status = GdipCreateFontFamilyFromName(fontname, NULL, &family);
-
-    if (status != Ok)
-    {
-        /* Wine doesn't have Courier New? */
-        todo_wine expect(Ok, status);
-        status = GdipCreateFontFamilyFromName(fontname2, NULL, &family);
-    }
-
     expect(Ok, status);
 
     status = GdipCreateFont(family, 10.0, FontStyleRegular, UnitPixel, &font);
@@ -2514,14 +2830,15 @@ static void test_string_functions(void)
     expect(Ok, status);
     expectf(0.0, bounds.X);
     expectf(0.0, bounds.Y);
-    expectf_(char_bounds.Width + char_width * 3, bounds.Width, 0.01);
+    ok(bounds.Width > char_bounds.Width + char_width * 2, "got %0.2f, expected at least %0.2f\n",
+       bounds.Width, char_bounds.Width + char_width * 2);
     ok(bounds.Height > char_bounds.Height, "got %0.2f, expected at least %0.2f\n", bounds.Height, char_bounds.Height);
     expect(6, codepointsfitted);
     expect(2, linesfilled);
     char_height = bounds.Height - char_bounds.Height;
 
     /* Cut off everything after the first space. */
-    rc.Width = char_bounds.Width + char_width * 2.5;
+    rc.Width = char_bounds.Width + char_width * 2.1;
 
     status = GdipMeasureString(graphics, teststring, 6, font, &rc, NULL, &bounds, &codepointsfitted, &linesfilled);
     expect(Ok, status);
@@ -2607,7 +2924,7 @@ static void test_string_functions(void)
     ok(!region_isempty[3], "region shouldn't be empty\n");
 
     /* Cut off everything after the first space, and the second line. */
-    rc.Width = char_bounds.Width + char_width * 2.5;
+    rc.Width = char_bounds.Width + char_width * 2.1;
     rc.Height = char_bounds.Height + char_height * 0.5;
 
     status = GdipMeasureCharacterRanges(graphics, teststring, 6, font, &rc, format, 3, regions);
@@ -2664,6 +2981,8 @@ START_TEST(graphics)
 
     test_constructor_destructor();
     test_save_restore();
+    test_GdipFillClosedCurve2();
+    test_GdipFillClosedCurve2I();
     test_GdipDrawBezierI();
     test_GdipDrawArc();
     test_GdipDrawArcI();
@@ -2675,6 +2994,8 @@ START_TEST(graphics)
     test_GdipDrawCurve3I();
     test_GdipDrawLineI();
     test_GdipDrawLinesI();
+    test_GdipFillClosedCurve();
+    test_GdipFillClosedCurveI();
     test_GdipDrawString();
     test_GdipGetNearestColor();
     test_GdipGetVisibleClipBounds();

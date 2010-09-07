@@ -24,6 +24,7 @@
 #include <winbase.h>
 #include <winerror.h>
 #include <wincrypt.h>
+#include <wininet.h>
 
 #include "wine/test.h"
 
@@ -4198,6 +4199,10 @@ static void check_ssl_policy(void)
     sslPolicyPara.pwszServerName = a_dot_b_dot_winehq_dot_org;
     checkChainPolicyStatus(CERT_CHAIN_POLICY_SSL, engine,
      &winehqPolicyCheckWithoutMatchingName, 0, &oct2007, &policyPara);
+    /* When specifying to ignore name mismatch: match */
+    sslPolicyPara.fdwChecks |= SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+    checkChainPolicyStatus(CERT_CHAIN_POLICY_SSL, engine,
+     &winehqPolicyCheckWithMatchingName, 0, &oct2007, &policyPara);
     CertFreeCertificateChainEngine(engine);
     CertCloseStore(testRoot, 0);
 }

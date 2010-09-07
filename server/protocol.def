@@ -1018,7 +1018,7 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
     obj_handle_t handle;        /* handle to the file */
 @REPLY
     int          type;          /* file type (see below) */
-    int          removable;     /* is file removable? */
+    int          cacheable;     /* can fd be cached in the client? */
     unsigned int access;        /* file access rights */
     unsigned int options;       /* file open options */
 @END
@@ -1089,6 +1089,13 @@ enum server_fd_type
 @END
 
 
+/* Accept into an initialized socket */
+@REQ(accept_into_socket)
+    obj_handle_t lhandle;       /* handle to the listening socket */
+    obj_handle_t ahandle;       /* handle to the accepting socket */
+@END
+
+
 /* Set socket event parameters */
 @REQ(set_socket_event)
     obj_handle_t  handle;        /* handle to the socket */
@@ -1130,6 +1137,7 @@ enum server_fd_type
     unsigned int access;        /* wanted access rights */
     unsigned int attributes;    /* object attributes */
     process_id_t pid;           /* pid of process which shall be attached to the console */
+    int          input_fd;      /* if pid=-1 (bare console to current process), fd for input */
 @REPLY
     obj_handle_t handle_in;     /* handle to console input */
     obj_handle_t event;         /* handle to renderer events change notification */
@@ -1216,6 +1224,7 @@ struct console_renderer_event
     obj_handle_t handle;        /* handle to the console */
 @REPLY
     int          mode;          /* console mode */
+    int          is_bare;       /* whether the console has an evt_queue */
 @END
 
 
@@ -1287,6 +1296,7 @@ struct console_renderer_event
     unsigned int access;        /* wanted access rights */
     unsigned int attributes;    /* object attributes */
     unsigned int share;         /* sharing credentials */
+    int          fd;            /* for bare consoles, fd the screen-buffer is attached to */
 @REPLY
     obj_handle_t handle_out;    /* handle to the screen buffer */
 @END
@@ -2334,11 +2344,19 @@ enum message_type
 /* Get the window and client rectangles of a window */
 @REQ(get_window_rectangles)
     user_handle_t  handle;        /* handle to the window */
+    int            relative;      /* coords relative to (see below) */
 @REPLY
     rectangle_t    window;        /* window rectangle */
     rectangle_t    visible;       /* visible part of the window rectangle */
     rectangle_t    client;        /* client rectangle */
 @END
+enum coords_relative
+{
+    COORDS_CLIENT,   /* relative to client area */
+    COORDS_WINDOW,   /* relative to whole window area */
+    COORDS_PARENT,   /* relative to parent's client area */
+    COORDS_SCREEN    /* relative to screen origin */
+};
 
 
 /* Get the window text */
@@ -3057,6 +3075,7 @@ enum message_type
 @REQ(query_symlink)
     obj_handle_t   handle;        /* handle to the symlink */
 @REPLY
+    data_size_t    total;         /* total needed size for name */
     VARARG(target_name,unicode_str); /* target name */
 @END
 

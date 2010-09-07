@@ -5,7 +5,7 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = shell32.dll
 IMPORTLIB = shell32
-IMPORTS   = uuid shlwapi comctl32 user32 gdi32 advapi32 kernel32 ntdll
+IMPORTS   = uuid shlwapi comctl32 user32 gdi32 advapi32
 DELAYIMPORTS = ole32 oleaut32 shdocvw version
 
 C_SRCS = \
@@ -23,6 +23,7 @@ C_SRCS = \
 	debughlp.c \
 	dialogs.c \
 	dragdrophelper.c \
+	ebrowser.c \
 	enumidlist.c \
 	folders.c \
 	iconcache.c \
@@ -80,6 +81,7 @@ RC_SRCS = \
 	shell32_Ru.rc \
 	shell32_Si.rc \
 	shell32_Sk.rc \
+	shell32_Sr.rc \
 	shell32_Sv.rc \
 	shell32_Tr.rc \
 	shell32_Uk.rc \

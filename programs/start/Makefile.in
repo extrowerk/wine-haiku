@@ -5,7 +5,7 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = start.exe
 APPMODE   = -mconsole -municode
-IMPORTS   = shell32 user32 kernel32
+IMPORTS   = shell32 user32
 
 C_SRCS = start.c
 
@@ -24,8 +24,11 @@ RC_SRCS = \
 	No.rc \
 	Pl.rc \
 	Pt.rc \
+	Ro.rc \
 	Ru.rc \
 	Si.rc \
-	Tr.rc
+	Sv.rc \
+	Tr.rc \
+	Uk.rc
 
 @MAKE_PROG_RULES@

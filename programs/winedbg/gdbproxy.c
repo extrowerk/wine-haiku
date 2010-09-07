@@ -391,6 +391,41 @@ static size_t cpu_register_map[] = {
     FIELD_OFFSET(CONTEXT, SegFs),
     FIELD_OFFSET(CONTEXT, SegGs),
 };
+#elif defined(__sparc__)
+static size_t cpu_register_map[] = {
+    FIELD_OFFSET(CONTEXT, g0),
+    FIELD_OFFSET(CONTEXT, g1),
+    FIELD_OFFSET(CONTEXT, g2),
+    FIELD_OFFSET(CONTEXT, g3),
+    FIELD_OFFSET(CONTEXT, g4),
+    FIELD_OFFSET(CONTEXT, g5),
+    FIELD_OFFSET(CONTEXT, g6),
+    FIELD_OFFSET(CONTEXT, g7),
+    FIELD_OFFSET(CONTEXT, o0),
+    FIELD_OFFSET(CONTEXT, o1),
+    FIELD_OFFSET(CONTEXT, o2),
+    FIELD_OFFSET(CONTEXT, o3),
+    FIELD_OFFSET(CONTEXT, o4),
+    FIELD_OFFSET(CONTEXT, o5),
+    FIELD_OFFSET(CONTEXT, o6),
+    FIELD_OFFSET(CONTEXT, o7),
+    FIELD_OFFSET(CONTEXT, l0),
+    FIELD_OFFSET(CONTEXT, l1),
+    FIELD_OFFSET(CONTEXT, l2),
+    FIELD_OFFSET(CONTEXT, l3),
+    FIELD_OFFSET(CONTEXT, l4),
+    FIELD_OFFSET(CONTEXT, l5),
+    FIELD_OFFSET(CONTEXT, l6),
+    FIELD_OFFSET(CONTEXT, l7),
+    FIELD_OFFSET(CONTEXT, i0),
+    FIELD_OFFSET(CONTEXT, i1),
+    FIELD_OFFSET(CONTEXT, i2),
+    FIELD_OFFSET(CONTEXT, i3),
+    FIELD_OFFSET(CONTEXT, i4),
+    FIELD_OFFSET(CONTEXT, i5),
+    FIELD_OFFSET(CONTEXT, i6),
+    FIELD_OFFSET(CONTEXT, i7),
+};
 #else
 # error Define the registers map for your CPU
 #endif
@@ -1042,7 +1077,8 @@ static enum packet_return packet_verbose(struct gdb_context* gdbctx)
     * and then an optional thread ID at the end..
     * *******************************************/
 
-    fprintf(stderr, "trying to process a verbose packet\n");
+    if (gdbctx->trace & GDBPXY_TRC_COMMAND)
+        fprintf(stderr, "trying to process a verbose packet\n");
     /* now check that we've got Cont */
     assert(strncmp(gdbctx->in_packet, "Cont", 4) == 0);
 
@@ -1795,8 +1831,9 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
     case 'S':
         if (strncmp(gdbctx->in_packet, "Symbol::", gdbctx->in_packet_len) == 0)
             return packet_ok;
-        if (strncmp(gdbctx->in_packet, "Supported", gdbctx->in_packet_len) == 0)
+        if (strncmp(gdbctx->in_packet, "Supported", 9) == 0)
         {
+            /* no features supported */
             packet_reply_open(gdbctx);
             packet_reply_close(gdbctx);
             return packet_done;
@@ -1816,6 +1853,13 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
             get_thread_info(gdbctx, tid, result, sizeof(result));
             packet_reply_open(gdbctx);
             packet_reply_hex_to_str(gdbctx, result);
+            packet_reply_close(gdbctx);
+            return packet_done;
+        }
+        if (strncmp(gdbctx->in_packet, "TStatus", 7) == 0)
+        {
+            /* Tracepoints not supported */
+            packet_reply_open(gdbctx);
             packet_reply_close(gdbctx);
             return packet_done;
         }
@@ -2217,6 +2261,7 @@ static BOOL gdb_startup(struct gdb_context* gdbctx, DEBUG_EVENT* de, unsigned fl
             fprintf(stderr, "Cannot create gdb\n");
             return FALSE;
         default: /* in parent... success */
+            signal(SIGINT, SIG_IGN);
             break;
         case 0: /* in child... and alive */
             gdb_exec(imh_mod.LoadedImageName, s_addrs.sin_port, flags);

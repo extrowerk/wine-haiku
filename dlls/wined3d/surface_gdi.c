@@ -167,7 +167,6 @@ static HRESULT WINAPI
 IWineGDISurfaceImpl_UnlockRect(IWineD3DSurface *iface)
 {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
-    IWineD3DSwapChainImpl *swapchain = NULL;
     TRACE("(%p)\n", This);
 
     if (!(This->Flags & SFLAG_LOCKED))
@@ -177,13 +176,13 @@ IWineGDISurfaceImpl_UnlockRect(IWineD3DSurface *iface)
     }
 
     /* Tell the swapchain to update the screen */
-    if (SUCCEEDED(IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain)))
+    if (This->container.type == WINED3D_CONTAINER_SWAPCHAIN)
     {
+        IWineD3DSwapChainImpl *swapchain = This->container.u.swapchain;
         if (This == swapchain->front_buffer)
         {
             x11_copy_to_screen(swapchain, &This->lockedRect);
         }
-        IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
     }
 
     This->Flags &= ~SFLAG_LOCKED;
@@ -210,18 +209,20 @@ IWineGDISurfaceImpl_Flip(IWineD3DSurface *iface,
                          IWineD3DSurface *override,
                          DWORD Flags)
 {
-    IWineD3DSwapChainImpl *swapchain = NULL;
+    IWineD3DSurfaceImpl *surface = (IWineD3DSurfaceImpl *)iface;
+    IWineD3DSwapChainImpl *swapchain;
     HRESULT hr;
 
-    if(FAILED(IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain)))
+    if (surface->container.type != WINED3D_CONTAINER_SWAPCHAIN)
     {
         ERR("Flipped surface is not on a swapchain\n");
         return WINEDDERR_NOTFLIPPABLE;
     }
 
+    swapchain = surface->container.u.swapchain;
     hr = IWineD3DSwapChain_Present((IWineD3DSwapChain *)swapchain,
             NULL, NULL, swapchain->win_handle, NULL, 0);
-    IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
+
     return hr;
 }
 
@@ -239,6 +240,11 @@ IWineGDISurfaceImpl_LoadTexture(IWineD3DSurface *iface, BOOL srgb_mode)
 {
     ERR("Unsupported on X11 surfaces\n");
     return WINED3DERR_INVALIDCALL;
+}
+
+static void WINAPI IWineGDISurfaceImpl_BindTexture(IWineD3DSurface *iface, BOOL srgb)
+{
+    ERR("Not supported.\n");
 }
 
 static HRESULT WINAPI IWineGDISurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
@@ -283,8 +289,8 @@ static HRESULT WINAPI IWineGDISurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHD
         return hr;
     }
 
-    if (This->resource.format_desc->format == WINED3DFMT_P8_UINT
-            || This->resource.format_desc->format == WINED3DFMT_P8_UINT_A8_UNORM)
+    if (This->resource.format->id == WINED3DFMT_P8_UINT
+            || This->resource.format->id == WINED3DFMT_P8_UINT_A8_UNORM)
     {
         unsigned int n;
         const PALETTEENTRY *pal = NULL;
@@ -344,7 +350,6 @@ static HRESULT WINAPI IWineGDISurfaceImpl_RealizePalette(IWineD3DSurface *iface)
     RGBQUAD col[256];
     IWineD3DPaletteImpl *pal = This->palette;
     unsigned int n;
-    IWineD3DSwapChainImpl *swapchain;
     TRACE("(%p)\n", This);
 
     if (!pal) return WINED3D_OK;
@@ -363,13 +368,13 @@ static HRESULT WINAPI IWineGDISurfaceImpl_RealizePalette(IWineD3DSurface *iface)
     /* Update the image because of the palette change. Some games like e.g Red Alert
        call SetEntries a lot to implement fading. */
     /* Tell the swapchain to update the screen */
-    if (SUCCEEDED(IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain)))
+    if (This->container.type == WINED3D_CONTAINER_SWAPCHAIN)
     {
+        IWineD3DSwapChainImpl *swapchain = This->container.u.swapchain;
         if (This == swapchain->front_buffer)
         {
             x11_copy_to_screen(swapchain, NULL);
         }
-        IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
     }
 
     return WINED3D_OK;
@@ -469,28 +474,6 @@ static HRESULT WINAPI IWineGDISurfaceImpl_SetMem(IWineD3DSurface *iface, void *M
     return WINED3D_OK;
 }
 
-/***************************
- *
- ***************************/
-static void WINAPI IWineGDISurfaceImpl_ModifyLocation(IWineD3DSurface *iface, DWORD flag, BOOL persistent) {
-    TRACE("(%p)->(%s, %s)\n", iface,
-          flag == SFLAG_INSYSMEM ? "SFLAG_INSYSMEM" : flag == SFLAG_INDRAWABLE ? "SFLAG_INDRAWABLE" : "SFLAG_INTEXTURE",
-          persistent ? "TRUE" : "FALSE");
-    /* GDI surfaces can be in system memory only */
-    if(flag != SFLAG_INSYSMEM) {
-        ERR("GDI Surface requested in gl %s memory\n", flag == SFLAG_INDRAWABLE ? "drawable" : "texture");
-    }
-}
-
-static HRESULT WINAPI IWineGDISurfaceImpl_LoadLocation(IWineD3DSurface *iface, DWORD flag, const RECT *rect) {
-    if(flag != SFLAG_INSYSMEM) {
-        ERR("GDI Surface requested to be copied to gl %s\n", flag == SFLAG_INTEXTURE ? "texture" : "drawable");
-    } else {
-        TRACE("Surface requested in surface memory\n");
-    }
-    return WINED3D_OK;
-}
-
 static WINED3DSURFTYPE WINAPI IWineGDISurfaceImpl_GetImplType(IWineD3DSurface *iface) {
     return SURFACE_GDI;
 }
@@ -520,7 +503,6 @@ const IWineD3DSurfaceVtbl IWineGDISurface_Vtbl =
     IWineGDISurfaceImpl_UnLoad,
     IWineD3DBaseSurfaceImpl_GetType,
     /* IWineD3DSurface */
-    IWineD3DBaseSurfaceImpl_GetContainer,
     IWineD3DBaseSurfaceImpl_GetDesc,
     IWineGDISurfaceImpl_LockRect,
     IWineGDISurfaceImpl_UnlockRect,
@@ -547,13 +529,10 @@ const IWineD3DSurfaceVtbl IWineGDISurface_Vtbl =
     IWineD3DBaseSurfaceImpl_GetClipper,
     /* Internal use: */
     IWineGDISurfaceImpl_LoadTexture,
-    IWineD3DBaseSurfaceImpl_BindTexture,
-    IWineD3DBaseSurfaceImpl_SetContainer,
+    IWineGDISurfaceImpl_BindTexture,
     IWineD3DBaseSurfaceImpl_GetData,
     IWineD3DBaseSurfaceImpl_SetFormat,
     IWineGDISurfaceImpl_PrivateSetup,
-    IWineGDISurfaceImpl_ModifyLocation,
-    IWineGDISurfaceImpl_LoadLocation,
     IWineGDISurfaceImpl_GetImplType,
     IWineGDISurfaceImpl_DrawOverlay
 };

@@ -378,6 +378,9 @@ static HRESULT WINAPI JScript_SetScriptState(IActiveScript *iface, SCRIPTSTATE s
 
         exec_queued_code(This);
         break;
+    case SCRIPTSTATE_INITIALIZED:
+        FIXME("unimplemented SCRIPTSTATE_INITIALIZED\n");
+        return S_OK;
     default:
         FIXME("unimplemented state %d\n", ss);
         return E_NOTIMPL;
@@ -555,7 +558,7 @@ static HRESULT WINAPI JScript_GetScriptDispatch(IActiveScript *iface, LPCOLESTR 
         return E_UNEXPECTED;
     }
 
-    *ppdisp = (IDispatch*)_IDispatchEx_(This->ctx->global);
+    *ppdisp = to_disp(This->ctx->global);
     IDispatch_AddRef(*ppdisp);
     return S_OK;
 }
@@ -755,7 +758,7 @@ static HRESULT WINAPI JScriptParseProcedure_ParseProcedureText(IActiveScriptPars
 {
     JScript *This = ASPARSEPROC_THIS(iface);
     parser_ctx_t *parser_ctx;
-    DispatchEx *dispex;
+    jsdisp_t *dispex;
     HRESULT hres;
 
     TRACE("(%p)->(%s %s %s %s %p %s %s %u %x %p)\n", This, debugstr_w(pstrCode), debugstr_w(pstrFormalParams),
@@ -776,7 +779,7 @@ static HRESULT WINAPI JScriptParseProcedure_ParseProcedureText(IActiveScriptPars
     if(FAILED(hres))
         return hres;
 
-    *ppdisp = (IDispatch*)_IDispatchEx_(dispex);
+    *ppdisp = to_disp(dispex);
     return S_OK;
 }
 

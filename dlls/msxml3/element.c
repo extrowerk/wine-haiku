@@ -28,7 +28,7 @@
 #include "winuser.h"
 #include "winnls.h"
 #include "ole2.h"
-#include "msxml2.h"
+#include "msxml6.h"
 
 #include "msxml_private.h"
 
@@ -65,16 +65,13 @@ static HRESULT WINAPI domelem_QueryInterface(
     TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppvObject);
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMElement ) ||
+         IsEqualGUID( riid, &IID_IXMLDOMNode ) ||
          IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
         *ppvObject = &This->lpVtbl;
     }
-    else if ( IsEqualGUID( riid, &IID_IXMLDOMNode ) )
-    {
-        *ppvObject = IXMLDOMNode_from_impl(&This->node);
-    }
-    else if(dispex_query_interface(&This->node.dispex, riid, ppvObject))
+    else if(node_query_interface(&This->node, riid, ppvObject))
     {
         return *ppvObject ? S_OK : E_NOINTERFACE;
     }
@@ -197,23 +194,35 @@ static HRESULT WINAPI domelem_get_nodeName(
     BSTR* p )
 {
     domelem *This = impl_from_IXMLDOMElement( iface );
-    return IXMLDOMNode_get_nodeName( IXMLDOMNode_from_impl(&This->node), p );
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return node_get_nodeName(&This->node, p);
 }
 
 static HRESULT WINAPI domelem_get_nodeValue(
     IXMLDOMElement *iface,
-    VARIANT* var1 )
+    VARIANT* value)
 {
     domelem *This = impl_from_IXMLDOMElement( iface );
-    return IXMLDOMNode_get_nodeValue( IXMLDOMNode_from_impl(&This->node), var1 );
+
+    TRACE("(%p)->(%p)\n", This, value);
+
+    if(!value)
+        return E_INVALIDARG;
+
+    V_VT(value) = VT_NULL;
+    V_BSTR(value) = NULL; /* tests show that we should do this */
+    return S_FALSE;
 }
 
 static HRESULT WINAPI domelem_put_nodeValue(
     IXMLDOMElement *iface,
-    VARIANT var1 )
+    VARIANT value)
 {
     domelem *This = impl_from_IXMLDOMElement( iface );
-    return IXMLDOMNode_put_nodeValue( IXMLDOMNode_from_impl(&This->node), var1 );
+    FIXME("(%p)->(v%d)\n", This, V_VT(&value));
+    return E_FAIL;
 }
 
 static HRESULT WINAPI domelem_get_nodeType(
@@ -221,7 +230,11 @@ static HRESULT WINAPI domelem_get_nodeType(
     DOMNodeType* domNodeType )
 {
     domelem *This = impl_from_IXMLDOMElement( iface );
-    return IXMLDOMNode_get_nodeType( IXMLDOMNode_from_impl(&This->node), domNodeType );
+
+    TRACE("(%p)->(%p)\n", This, domNodeType);
+
+    *domNodeType = NODE_ELEMENT;
+    return S_OK;
 }
 
 static HRESULT WINAPI domelem_get_parentNode(
@@ -229,7 +242,10 @@ static HRESULT WINAPI domelem_get_parentNode(
     IXMLDOMNode** parent )
 {
     domelem *This = impl_from_IXMLDOMElement( iface );
-    return IXMLDOMNode_get_parentNode( IXMLDOMNode_from_impl(&This->node), parent );
+
+    TRACE("(%p)->(%p)\n", This, parent);
+
+    return node_get_parent(&This->node, parent);
 }
 
 static HRESULT WINAPI domelem_get_childNodes(
@@ -653,7 +669,11 @@ static HRESULT WINAPI domelem_setAttributeNode(
     IXMLDOMAttribute** attributeNode)
 {
     domelem *This = impl_from_IXMLDOMElement( iface );
+
     FIXME("(%p)->(%p %p)\n", This, domAttribute, attributeNode);
+
+    if(!domAttribute) return E_INVALIDARG;
+
     return E_NOTIMPL;
 }
 
@@ -669,38 +689,47 @@ static HRESULT WINAPI domelem_removeAttributeNode(
 
 static HRESULT WINAPI domelem_getElementsByTagName(
     IXMLDOMElement *iface,
-    BSTR bstrName, IXMLDOMNodeList** resultList)
+    BSTR tagName, IXMLDOMNodeList** resultList)
 {
-    static const WCHAR xpathformat[] =
-            { '.','/','/','*','[','l','o','c','a','l','-','n','a','m','e','(',')','=','\'','%','s','\'',']',0 };
     domelem *This = impl_from_IXMLDOMElement( iface );
-    LPWSTR szPattern;
     xmlNodePtr element;
     HRESULT hr;
 
-    TRACE("(%p)->(%s %p)\n", This, debugstr_w(bstrName), resultList);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_w(tagName), resultList);
 
-    if (bstrName[0] == '*' && bstrName[1] == 0)
+    if (!tagName || !resultList) return E_INVALIDARG;
+    if (!(element = get_element(This))) return E_FAIL;
+
+    if (tagName[0] == '*' && tagName[1] == 0)
     {
-        szPattern = heap_alloc(sizeof(WCHAR)*5);
-        szPattern[0] = '.';
-        szPattern[1] = szPattern[2] = '/';
-        szPattern[3] = '*';
-        szPattern[4] = 0;
+        static const WCHAR formatallW[] = {'/','/','*',0};
+        hr = queryresult_create(element, formatallW, resultList);
     }
     else
     {
-        szPattern = heap_alloc(sizeof(WCHAR)*(21+lstrlenW(bstrName)+1));
-        wsprintfW(szPattern, xpathformat, bstrName);
-    }
-    TRACE("%s\n", debugstr_w(szPattern));
+        static const WCHAR xpathformat[] =
+            { '/','/','*','[','l','o','c','a','l','-','n','a','m','e','(',')','=','\'' };
+        static const WCHAR closeW[] = { '\'',']',0 };
 
-    element = get_element(This);
-    if (!element)
-        hr = E_FAIL;
-    else
-        hr = queryresult_create(element, szPattern, resultList);
-    heap_free(szPattern);
+        LPWSTR pattern;
+        WCHAR *ptr;
+        INT length;
+
+        length = lstrlenW(tagName);
+
+        /* without two WCHARs from format specifier */
+        ptr = pattern = heap_alloc(sizeof(xpathformat) + length*sizeof(WCHAR) + sizeof(closeW));
+
+        memcpy(ptr, xpathformat, sizeof(xpathformat));
+        ptr += sizeof(xpathformat)/sizeof(WCHAR);
+        memcpy(ptr, tagName, length*sizeof(WCHAR));
+        ptr += length;
+        memcpy(ptr, closeW, sizeof(closeW));
+
+        TRACE("%s\n", debugstr_w(pattern));
+        hr = queryresult_create(element, pattern, resultList);
+        heap_free(pattern);
+    }
 
     return hr;
 }
@@ -792,7 +821,7 @@ IUnknown* create_element( xmlNodePtr element )
     This->lpVtbl = &domelem_vtbl;
     This->ref = 1;
 
-    init_xmlnode(&This->node, element, (IUnknown*)&This->lpVtbl, &domelem_dispex);
+    init_xmlnode(&This->node, element, (IXMLDOMNode*)&This->lpVtbl, &domelem_dispex);
 
     return (IUnknown*) &This->lpVtbl;
 }

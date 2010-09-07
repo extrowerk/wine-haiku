@@ -183,9 +183,10 @@ wine_fn_config_makefile ()
 {
     ac_dir=$[1]
     ac_enable=$[2]
-    wine_fn_all_dir_rules $ac_dir "Make.rules \$(MAKEDEP)"
+    AS_VAR_IF([$ac_enable],[no],[return 0])
 
-    AS_VAR_IF([$ac_enable],[no],,[wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
+    wine_fn_all_dir_rules $ac_dir "Make.rules \$(MAKEDEP)"
+    wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
 "all: $ac_dir
 .PHONY: $ac_dir
 $ac_dir: $ac_dir/Makefile dummy
@@ -197,7 +198,7 @@ install-lib:: $ac_dir
 install-dev:: $ac_dir
 	@cd $ac_dir && \$(MAKE) install-dev
 uninstall:: $ac_dir/Makefile
-	@cd $ac_dir && \$(MAKE) uninstall"])
+	@cd $ac_dir && \$(MAKE) uninstall"
 }
 
 wine_fn_config_lib ()
@@ -207,12 +208,8 @@ wine_fn_config_lib ()
     wine_fn_all_dir_rules $ac_dir "dlls/Makeimplib.rules \$(MAKEDEP)"
     wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
 "all __builddeps__: $ac_dir
-__buildcrossdeps__: $ac_dir/lib$ac_name.cross.a
-$ac_dir $ac_dir/lib$ac_name.cross.a: $ac_dir/Makefile tools/widl tools/winebuild tools/winegcc include
-$ac_dir: dummy
+$ac_dir: $ac_dir/Makefile tools/widl tools/winebuild tools/winegcc include dummy
 	@cd $ac_dir && \$(MAKE)
-$ac_dir/lib$ac_name.cross.a: dummy
-	@cd $ac_dir && \$(MAKE) lib$ac_name.cross.a
 install install-dev:: $ac_dir
 	@cd $ac_dir && \$(MAKE) install
 uninstall:: $ac_dir/Makefile
@@ -227,6 +224,11 @@ wine_fn_config_dll ()
     ac_implibsrc=$[4]
     ac_file="dlls/$ac_dir/lib$ac_implib"
     ac_deps="tools/widl tools/winebuild tools/winegcc include"
+    ac_implibflags=""
+
+    case $ac_dir in
+      *16) ac_implibflags=" -m16" ;;
+    esac
 
     wine_fn_all_dir_rules dlls/$ac_dir "dlls/Makedll.rules \$(MAKEDEP)"
 
@@ -249,35 +251,54 @@ uninstall manpages htmlpages sgmlpages xmlpages:: dlls/$ac_dir/Makefile
     then
         wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
 "__builddeps__: $ac_file.$IMPLIBEXT $ac_file.$STATIC_IMPLIBEXT
-__buildcrossdeps__: $ac_file.cross.a
 $ac_file.$IMPLIBEXT $ac_file.$STATIC_IMPLIBEXT $ac_file.cross.a: $ac_deps
 $ac_file.def: dlls/$ac_dir/$ac_dir.spec dlls/$ac_dir/Makefile
-	@cd dlls/$ac_dir && \$(MAKE) \`basename \$[@]\`
-$ac_file.$STATIC_IMPLIBEXT $ac_file.cross.a: dlls/$ac_dir/Makefile dummy
-	@cd dlls/$ac_dir && \$(MAKE) \`basename \$[@]\`
+	@cd dlls/$ac_dir && \$(MAKE) lib$ac_implib.def
+$ac_file.$STATIC_IMPLIBEXT: dlls/$ac_dir/Makefile dummy
+	@cd dlls/$ac_dir && \$(MAKE) lib$ac_implib.$STATIC_IMPLIBEXT
 install-dev:: dlls/$ac_dir/Makefile __builddeps__ 
 	@cd dlls/$ac_dir && \$(MAKE) install-dev"
+        if test "x$CROSSTEST_DISABLE" = x
+        then
+            wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
+"__builddeps__: $ac_file.cross.a
+$ac_file.cross.a: dlls/$ac_dir/Makefile dummy
+	@cd dlls/$ac_dir && \$(MAKE) lib$ac_implib.cross.a"
+        fi
+
     elif test -n "$ac_implib"
     then
         wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
 "__builddeps__: $ac_file.$IMPLIBEXT
-__buildcrossdeps__: $ac_file.cross.a
-$ac_file.$IMPLIBEXT $ac_file.cross.a: dlls/$ac_dir/$ac_dir.spec dlls/$ac_dir/Makefile $ac_deps
-	@cd dlls/$ac_dir && \$(MAKE) \`basename \$[@]\`
+$ac_file.def: dlls/$ac_dir/$ac_dir.spec dlls/$ac_dir/Makefile \$(WINEBUILD)
+	\$(WINEBUILD) \$(TARGETFLAGS)$ac_implibflags -w --def -o \$[@] --export \$(SRCDIR)/dlls/$ac_dir/$ac_dir.spec
+$ac_file.a: dlls/$ac_dir/$ac_dir.spec dlls/$ac_dir/Makefile \$(WINEBUILD)
+	\$(WINEBUILD) \$(TARGETFLAGS)$ac_implibflags -w --implib -o \$[@] --export \$(SRCDIR)/dlls/$ac_dir/$ac_dir.spec
 install-dev:: dlls/$ac_dir/Makefile __builddeps__ 
 	@cd dlls/$ac_dir && \$(MAKE) install-dev"
+        if test "x$CROSSTEST_DISABLE" = x
+        then
+            wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
+"__builddeps__: $ac_file.cross.a
+$ac_file.cross.a: dlls/$ac_dir/$ac_dir.spec dlls/$ac_dir/Makefile \$(WINEBUILD)
+	\$(WINEBUILD) \$(CROSSTARGET:%=-b %)$ac_implibflags -w --implib -o \$[@] --export \$(SRCDIR)/dlls/$ac_dir/$ac_dir.spec"
+        fi
 
         if test "$ac_dir" != "$ac_implib"
         then
             wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
 "__builddeps__: dlls/lib$ac_implib.$IMPLIBEXT
-__buildcrossdeps__: dlls/lib$ac_implib.cross.a
 dlls/lib$ac_implib.$IMPLIBEXT: $ac_file.$IMPLIBEXT
 	\$(RM) \$[@] && \$(LN_S) $ac_dir/lib$ac_implib.$IMPLIBEXT \$[@]
-dlls/lib$ac_implib.cross.a: $ac_file.cross.a
-	\$(RM) \$[@] && \$(LN_S) $ac_dir/lib$ac_implib.cross.a \$[@]
 clean::
 	\$(RM) dlls/lib$ac_implib.$IMPLIBEXT"
+            if test "x$CROSSTEST_DISABLE" = x
+            then
+                wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
+"__builddeps__: dlls/lib$ac_implib.cross.a
+dlls/lib$ac_implib.cross.a: $ac_file.cross.a
+	\$(RM) \$[@] && \$(LN_S) $ac_dir/lib$ac_implib.cross.a \$[@]"
+            fi
         fi
     fi
 }
@@ -329,16 +350,21 @@ $ac_name.res: $ac_name.rc $ac_name.exe"
 .PHONY: $ac_dir
 $ac_dir: $ac_dir/Makefile __builddeps__ dummy
 	@cd $ac_dir && \$(MAKE)
-crosstest: $ac_dir/__crosstest__
-.PHONY: $ac_dir/__crosstest__
-$ac_dir/__crosstest__: $ac_dir/Makefile __buildcrossdeps__ dummy
-	@cd $ac_dir && \$(MAKE) crosstest
 test: $ac_dir/__test__
 .PHONY: $ac_dir/__test__
 $ac_dir/__test__: dummy
 	@cd $ac_dir && \$(MAKE) test
 testclean::
-	\$(RM) $ac_dir/*.ok"])
+	\$(RM) $ac_dir/*.ok"
+
+        if test "x$CROSSTEST_DISABLE" = x
+        then
+            wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
+"crosstest: $ac_dir/__crosstest__
+.PHONY: $ac_dir/__crosstest__
+$ac_dir/__crosstest__: $ac_dir/Makefile __builddeps__ dummy
+	@cd $ac_dir && \$(MAKE) crosstest"
+        fi])
 }
 
 wine_fn_config_tool ()
@@ -371,7 +397,10 @@ install-dev:: $ac_dir
 all __tooldeps__: $ac_dir
 .PHONY: $ac_dir
 $ac_dir: $ac_dir/Makefile libs/port dummy
-	@cd $ac_dir && \$(MAKE)"])
+	@cd $ac_dir && \$(MAKE)"
+      case $ac_dir in
+        tools/winebuild) wine_fn_append_rule ALL_MAKEFILE_DEPENDS "\$(WINEBUILD): $ac_dir" ;;
+      esac])
 }
 
 wine_fn_config_makerules ()
@@ -393,7 +422,14 @@ wine_fn_config_symlink ()
 	@./config.status $ac_link
 distclean::
 	\$(RM) $ac_link"
-}])
+}
+
+if test "x$CROSSTEST_DISABLE" != x
+then
+    wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
+"crosstest:
+	@echo \"crosstest is not supported (mingw not installed?)\" && false"
+fi])
 
 dnl **** Define helper function to append a file to a makefile file list ****
 dnl

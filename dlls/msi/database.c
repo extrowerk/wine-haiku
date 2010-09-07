@@ -126,8 +126,10 @@ static UINT clone_open_stream( MSIDATABASE *db, LPCWSTR name, IStream **stm )
 UINT db_get_raw_stream( MSIDATABASE *db, LPCWSTR stname, IStream **stm )
 {
     HRESULT r;
+    WCHAR decoded[MAX_STREAM_NAME_LEN];
 
-    TRACE("%s\n", debugstr_w(stname));
+    decode_streamname( stname, decoded );
+    TRACE("%s -> %s\n", debugstr_w(stname), debugstr_w(decoded));
 
     if (clone_open_stream( db, stname, stm ) == ERROR_SUCCESS)
         return ERROR_SUCCESS;
@@ -140,7 +142,6 @@ UINT db_get_raw_stream( MSIDATABASE *db, LPCWSTR stname, IStream **stm )
 
         LIST_FOR_EACH_ENTRY( transform, &db->transforms, MSITRANSFORM, entry )
         {
-            TRACE("looking for %s in transform storage\n", debugstr_w(stname) );
             r = IStorage_OpenStream( transform->stg, stname, NULL,
                                      STGM_READ | STGM_SHARE_EXCLUSIVE, 0, stm );
             if (SUCCEEDED(r))
@@ -226,7 +227,7 @@ void append_storage_to_db( MSIDATABASE *db, IStorage *stg )
     t = msi_alloc( sizeof *t );
     t->stg = stg;
     IStorage_AddRef( stg );
-    list_add_tail( &db->transforms, &t->entry );
+    list_add_head( &db->transforms, &t->entry );
 
     /* the transform may add or replace streams */
     free_streams( db );
@@ -254,6 +255,43 @@ static VOID MSI_CloseDatabase( MSIOBJECTHDR *arg )
     }
 }
 
+static HRESULT db_initialize( IStorage *stg, const GUID *clsid )
+{
+    static const WCHAR szTables[]  = { '_','T','a','b','l','e','s',0 };
+    HRESULT hr;
+
+    hr = IStorage_SetClass( stg, clsid );
+    if (FAILED( hr ))
+    {
+        WARN("failed to set class id 0x%08x\n", hr);
+        return hr;
+    }
+
+    /* create the _Tables stream */
+    hr = write_stream_data( stg, szTables, NULL, 0, TRUE );
+    if (FAILED( hr ))
+    {
+        WARN("failed to create _Tables stream 0x%08x\n", hr);
+        return hr;
+    }
+
+    hr = msi_init_string_table( stg );
+    if (FAILED( hr ))
+    {
+        WARN("failed to initialize string table 0x%08x\n", hr);
+        return hr;
+    }
+
+    hr = IStorage_Commit( stg, 0 );
+    if (FAILED( hr ))
+    {
+        WARN("failed to commit changes 0x%08x\n", hr);
+        return hr;
+    }
+
+    return S_OK;
+}
+
 UINT MSI_OpenDatabaseW(LPCWSTR szDBPath, LPCWSTR szPersist, MSIDATABASE **pdb)
 {
     IStorage *stg = NULL;
@@ -264,8 +302,6 @@ UINT MSI_OpenDatabaseW(LPCWSTR szDBPath, LPCWSTR szPersist, MSIDATABASE **pdb)
     STATSTG stat;
     BOOL created = FALSE, patch = FALSE;
     WCHAR path[MAX_PATH];
-
-    static const WCHAR szTables[]  = { '_','T','a','b','l','e','s',0 };
 
     TRACE("%s %s\n",debugstr_w(szDBPath),debugstr_w(szPersist) );
 
@@ -297,28 +333,28 @@ UINT MSI_OpenDatabaseW(LPCWSTR szDBPath, LPCWSTR szPersist, MSIDATABASE **pdb)
         r = StgOpenStorage( szDBPath, NULL,
               STGM_DIRECT|STGM_READ|STGM_SHARE_DENY_WRITE, NULL, 0, &stg);
     }
-    else if( szPersist == MSIDBOPEN_CREATE || szPersist == MSIDBOPEN_CREATEDIRECT )
+    else if( szPersist == MSIDBOPEN_CREATE )
     {
-        /* FIXME: MSIDBOPEN_CREATE should case STGM_TRANSACTED flag to be
-         * used here: */
         r = StgCreateDocfile( szDBPath,
-              STGM_CREATE|STGM_DIRECT|STGM_READWRITE|STGM_SHARE_EXCLUSIVE, 0, &stg);
-        if( r == ERROR_SUCCESS )
-        {
-            IStorage_SetClass( stg, patch ? &CLSID_MsiPatch : &CLSID_MsiDatabase );
-            /* create the _Tables stream */
-            r = write_stream_data(stg, szTables, NULL, 0, TRUE);
-            if (SUCCEEDED(r))
-                r = msi_init_string_table( stg );
-        }
+              STGM_CREATE|STGM_TRANSACTED|STGM_READWRITE|STGM_SHARE_EXCLUSIVE, 0, &stg );
+
+        if( SUCCEEDED(r) )
+            r = db_initialize( stg, patch ? &CLSID_MsiPatch : &CLSID_MsiDatabase );
+        created = TRUE;
+    }
+    else if( szPersist == MSIDBOPEN_CREATEDIRECT )
+    {
+        r = StgCreateDocfile( szDBPath,
+              STGM_CREATE|STGM_DIRECT|STGM_READWRITE|STGM_SHARE_EXCLUSIVE, 0, &stg );
+
+        if( SUCCEEDED(r) )
+            r = db_initialize( stg, patch ? &CLSID_MsiPatch : &CLSID_MsiDatabase );
         created = TRUE;
     }
     else if( szPersist == MSIDBOPEN_TRANSACT )
     {
-        /* FIXME: MSIDBOPEN_TRANSACT should case STGM_TRANSACTED flag to be
-         * used here: */
         r = StgOpenStorage( szDBPath, NULL,
-              STGM_DIRECT|STGM_READWRITE|STGM_SHARE_EXCLUSIVE, NULL, 0, &stg);
+              STGM_TRANSACTED|STGM_READWRITE|STGM_SHARE_EXCLUSIVE, NULL, 0, &stg);
     }
     else if( szPersist == MSIDBOPEN_DIRECT )
     {

@@ -3,7 +3,7 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = userenv.dll
-IMPORTS   = kernel32 ntdll
+IMPORTS   = advapi32
 IMPORTLIB = userenv
 
 C_SRCS = \

@@ -248,8 +248,8 @@ struct arb_vs_compile_args
         struct
         {
             WORD                    bools;
-            char                    clip_texcoord;
-            char                    clipplane_mask;
+            unsigned char           clip_texcoord;
+            unsigned char           clipplane_mask;
         }                           boolclip;
         DWORD                       boolclip_compare;
     } clip;
@@ -582,9 +582,9 @@ static inline void shader_arb_ps_local_constants(IWineD3DDeviceImpl* deviceImpl)
         if(gl_shader->int_consts[i] != WINED3D_CONST_NUM_UNUSED)
         {
             float val[4];
-            val[0] = stateBlock->pixelShaderConstantI[4 * i];
-            val[1] = stateBlock->pixelShaderConstantI[4 * i + 1];
-            val[2] = stateBlock->pixelShaderConstantI[4 * i + 2];
+            val[0] = (float) stateBlock->pixelShaderConstantI[4 * i];
+            val[1] = (float) stateBlock->pixelShaderConstantI[4 * i + 1];
+            val[2] = (float) stateBlock->pixelShaderConstantI[4 * i + 2];
             val[3] = -1.0f;
 
             GL_EXTCALL(glProgramLocalParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, gl_shader->int_consts[i], val));
@@ -614,9 +614,9 @@ static inline void shader_arb_vs_local_constants(IWineD3DDeviceImpl* deviceImpl)
         if(gl_shader->int_consts[i] != WINED3D_CONST_NUM_UNUSED)
         {
             float val[4];
-            val[0] = stateBlock->vertexShaderConstantI[4 * i];
-            val[1] = stateBlock->vertexShaderConstantI[4 * i + 1];
-            val[2] = stateBlock->vertexShaderConstantI[4 * i + 2];
+            val[0] = (float) stateBlock->vertexShaderConstantI[4 * i];
+            val[1] = (float) stateBlock->vertexShaderConstantI[4 * i + 1];
+            val[2] = (float) stateBlock->vertexShaderConstantI[4 * i + 2];
             val[3] = -1.0f;
 
             GL_EXTCALL(glProgramLocalParameter4fvARB(GL_VERTEX_PROGRAM_ARB, gl_shader->int_consts[i], val));
@@ -1058,7 +1058,7 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
                 else if (reg->idx >= rel_offset)
                     sprintf(register_name, "C[%s + %u]", rel_reg, reg->idx - rel_offset);
                 else
-                    sprintf(register_name, "C[%s - %u]", rel_reg, -reg->idx + rel_offset);
+                    sprintf(register_name, "C[%s - %u]", rel_reg, rel_offset - reg->idx);
             }
             else
             {
@@ -1887,7 +1887,7 @@ static void pshader_hw_tex(const struct wined3d_shader_instruction *ins)
     char reg_dest[40];
     char reg_coord[40];
     DWORD reg_sampler_code;
-    DWORD myflags = 0;
+    WORD myflags = 0;
 
     /* All versions have a destination register */
     shader_arb_get_dst_param(ins, dst, reg_dest);
@@ -3052,7 +3052,7 @@ static void shader_hw_texldd(const struct wined3d_shader_instruction *ins)
     DWORD sampler_idx = ins->src[1].reg.idx;
     char reg_dest[40];
     char reg_src[3][40];
-    DWORD flags = TEX_DERIV;
+    WORD flags = TEX_DERIV;
 
     shader_arb_get_dst_param(ins, &ins->dst[0], reg_dest);
     shader_arb_get_src_param(ins, &ins->src[0], 0, reg_src[0]);
@@ -3070,7 +3070,7 @@ static void shader_hw_texldl(const struct wined3d_shader_instruction *ins)
     DWORD sampler_idx = ins->src[1].reg.idx;
     char reg_dest[40];
     char reg_coord[40];
-    DWORD flags = TEX_LOD;
+    WORD flags = TEX_LOD;
 
     shader_arb_get_dst_param(ins, &ins->dst[0], reg_dest);
     shader_arb_get_src_param(ins, &ins->src[0], 0, reg_coord);
@@ -3412,7 +3412,7 @@ static const DWORD *find_loop_control_values(IWineD3DBaseShaderImpl *This, DWORD
 static void init_ps_input(const IWineD3DPixelShaderImpl *This, const struct arb_ps_compile_args *args,
                           struct shader_arb_ctx_priv *priv)
 {
-    const char *texcoords[8] =
+    static const char * const texcoords[8] =
     {
         "fragment.texcoord[0]", "fragment.texcoord[1]", "fragment.texcoord[2]", "fragment.texcoord[3]",
         "fragment.texcoord[4]", "fragment.texcoord[5]", "fragment.texcoord[6]", "fragment.texcoord[7]"
@@ -3894,7 +3894,7 @@ static void init_output_registers(IWineD3DVertexShaderImpl *shader, DWORD sig_nu
                                   struct arb_vs_compiled_shader *compiled)
 {
     unsigned int i, j;
-    static const char *texcoords[8] =
+    static const char * const texcoords[8] =
     {
         "result.texcoord[0]", "result.texcoord[1]", "result.texcoord[2]", "result.texcoord[3]",
         "result.texcoord[4]", "result.texcoord[5]", "result.texcoord[6]", "result.texcoord[7]"
@@ -3908,10 +3908,10 @@ static void init_output_registers(IWineD3DVertexShaderImpl *shader, DWORD sig_nu
     /* Write generic input varyings 0 to 7 to result.texcoord[], varying 8 to result.color.primary
      * and varying 9 to result.color.secondary
      */
-    const char *decl_idx_to_string[MAX_REG_INPUT] =
+    static const char * const decl_idx_to_string[MAX_REG_INPUT] =
     {
-        texcoords[0], texcoords[1], texcoords[2], texcoords[3],
-        texcoords[4], texcoords[5], texcoords[6], texcoords[7],
+        "result.texcoord[0]", "result.texcoord[1]", "result.texcoord[2]", "result.texcoord[3]",
+        "result.texcoord[4]", "result.texcoord[5]", "result.texcoord[6]", "result.texcoord[7]",
         "result.color.primary", "result.color.secondary"
     };
 
@@ -4482,7 +4482,7 @@ static inline void find_arb_vs_compile_args(IWineD3DVertexShaderImpl *shader, IW
     {
         if(stateblock->renderState[WINED3DRS_CLIPPING])
         {
-            args->clip.boolclip.clipplane_mask = stateblock->renderState[WINED3DRS_CLIPPLANEENABLE];
+            args->clip.boolclip.clipplane_mask = (unsigned char) stateblock->renderState[WINED3DRS_CLIPPLANEENABLE];
         }
         /* clipplane_mask was set to 0 by setting boolclip_compare to 0 */
     }
@@ -5244,7 +5244,8 @@ static void shader_arb_handle_instruction(const struct wined3d_shader_instructio
 
             if(control_frame->outer_loop)
             {
-                int iteration, aL = 0;
+                unsigned int iteration;
+                int aL = 0;
                 struct list copy;
 
                 /* Turn off recording before playback */
@@ -5276,11 +5277,11 @@ static void shader_arb_handle_instruction(const struct wined3d_shader_instructio
                     if(ins->handler_idx == WINED3DSIH_ENDLOOP)
                     {
                         priv->aL = aL;
-                        shader_addline(buffer, "#Iteration %d, aL=%d\n", iteration, aL);
+                        shader_addline(buffer, "#Iteration %u, aL=%d\n", iteration, aL);
                     }
                     else
                     {
-                        shader_addline(buffer, "#Iteration %d\n", iteration);
+                        shader_addline(buffer, "#Iteration %u\n", iteration);
                     }
 
                     LIST_FOR_EACH_ENTRY(rec_ins, &copy, struct recorded_instruction, entry)
@@ -6981,15 +6982,15 @@ static HRESULT arbfp_blit_set(IWineD3DDevice *iface, IWineD3DSurfaceImpl *surfac
     GLenum shader;
     IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) iface;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
-    float size[4] = {surface->pow2Width, surface->pow2Height, 1, 1};
+    float size[4] = {(float) surface->pow2Width, (float) surface->pow2Height, 1.0f, 1.0f};
     struct arbfp_blit_priv *priv = device->blit_priv;
     enum complex_fixup fixup;
     GLenum textype = surface->texture_target;
 
-    if (!is_complex_fixup(surface->resource.format_desc->color_fixup))
+    if (!is_complex_fixup(surface->resource.format->color_fixup))
     {
         TRACE("Fixup:\n");
-        dump_color_fixup_desc(surface->resource.format_desc->color_fixup);
+        dump_color_fixup_desc(surface->resource.format->color_fixup);
         /* Don't bother setting up a shader for unconverted formats */
         ENTER_GL();
         glEnable(textype);
@@ -6998,7 +6999,7 @@ static HRESULT arbfp_blit_set(IWineD3DDevice *iface, IWineD3DSurfaceImpl *surfac
         return WINED3D_OK;
     }
 
-    fixup = get_complex_fixup(surface->resource.format_desc->color_fixup);
+    fixup = get_complex_fixup(surface->resource.format->color_fixup);
 
     switch(fixup)
     {
@@ -7068,10 +7069,8 @@ static void arbfp_blit_unset(IWineD3DDevice *iface) {
 }
 
 static BOOL arbfp_blit_supported(const struct wined3d_gl_info *gl_info, enum blit_operation blit_op,
-                                 const RECT *src_rect, DWORD src_usage, WINED3DPOOL src_pool,
-                                 const struct wined3d_format_desc *src_format_desc,
-                                 const RECT *dst_rect, DWORD dst_usage, WINED3DPOOL dst_pool,
-                                 const struct wined3d_format_desc *dst_format_desc)
+        const RECT *src_rect, DWORD src_usage, WINED3DPOOL src_pool, const struct wined3d_format *src_format,
+        const RECT *dst_rect, DWORD dst_usage, WINED3DPOOL dst_pool, const struct wined3d_format *dst_format)
 {
     enum complex_fixup src_fixup;
 
@@ -7081,27 +7080,27 @@ static BOOL arbfp_blit_supported(const struct wined3d_gl_info *gl_info, enum bli
         return FALSE;
     }
 
-    src_fixup = get_complex_fixup(src_format_desc->color_fixup);
+    src_fixup = get_complex_fixup(src_format->color_fixup);
     if (TRACE_ON(d3d_shader) && TRACE_ON(d3d))
     {
         TRACE("Checking support for fixup:\n");
-        dump_color_fixup_desc(src_format_desc->color_fixup);
+        dump_color_fixup_desc(src_format->color_fixup);
     }
 
-    if (!is_identity_fixup(dst_format_desc->color_fixup))
+    if (!is_identity_fixup(dst_format->color_fixup))
     {
         TRACE("Destination fixups are not supported\n");
         return FALSE;
     }
 
-    if (is_identity_fixup(src_format_desc->color_fixup))
+    if (is_identity_fixup(src_format->color_fixup))
     {
         TRACE("[OK]\n");
         return TRUE;
     }
 
      /* We only support YUV conversions. */
-    if (!is_complex_fixup(src_format_desc->color_fixup))
+    if (!is_complex_fixup(src_format->color_fixup))
     {
         TRACE("[FAILED]\n");
         return FALSE;
@@ -7143,7 +7142,8 @@ HRESULT arbfp_blit_surface(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *src_
      * Also beware of the origin difference(top left vs bottom left).
      * Also beware that the front buffer's surface size is screen width x screen height,
      * whereas the real gl drawable size is the size of the window. */
-    dst_swapchain = (dst_surface->Flags & SFLAG_SWAPCHAIN) ? (IWineD3DSwapChainImpl *)dst_surface->container : NULL;
+    dst_swapchain = dst_surface->container.type == WINED3D_CONTAINER_SWAPCHAIN
+            ? dst_surface->container.u.swapchain : NULL;
     if (dst_swapchain && dst_surface == dst_swapchain->front_buffer)
         surface_translate_frontbuffer_coords(dst_surface, context->win_handle, &dst_rect);
 
@@ -7166,11 +7166,13 @@ HRESULT arbfp_blit_surface(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *src_
 
     context_release(context);
 
-    IWineD3DSurface_ModifyLocation((IWineD3DSurface *)dst_surface, SFLAG_INDRAWABLE, TRUE);
+    surface_modify_location(dst_surface, SFLAG_INDRAWABLE, TRUE);
     return WINED3D_OK;
 }
 
-static HRESULT arbfp_blit_color_fill(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *dst_surface, const RECT *dst_rect, DWORD fill_color)
+/* Do not call while under the GL lock. */
+static HRESULT arbfp_blit_color_fill(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *dst_surface,
+        const RECT *dst_rect, const WINED3DCOLORVALUE *color)
 {
     FIXME("Color filling not implemented by arbfp_blit\n");
     return WINED3DERR_INVALIDCALL;

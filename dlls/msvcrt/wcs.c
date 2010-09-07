@@ -133,6 +133,7 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
     int exp=0, sign=1;
     const MSVCRT_wchar_t *p;
     double ret;
+    BOOL found_digit = FALSE;
 
     if(!str) {
         MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
@@ -154,6 +155,7 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
         p++;
 
     while(isdigitW(*p)) {
+        found_digit = TRUE;
         hlp = d*10+*(p++)-'0';
         if(d>MSVCRT_UI64_MAX/10 || hlp<d) {
             exp++;
@@ -169,6 +171,7 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
         p++;
 
     while(isdigitW(*p)) {
+        found_digit = TRUE;
         hlp = d*10+*(p++)-'0';
         if(d>MSVCRT_UI64_MAX/10 || hlp<d)
             break;
@@ -179,7 +182,7 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
     while(isdigitW(*p))
         p++;
 
-    if(p == str) {
+    if(!found_digit) {
         if(end)
             *end = (MSVCRT_wchar_t*)str;
         return 0.0;
@@ -1112,6 +1115,19 @@ int CDECL MSVCRT__snprintf_s(char *str, unsigned int len, unsigned int count,
     __ms_va_list valist;
     __ms_va_start(valist, format);
     retval = MSVCRT_vsnprintf_s_l(str, len, count, format, NULL, valist);
+    __ms_va_end(valist);
+    return retval;
+}
+
+/*********************************************************************
+ *              _scprintf (MSVCRT.@)
+ */
+int CDECL MSVCRT__scprintf(const char *format, ...)
+{
+    int retval;
+    __ms_va_list valist;
+    __ms_va_start(valist, format);
+    retval = _vscprintf(format, valist);
     __ms_va_end(valist);
     return retval;
 }

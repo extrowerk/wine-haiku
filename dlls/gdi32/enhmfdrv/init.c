@@ -71,7 +71,6 @@ static const DC_FUNCTIONS EMFDRV_Funcs =
     EMFDRV_GdiComment,               /* pGdiComment */
     NULL,                            /* pGetBitmapBits */
     NULL,                            /* pGetCharWidth */
-    NULL,                            /* pGetDCOrgEx */
     NULL,                            /* pGetDIBColorTable */
     NULL,                            /* pGetDIBits */
     EMFDRV_GetDeviceCaps,            /* pGetDeviceCaps */
@@ -286,10 +285,8 @@ HDC WINAPI CreateEnhMetaFileA(
 
     hReturnDC = CreateEnhMetaFileW(hdc, filenameW, rect, descriptionW);
 
-    if(filenameW)
-        HeapFree( GetProcessHeap(), 0, filenameW );
-    if(descriptionW)
-        HeapFree( GetProcessHeap(), 0, descriptionW );
+    HeapFree( GetProcessHeap(), 0, filenameW );
+    HeapFree( GetProcessHeap(), 0, descriptionW );
 
     return hReturnDC;
 }

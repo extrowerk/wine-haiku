@@ -3,11 +3,13 @@ TOPOBJDIR = ../../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 TESTDLL   = winmm.dll
-IMPORTS   = winmm user32 kernel32
+IMPORTS   = winmm user32
 
 C_SRCS = \
 	capture.c \
+	generated.c \
 	mci.c \
+	mcicda.c \
 	midi.c \
 	mixer.c \
 	mmio.c \

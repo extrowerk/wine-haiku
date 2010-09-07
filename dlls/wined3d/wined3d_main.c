@@ -46,8 +46,8 @@ struct wined3d_wndproc_table
 static struct wined3d_wndproc_table wndproc_table;
 
 int num_lock = 0;
-void (*CDECL wine_tsx11_lock_ptr)(void) = NULL;
-void (*CDECL wine_tsx11_unlock_ptr)(void) = NULL;
+void (CDECL *wine_tsx11_lock_ptr)(void) = NULL;
+void (CDECL *wine_tsx11_unlock_ptr)(void) = NULL;
 
 static CRITICAL_SECTION wined3d_cs;
 static CRITICAL_SECTION_DEBUG wined3d_cs_debug =
@@ -76,7 +76,8 @@ wined3d_settings_t wined3d_settings =
     FALSE,          /* No strict draw ordering. */
 };
 
-IWineD3D * WINAPI WineDirect3DCreate(UINT version, IUnknown *parent)
+/* Do not call while under the GL lock. */
+IWineD3D * WINAPI WineDirect3DCreate(UINT version, void *parent)
 {
     IWineD3DImpl *object;
     HRESULT hr;

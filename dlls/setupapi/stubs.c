@@ -194,6 +194,24 @@ INT WINAPI SetupPromptReboot( HSPFILEQ file_queue, HWND owner, BOOL scan_only )
 }
 
 /***********************************************************************
+ *      SetupQueryDrivesInDiskSpaceListA (SETUPAPI.@)
+ */
+BOOL WINAPI SetupQueryDrivesInDiskSpaceListA(HDSKSPC disk_space, PSTR return_buffer, DWORD return_buffer_size, PDWORD required_size)
+{
+    FIXME("%p, %p, %d, %p\n", disk_space, return_buffer, return_buffer_size, required_size);
+    return FALSE;
+}
+
+/***********************************************************************
+ *      SetupQueryDrivesInDiskSpaceListW (SETUPAPI.@)
+ */
+BOOL WINAPI SetupQueryDrivesInDiskSpaceListW(HDSKSPC disk_space, PWSTR return_buffer, DWORD return_buffer_size, PDWORD required_size)
+{
+    FIXME("%p, %p, %d, %p\n", disk_space, return_buffer, return_buffer_size, required_size);
+    return FALSE;
+}
+
+/***********************************************************************
  *      SetupSetSourceListA (SETUPAPI.@)
  */
 BOOL WINAPI SetupSetSourceListA(DWORD flags, PCSTR *list, UINT count)
@@ -389,6 +407,41 @@ BOOL WINAPI SetupLogFileA(
     FIXME("(%p, %p, '%s', '%s', %d, %p, %p, %p, %d): stub\n", FileLogHandle,
         LogSectionName, SourceFileName, TargetFileName, Checksum, DiskTagfile,
         DiskDescription, OtherInfo, Flags);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/***********************************************************************
+ *              SetupDiBuildDriverInfoList  (SETUPAPI.@)
+ */
+
+BOOL WINAPI SetupDiBuildDriverInfoList(HDEVINFO DeviceInfoSet, PSP_DEVINFO_DATA DeviceInfoData, DWORD DriverType)
+ {
+    FIXME(": stub %p, %p, %d\n", DeviceInfoSet, DeviceInfoData, DriverType);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+ }
+
+/***********************************************************************
+ *              SetupDiDeleteDeviceInfo  (SETUPAPI.@)
+ */
+
+BOOL WINAPI SetupDiDeleteDeviceInfo(HDEVINFO DeviceInfoSet, PSP_DEVINFO_DATA DeviceInfoData)
+ {
+    FIXME(": stub %p, %p\n", DeviceInfoSet, DeviceInfoData);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+ }
+
+/***********************************************************************
+ *              SetupDiLoadClassIcon  (SETUPAPI.@)
+ */
+BOOL WINAPI SetupDiLoadClassIcon(const GUID *ClassGuid, HICON *LargeIcon, PINT MiniIconIndex)
+{
+    FIXME(": stub %s, %p, %p\n", debugstr_guid(ClassGuid), LargeIcon, MiniIconIndex);
 
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;

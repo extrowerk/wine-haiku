@@ -31,10 +31,12 @@
 #include "shlwapi.h"
 #include "docobj.h"
 #include "shobjidl.h"
+#include "shlobj.h"
 
 /* Function ptrs for ordinal calls */
 static HMODULE hShlwapi;
 static BOOL is_win2k_and_lower;
+static BOOL is_win9x;
 
 static int (WINAPI *pSHSearchMapInt)(const int*,const int*,int,int);
 static HRESULT (WINAPI *pGetAcceptLanguagesA)(LPSTR,LPDWORD);
@@ -56,9 +58,16 @@ static BOOL   (WINAPI *pGUIDFromStringA)(LPSTR, CLSID *);
 static HRESULT (WINAPI *pIUnknown_QueryServiceExec)(IUnknown*, REFIID, const GUID*, DWORD, DWORD, VARIANT*, VARIANT*);
 static HRESULT (WINAPI *pIUnknown_ProfferService)(IUnknown*, REFGUID, IServiceProvider*, DWORD*);
 static HWND    (WINAPI *pSHCreateWorkerWindowA)(LONG, HWND, DWORD, DWORD, HMENU, LONG_PTR);
+static HRESULT (WINAPI *pSHIShellFolder_EnumObjects)(LPSHELLFOLDER, HWND, SHCONTF, IEnumIDList**);
+static DWORD   (WINAPI *pSHGetIniStringW)(LPCWSTR, LPCWSTR, LPWSTR, DWORD, LPCWSTR);
+static BOOL    (WINAPI *pSHSetIniStringW)(LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR);
+static HKEY    (WINAPI *pSHGetShellKey)(DWORD, LPWSTR, BOOL);
 
 static HMODULE hmlang;
 static HRESULT (WINAPI *pLcidToRfc1766A)(LCID, LPSTR, INT);
+
+static HMODULE hshell32;
+static HRESULT (WINAPI *pSHGetDesktopFolder)(IShellFolder**);
 
 static const CHAR ie_international[] = {
     'S','o','f','t','w','a','r','e','\\',
@@ -67,6 +76,13 @@ static const CHAR ie_international[] = {
     'I','n','t','e','r','n','a','t','i','o','n','a','l',0};
 static const CHAR acceptlanguage[] = {
     'A','c','c','e','p','t','L','a','n','g','u','a','g','e',0};
+
+static int strcmp_wa(LPCWSTR strw, const char *stra)
+{
+    CHAR buf[512];
+    WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
+    return lstrcmpA(stra, buf);
+}
 
 typedef struct {
     int id;
@@ -576,6 +592,7 @@ static void test_GetShellSecurityDescriptor(void)
     };
     SECURITY_DESCRIPTOR* psd;
     SECURITY_DESCRIPTOR* (WINAPI*pGetShellSecurityDescriptor)(PSHELL_USER_PERMISSION*,int);
+    void *pChrCmpIW = GetProcAddress(hShlwapi, "ChrCmpIW");
 
     pGetShellSecurityDescriptor=(void*)GetProcAddress(hShlwapi,(char*)475);
 
@@ -585,12 +602,18 @@ static void test_GetShellSecurityDescriptor(void)
         return;
     }
 
+    if(pChrCmpIW && pChrCmpIW == pGetShellSecurityDescriptor) /* win2k */
+    {
+        win_skip("Skipping for GetShellSecurityDescriptor, same ordinal used for ChrCmpIW\n");
+        return;
+    }
+
     psd = pGetShellSecurityDescriptor(NULL, 2);
     ok(psd==NULL ||
        broken(psd==INVALID_HANDLE_VALUE), /* IE5 */
        "GetShellSecurityDescriptor should fail\n");
     psd = pGetShellSecurityDescriptor(rgsup, 0);
-    ok(psd==NULL, "GetShellSecurityDescriptor should fail\n");
+    ok(psd==NULL, "GetShellSecurityDescriptor should fail, got %p\n", psd);
 
     SetLastError(0xdeadbeef);
     psd = pGetShellSecurityDescriptor(rgsup, 2);
@@ -600,7 +623,7 @@ static void test_GetShellSecurityDescriptor(void)
         win_skip("GetShellSecurityDescriptor is not implemented\n");
         return;
     }
-    if (psd==INVALID_HANDLE_VALUE)
+    if (psd == INVALID_HANDLE_VALUE)
     {
         win_skip("GetShellSecurityDescriptor is broken on IE5\n");
         return;
@@ -1589,7 +1612,8 @@ if (0)
     SetLastError(0xdeadbeef);
     ret = pSHFormatDateTimeA(&filetime, NULL, NULL, 0);
     ok(ret == 0, "got %d\n", ret);
-    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef || broken(GetLastError() == ERROR_SUCCESS /* Win7 */),
+        "expected 0xdeadbeef, got %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     buff[0] = 'a'; buff[1] = 0;
@@ -1895,6 +1919,7 @@ static void test_SHGetObjectCompatFlags(void)
     };
 
     static const char compat_path[] = "Software\\Microsoft\\Windows\\CurrentVersion\\ShellCompatibility\\Objects";
+    void *pColorAdjustLuma = GetProcAddress(hShlwapi, "ColorAdjustLuma");
     CHAR keyA[39]; /* {CLSID} */
     HKEY root;
     DWORD ret;
@@ -1903,6 +1928,12 @@ static void test_SHGetObjectCompatFlags(void)
     if (!pSHGetObjectCompatFlags)
     {
         win_skip("SHGetObjectCompatFlags isn't available\n");
+        return;
+    }
+
+    if (pColorAdjustLuma && pColorAdjustLuma == pSHGetObjectCompatFlags) /* win2k */
+    {
+        win_skip("Skipping SHGetObjectCompatFlags, same ordinal used for ColorAdjustLuma\n");
         return;
     }
 
@@ -2359,14 +2390,349 @@ static void test_SHCreateWorkerWindowA(void)
 
     /* test exstyle */
     ret = GetWindowLongA(hwnd, GWL_EXSTYLE);
-    ok(ret == WS_EX_WINDOWEDGE, "0x%08lx\n", ret);
+    ok(ret == WS_EX_WINDOWEDGE ||
+       ret == (WS_EX_WINDOWEDGE|WS_EX_LAYOUTRTL) /* systems with RTL locale */, "0x%08lx\n", ret);
 
     DestroyWindow(hwnd);
 
     hwnd = pSHCreateWorkerWindowA(0, NULL, WS_EX_TOOLWINDOW, 0, 0, 0);
     ret = GetWindowLongA(hwnd, GWL_EXSTYLE);
-    ok(ret == (WS_EX_WINDOWEDGE|WS_EX_TOOLWINDOW), "0x%08lx\n", ret);
+    ok(ret == (WS_EX_WINDOWEDGE|WS_EX_TOOLWINDOW) ||
+       ret == (WS_EX_WINDOWEDGE|WS_EX_TOOLWINDOW|WS_EX_LAYOUTRTL) /* systems with RTL locale */, "0x%08lx\n", ret);
     DestroyWindow(hwnd);
+}
+
+static HRESULT WINAPI SF_QueryInterface(IShellFolder *iface,
+        REFIID riid, void **ppv)
+{
+    /* SHIShellFolder_EnumObjects doesn't QI the object for IShellFolder */
+    ok(!IsEqualGUID(&IID_IShellFolder, riid),
+            "Unexpected QI for IShellFolder\n");
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI SF_AddRef(IShellFolder *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI SF_Release(IShellFolder *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI SF_ParseDisplayName(IShellFolder *iface,
+        HWND owner, LPBC reserved, LPOLESTR displayName, ULONG *eaten,
+        LPITEMIDLIST *idl, ULONG *attr)
+{
+    ok(0, "Didn't expect ParseDisplayName\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SF_EnumObjects(IShellFolder *iface,
+        HWND owner, SHCONTF flags, IEnumIDList **enm)
+{
+    *enm = (IEnumIDList*)0xcafebabe;
+    return S_OK;
+}
+
+static HRESULT WINAPI SF_BindToObject(IShellFolder *iface,
+        LPCITEMIDLIST idl, LPBC reserved, REFIID riid, void **obj)
+{
+    ok(0, "Didn't expect BindToObject\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SF_BindToStorage(IShellFolder *iface,
+        LPCITEMIDLIST idl, LPBC reserved, REFIID riid, void **obj)
+{
+    ok(0, "Didn't expect BindToStorage\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SF_CompareIDs(IShellFolder *iface,
+        LPARAM lparam, LPCITEMIDLIST idl1, LPCITEMIDLIST idl2)
+{
+    ok(0, "Didn't expect CompareIDs\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SF_CreateViewObject(IShellFolder *iface,
+        HWND owner, REFIID riid, void **out)
+{
+    ok(0, "Didn't expect CreateViewObject\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SF_GetAttributesOf(IShellFolder *iface,
+        UINT cidl, LPCITEMIDLIST *idl, SFGAOF *inOut)
+{
+    ok(0, "Didn't expect GetAttributesOf\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SF_GetUIObjectOf(IShellFolder *iface,
+        HWND owner, UINT cidl, LPCITEMIDLIST *idls, REFIID riid, UINT *inOut,
+        void **out)
+{
+    ok(0, "Didn't expect GetUIObjectOf\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SF_GetDisplayNameOf(IShellFolder *iface,
+        LPCITEMIDLIST idl, SHGDNF flags, STRRET *name)
+{
+    ok(0, "Didn't expect GetDisplayNameOf\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SF_SetNameOf(IShellFolder *iface,
+        HWND hwnd, LPCITEMIDLIST idl, LPCOLESTR name, SHGDNF flags,
+        LPITEMIDLIST *idlOut)
+{
+    ok(0, "Didn't expect SetNameOf\n");
+    return E_NOTIMPL;
+}
+
+static IShellFolderVtbl ShellFolderVtbl = {
+    SF_QueryInterface,
+    SF_AddRef,
+    SF_Release,
+    SF_ParseDisplayName,
+    SF_EnumObjects,
+    SF_BindToObject,
+    SF_BindToStorage,
+    SF_CompareIDs,
+    SF_CreateViewObject,
+    SF_GetAttributesOf,
+    SF_GetUIObjectOf,
+    SF_GetDisplayNameOf,
+    SF_SetNameOf
+};
+
+static IShellFolder ShellFolder = { &ShellFolderVtbl };
+
+static void test_SHIShellFolder_EnumObjects(void)
+{
+    IEnumIDList *enm;
+    HRESULT hres;
+    IShellFolder *folder;
+
+    if(!pSHIShellFolder_EnumObjects || is_win2k_and_lower){
+        win_skip("SHIShellFolder_EnumObjects not available\n");
+        return;
+    }
+
+    if(0){
+        /* NULL object crashes on Windows */
+        hres = pSHIShellFolder_EnumObjects(NULL, NULL, 0, NULL);
+    }
+
+    /* SHIShellFolder_EnumObjects doesn't QI the object for IShellFolder */
+    enm = (IEnumIDList*)0xdeadbeef;
+    hres = pSHIShellFolder_EnumObjects(&ShellFolder, NULL, 0, &enm);
+    ok(hres == S_OK, "SHIShellFolder_EnumObjects failed: 0x%08x\n", hres);
+    ok(enm == (IEnumIDList*)0xcafebabe, "Didn't get expected enumerator location, instead: %p\n", enm);
+
+    /* SHIShellFolder_EnumObjects isn't strict about the IShellFolder object */
+    hres = pSHGetDesktopFolder(&folder);
+    ok(hres == S_OK, "SHGetDesktopFolder failed: 0x%08x\n", hres);
+
+    enm = NULL;
+    hres = pSHIShellFolder_EnumObjects(folder, NULL, 0, &enm);
+    ok(hres == S_OK, "SHIShellFolder_EnumObjects failed: 0x%08x\n", hres);
+    ok(enm != NULL, "Didn't get an enumerator\n");
+    if(enm)
+        IEnumIDList_Release(enm);
+
+    IShellFolder_Release(folder);
+}
+
+static void write_inifile(LPCWSTR filename)
+{
+    DWORD written;
+    HANDLE file;
+
+    static const char data[] =
+        "[TestApp]\r\n"
+        "AKey=1\r\n"
+        "AnotherKey=asdf\r\n";
+
+    file = CreateFileW(filename, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    if(file == INVALID_HANDLE_VALUE)
+        return;
+
+    WriteFile(file, data, sizeof(data), &written, NULL);
+
+    CloseHandle(file);
+}
+
+#define verify_inifile(f, e) r_verify_inifile(__LINE__, f, e)
+static void r_verify_inifile(unsigned l, LPCWSTR filename, LPCSTR exp)
+{
+    HANDLE file;
+    CHAR buf[1024];
+    DWORD read;
+
+    file = CreateFileW(filename, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+    if(file == INVALID_HANDLE_VALUE)
+        return;
+
+    ReadFile(file, buf, sizeof(buf) * sizeof(CHAR), &read, NULL);
+    buf[read] = '\0';
+
+    CloseHandle(file);
+
+    ok_(__FILE__,l)(!strcmp(buf, exp), "Expected:\n%s\nGot:\n%s\n", exp,
+            buf);
+}
+
+static void test_SHGetIniString(void)
+{
+    DWORD ret;
+    WCHAR out[64] = {0};
+
+    static const WCHAR TestAppW[] = {'T','e','s','t','A','p','p',0};
+    static const WCHAR TestIniW[] = {'C',':','\\','t','e','s','t','.','i','n','i',0};
+    static const WCHAR AKeyW[] = {'A','K','e','y',0};
+    static const WCHAR AnotherKeyW[] = {'A','n','o','t','h','e','r','K','e','y',0};
+    static const WCHAR JunkKeyW[] = {'J','u','n','k','K','e','y',0};
+
+    if(!pSHGetIniStringW || is_win2k_and_lower){
+        win_skip("SHGetIniStringW is not available\n");
+        return;
+    }
+
+    write_inifile(TestIniW);
+
+    if(0){
+        /* these crash on Windows */
+        ret = pSHGetIniStringW(NULL, NULL, NULL, 0, NULL);
+        ret = pSHGetIniStringW(NULL, AKeyW, out, sizeof(out), TestIniW);
+        ret = pSHGetIniStringW(TestAppW, AKeyW, NULL, sizeof(out), TestIniW);
+    }
+
+    ret = pSHGetIniStringW(TestAppW, AKeyW, out, 0, TestIniW);
+    ok(ret == 0, "SHGetIniStringW should have given 0, instead: %d\n", ret);
+
+    /* valid arguments */
+    ret = pSHGetIniStringW(TestAppW, NULL, out, sizeof(out), TestIniW);
+    ok(broken(ret == 0) || /* win 98 */
+            ret == 4, "SHGetIniStringW should have given 4, instead: %d\n", ret);
+    ok(!lstrcmpW(out, AKeyW), "Expected %s, got: %s\n",
+                wine_dbgstr_w(AKeyW), wine_dbgstr_w(out));
+
+    ret = pSHGetIniStringW(TestAppW, AKeyW, out, sizeof(out), TestIniW);
+    ok(broken(ret == 0) || /* win 98 */
+                ret == 1, "SHGetIniStringW should have given 1, instead: %d\n", ret);
+    ok(broken(*out == 0) || /*win 98 */
+        !strcmp_wa(out, "1"), "Expected L\"1\", got: %s\n", wine_dbgstr_w(out));
+
+    ret = pSHGetIniStringW(TestAppW, AnotherKeyW, out, sizeof(out), TestIniW);
+    ok(broken(ret == 0) || /* win 98 */
+            ret == 4, "SHGetIniStringW should have given 4, instead: %d\n", ret);
+    ok(broken(*out == 0) || /* win 98 */
+            !strcmp_wa(out, "asdf"), "Expected L\"asdf\", got: %s\n", wine_dbgstr_w(out));
+
+    ret = pSHGetIniStringW(TestAppW, JunkKeyW, out, sizeof(out), TestIniW);
+    ok(ret == 0, "SHGetIniStringW should have given 0, instead: %d\n", ret);
+    ok(*out == 0, "Expected L\"\", got: %s\n", wine_dbgstr_w(out));
+
+    DeleteFileW(TestIniW);
+}
+
+static void test_SHSetIniString(void)
+{
+    BOOL ret;
+
+    static const WCHAR TestAppW[] = {'T','e','s','t','A','p','p',0};
+    static const WCHAR AnotherAppW[] = {'A','n','o','t','h','e','r','A','p','p',0};
+    static const WCHAR TestIniW[] = {'C',':','\\','t','e','s','t','.','i','n','i',0};
+    static const WCHAR AKeyW[] = {'A','K','e','y',0};
+    static const WCHAR NewKeyW[] = {'N','e','w','K','e','y',0};
+    static const WCHAR AValueW[] = {'A','V','a','l','u','e',0};
+
+    if(!pSHSetIniStringW || is_win2k_and_lower){
+        win_skip("SHSetIniStringW is not available\n");
+        return;
+    }
+
+    write_inifile(TestIniW);
+
+    ret = pSHSetIniStringW(TestAppW, AKeyW, AValueW, TestIniW);
+    ok(ret == TRUE, "SHSetIniStringW should not have failed\n");
+    todo_wine /* wine sticks an extra \r\n at the end of the file */
+        verify_inifile(TestIniW, "[TestApp]\r\nAKey=AValue\r\nAnotherKey=asdf\r\n");
+
+    ret = pSHSetIniStringW(TestAppW, AKeyW, NULL, TestIniW);
+    ok(ret == TRUE, "SHSetIniStringW should not have failed\n");
+    verify_inifile(TestIniW, "[TestApp]\r\nAnotherKey=asdf\r\n");
+
+    ret = pSHSetIniStringW(AnotherAppW, NewKeyW, AValueW, TestIniW);
+    ok(ret == TRUE, "SHSetIniStringW should not have failed\n");
+    verify_inifile(TestIniW, "[TestApp]\r\nAnotherKey=asdf\r\n[AnotherApp]\r\nNewKey=AValue\r\n");
+
+    ret = pSHSetIniStringW(TestAppW, NULL, AValueW, TestIniW);
+    ok(ret == TRUE, "SHSetIniStringW should not have failed\n");
+    verify_inifile(TestIniW, "[AnotherApp]\r\nNewKey=AValue\r\n");
+
+    DeleteFileW(TestIniW);
+}
+
+enum _shellkey_flags {
+    SHKEY_Explorer  = 0x00,
+    SHKEY_Root_HKCU = 0x01
+};
+
+static void test_SHGetShellKey(void)
+{
+    void *pPathBuildRootW = GetProcAddress(hShlwapi, "PathBuildRootW");
+    HKEY hkey, hkey2;
+    DWORD ret;
+
+    if (!pSHGetShellKey)
+    {
+        win_skip("SHGetShellKey(ordinal 491) isn't available\n");
+        return;
+    }
+
+    /* some win2k */
+    if (pPathBuildRootW && pPathBuildRootW == pSHGetShellKey)
+    {
+        win_skip("SHGetShellKey(ordinal 491) used for PathBuildRootW\n");
+        return;
+    }
+
+    if (is_win9x || is_win2k_and_lower)
+    {
+        win_skip("Ordinal 491 used for another call, skipping SHGetShellKey tests\n");
+        return;
+    }
+
+    /* marking broken cause latest Vista+ versions fail here */
+    SetLastError(0xdeadbeef);
+    hkey = pSHGetShellKey(SHKEY_Explorer, NULL, FALSE);
+    ok(hkey == NULL || broken(hkey != NULL), "got %p\n", hkey);
+    if (hkey)
+    {
+        hkey2 = 0;
+        ret = RegOpenKeyExA(hkey, "Shell Folders", 0, KEY_READ, &hkey2);
+        ok(ret == ERROR_SUCCESS, "got %d\n", ret);
+        ok(hkey2 != NULL, "got %p\n", hkey2);
+        RegCloseKey( hkey2 );
+        RegCloseKey( hkey );
+    }
+
+    hkey = pSHGetShellKey(SHKEY_Explorer | SHKEY_Root_HKCU, NULL, FALSE);
+    ok(hkey != NULL, "got %p\n", hkey);
+
+    hkey2 = 0;
+    ret = RegOpenKeyExA(hkey, "Shell Folders", 0, KEY_READ, &hkey2);
+    ok(ret == ERROR_SUCCESS, "got %d\n", ret);
+    ok(hkey2 != NULL, "got %p\n", hkey2);
+    RegCloseKey( hkey2 );
+
+    RegCloseKey( hkey );
 }
 
 static void init_pointers(void)
@@ -2385,10 +2751,14 @@ static void init_pointers(void)
     MAKEFUNC(SHPackDispParams, 282);
     MAKEFUNC(IConnectionPoint_InvokeWithCancel, 283);
     MAKEFUNC(IConnectionPoint_SimpleInvoke, 284);
+    MAKEFUNC(SHGetIniStringW, 294);
+    MAKEFUNC(SHSetIniStringW, 295);
     MAKEFUNC(SHFormatDateTimeA, 353);
     MAKEFUNC(SHFormatDateTimeW, 354);
+    MAKEFUNC(SHIShellFolder_EnumObjects, 404);
     MAKEFUNC(SHGetObjectCompatFlags, 476);
     MAKEFUNC(IUnknown_QueryServiceExec, 484);
+    MAKEFUNC(SHGetShellKey, 491);
     MAKEFUNC(SHPropertyBag_ReadLONG, 496);
     MAKEFUNC(IUnknown_ProfferService, 514);
 #undef MAKEFUNC
@@ -2398,11 +2768,15 @@ START_TEST(ordinal)
 {
     hShlwapi = GetModuleHandleA("shlwapi.dll");
     is_win2k_and_lower = GetProcAddress(hShlwapi, "StrChrNW") == 0;
+    is_win9x = GetProcAddress(hShlwapi, (LPSTR)99) == 0; /* StrCpyNXA */
 
     init_pointers();
 
     hmlang = LoadLibraryA("mlang.dll");
     pLcidToRfc1766A = (void *)GetProcAddress(hmlang, "LcidToRfc1766A");
+
+    hshell32 = LoadLibraryA("shell32.dll");
+    pSHGetDesktopFolder = (void *)GetProcAddress(hshell32, "SHGetDesktopFolder");
 
     test_GetAcceptLanguagesA();
     test_SHSearchMapInt();
@@ -2419,4 +2793,11 @@ START_TEST(ordinal)
     test_IUnknown_QueryServiceExec();
     test_IUnknown_ProfferService();
     test_SHCreateWorkerWindowA();
+    test_SHIShellFolder_EnumObjects();
+    test_SHGetIniString();
+    test_SHSetIniString();
+    test_SHGetShellKey();
+
+    FreeLibrary(hshell32);
+    FreeLibrary(hmlang);
 }

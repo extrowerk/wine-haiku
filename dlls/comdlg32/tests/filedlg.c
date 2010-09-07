@@ -562,14 +562,16 @@ static void test_resize(void)
 
 /* test cases for control message IDOK */
 /* Show case for bug #19079 */
-static struct {
+typedef struct {
     int  retval;        /* return code of the message handler */
     BOOL setmsgresult;  /* set the result in the DWLP_MSGRESULT */
     BOOL usemsgokstr;   /* use the FILEOKSTRING message instead of WM_NOTIFY:CDN_FILEOK */
     BOOL do_subclass;   /* subclass the dialog hook procedure */
     BOOL expclose;      /* is the dialog expected to close ? */
     BOOL actclose;      /* has the dialog actually closed ? */
-} ok_testcases[] = {
+} ok_wndproc_testcase;
+
+static ok_wndproc_testcase ok_testcases[] = {
     { 0,        FALSE,  FALSE,  FALSE,  TRUE},
     { 0,         TRUE,  FALSE,  FALSE,  TRUE},
     { 0,        FALSE,  FALSE,   TRUE,  TRUE},
@@ -590,12 +592,12 @@ static struct {
 static LONG_PTR WINAPI test_ok_wndproc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     HWND parent = GetParent( dlg);
-    static int index;
+    static ok_wndproc_testcase *testcase = NULL;
     static UINT msgFILEOKSTRING;
     if (msg == WM_INITDIALOG)
     {
-        index = ((OPENFILENAME*)lParam)->lCustData;
-        ok_testcases[index].actclose = TRUE;
+        testcase = (ok_wndproc_testcase*)((OPENFILENAME*)lParam)->lCustData;
+        testcase->actclose = TRUE;
         msgFILEOKSTRING = RegisterWindowMessageA( FILEOKSTRING);
     }
     if( msg == WM_NOTIFY) {
@@ -604,28 +606,28 @@ static LONG_PTR WINAPI test_ok_wndproc(HWND dlg, UINT msg, WPARAM wParam, LPARAM
             PostMessage( parent, WM_COMMAND, IDOK, 0);
             return FALSE;
         } else if(((LPNMHDR)lParam)->code == CDN_FILEOK) {
-            if( ok_testcases[index].usemsgokstr)
+            if( testcase->usemsgokstr)
                 return FALSE;
-            if( ok_testcases[index].setmsgresult)
-                SetWindowLongPtrA( dlg, DWLP_MSGRESULT, ok_testcases[index].retval);
-            return ok_testcases[index].retval;
+            if( testcase->setmsgresult)
+                SetWindowLongPtrA( dlg, DWLP_MSGRESULT, testcase->retval);
+            return testcase->retval;
         }
     }
     if( msg == msgFILEOKSTRING) {
-        if( !ok_testcases[index].usemsgokstr)
+        if( !testcase->usemsgokstr)
             return FALSE;
-        if( ok_testcases[index].setmsgresult)
-            SetWindowLongPtrA( dlg, DWLP_MSGRESULT, ok_testcases[index].retval);
-        return ok_testcases[index].retval;
+        if( testcase->setmsgresult)
+            SetWindowLongPtrA( dlg, DWLP_MSGRESULT, testcase->retval);
+        return testcase->retval;
     }
     if( msg == WM_TIMER) {
         /* the dialog did not close automatically */
-        ok_testcases[index].actclose = FALSE;
+        testcase->actclose = FALSE;
         KillTimer( dlg, 0);
         PostMessage( parent, WM_COMMAND, IDCANCEL, 0);
         return FALSE;
     }
-    if( ok_testcases[index].do_subclass)
+    if( testcase && testcase->do_subclass)
         return DefWindowProc( dlg, msg, wParam, lParam);
     return FALSE;
 }
@@ -658,7 +660,7 @@ static void test_ok(void)
     ofn.Flags =  OFN_ENABLEHOOK | OFN_EXPLORER| OFN_ENABLETEMPLATE ;
     for( i = 0; ok_testcases[i].retval != -1; i++) {
         strcpy( filename, tmpfilename);
-        ofn.lCustData = i;
+        ofn.lCustData = (LPARAM)(ok_testcases + i);
         ofn.lpfnHook = ok_testcases[i].do_subclass
             ? (LPOFNHOOKPROC) ok_template_hook
             : (LPOFNHOOKPROC) test_ok_wndproc;
@@ -983,6 +985,55 @@ static void test_resizable2(void)
 #undef ISSIZABLE
 }
 
+static void test_mru(void)
+{
+    ok_wndproc_testcase testcase = {0};
+    OPENFILENAME ofn = {sizeof(OPENFILENAME)};
+    const char *test_dir_name = "C:\\mru_test";
+    const char *test_file_name = "test.txt";
+    const char *test_full_path = "C:\\mru_test\\test.txt";
+    char filename_buf[MAX_PATH];
+    DWORD ret;
+
+    ofn.lpstrFile = filename_buf;
+    ofn.nMaxFile = sizeof(filename_buf);
+    ofn.lpTemplateName = "template1";
+    ofn.hInstance = GetModuleHandle(NULL);
+    ofn.Flags =  OFN_ENABLEHOOK | OFN_EXPLORER | OFN_ENABLETEMPLATE | OFN_NOCHANGEDIR;
+    ofn.lCustData = (LPARAM)&testcase;
+    ofn.lpfnHook = (LPOFNHOOKPROC)test_ok_wndproc;
+
+    SetLastError(0xdeadbeef);
+    ret = CreateDirectoryA(test_dir_name, NULL);
+    ok(ret == TRUE, "CreateDirectoryA should have succeeded: %d\n", GetLastError());
+
+    /* "teach" comdlg32 about this directory */
+    strcpy(filename_buf, test_full_path);
+    SetLastError(0xdeadbeef);
+    ret = GetOpenFileNameA(&ofn);
+    ok(ret, "GetOpenFileNameA should have succeeded: %d\n", GetLastError());
+    ret = CommDlgExtendedError();
+    ok(!ret, "CommDlgExtendedError returned %x\n", ret);
+    ok(testcase.actclose, "Open File dialog should have closed.\n");
+    ok(!strcmp(ofn.lpstrFile, test_full_path), "Expected to get %s, got %s\n", test_full_path, ofn.lpstrFile);
+
+    /* get a filename without a full path. it should return the file in
+     * test_dir_name, not in the CWD */
+    strcpy(filename_buf, test_file_name);
+    SetLastError(0xdeadbeef);
+    ret = GetOpenFileNameA(&ofn);
+    ok(ret, "GetOpenFileNameA should have succeeded: %d\n", GetLastError());
+    ret = CommDlgExtendedError();
+    ok(!ret, "CommDlgExtendedError returned %x\n", ret);
+    ok(testcase.actclose, "Open File dialog should have closed.\n");
+    if(strcmp(ofn.lpstrFile, test_full_path) != 0)
+        win_skip("Platform doesn't save MRU data\n");
+
+    SetLastError(0xdeadbeef);
+    ret = RemoveDirectoryA(test_dir_name);
+    ok(ret == TRUE, "RemoveDirectoryA should have succeeded: %d\n", GetLastError());
+}
+
 START_TEST(filedlg)
 {
     test_DialogCancel();
@@ -992,5 +1043,6 @@ START_TEST(filedlg)
     test_resize();
     test_ok();
     test_getfolderpath();
+    test_mru();
     if( resizesupported) test_resizable2();
 }

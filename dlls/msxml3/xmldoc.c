@@ -27,7 +27,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
-#include "msxml2.h"
+#include "msxml6.h"
 #include "wininet.h"
 #include "winreg.h"
 #include "shlwapi.h"
@@ -591,7 +591,7 @@ static HRESULT WINAPI xmldoc_IPersistStreamInit_IsDirty(
     return E_NOTIMPL;
 }
 
-xmlDocPtr parse_xml(char *ptr, int len)
+static xmlDocPtr parse_xml(char *ptr, int len)
 {
 #ifdef HAVE_XMLREADMEMORY
     return xmlReadMemory(ptr, len, NULL, NULL,

@@ -1404,9 +1404,8 @@ static void load_builtin_callback( void *module, const char *filename )
         builtin_load_info->status = STATUS_INVALID_IMAGE_FORMAT;
         return;
     }
-    virtual_create_system_view( module, nt->OptionalHeader.SizeOfImage,
-                                VPROT_SYSTEM | VPROT_IMAGE | VPROT_COMMITTED |
-                                VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC );
+
+    virtual_create_builtin_view( module );
 
     /* create the MODREF */
 
@@ -2120,7 +2119,6 @@ IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count
         {
         case IMAGE_REL_BASED_ABSOLUTE:
             break;
-#ifdef __i386__
         case IMAGE_REL_BASED_HIGH:
             *(short *)((char *)page + offset) += HIWORD(delta);
             break;
@@ -2130,7 +2128,7 @@ IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count
         case IMAGE_REL_BASED_HIGHLOW:
             *(int *)((char *)page + offset) += delta;
             break;
-#elif defined(__x86_64__)
+#ifdef __x86_64__
         case IMAGE_REL_BASED_DIR64:
             *(INT_PTR *)((char *)page + offset) += delta;
             break;

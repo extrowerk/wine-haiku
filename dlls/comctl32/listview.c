@@ -456,7 +456,7 @@ static INT LISTVIEW_GetStringWidthT(const LISTVIEW_INFO *, LPCWSTR, BOOL);
 static BOOL LISTVIEW_KeySelection(LISTVIEW_INFO *, INT, BOOL);
 static UINT LISTVIEW_GetItemState(const LISTVIEW_INFO *, INT, UINT);
 static BOOL LISTVIEW_SetItemState(LISTVIEW_INFO *, INT, const LVITEMW *);
-static LRESULT LISTVIEW_VScroll(LISTVIEW_INFO *, INT, INT, HWND);
+static LRESULT LISTVIEW_VScroll(LISTVIEW_INFO *, INT, INT);
 static LRESULT LISTVIEW_HScroll(LISTVIEW_INFO *, INT, INT, HWND);
 static BOOL LISTVIEW_EnsureVisible(LISTVIEW_INFO *, INT, BOOL);
 static HIMAGELIST LISTVIEW_SetImageList(LISTVIEW_INFO *, INT, HIMAGELIST);
@@ -474,20 +474,14 @@ static BOOL LISTVIEW_Scroll(LISTVIEW_INFO *, INT, INT);
  *   W: Unicode, T: ANSI/Unicode - function of isW
  */
 
-static inline BOOL is_textW(LPCWSTR text)
+static inline BOOL is_text(LPCWSTR text)
 {
     return text != NULL && text != LPSTR_TEXTCALLBACKW;
 }
 
-static inline BOOL is_textT(LPCWSTR text, BOOL isW)
-{
-    /* we can ignore isW since LPSTR_TEXTCALLBACKW == LPSTR_TEXTCALLBACKA */
-    return is_textW(text);
-}
-
 static inline int textlenT(LPCWSTR text, BOOL isW)
 {
-    return !is_textT(text, isW) ? 0 :
+    return !is_text(text) ? 0 :
 	   isW ? lstrlenW(text) : lstrlenA((LPCSTR)text);
 }
 
@@ -505,7 +499,7 @@ static inline LPWSTR textdupTtoW(LPCWSTR text, BOOL isW)
 {
     LPWSTR wstr = (LPWSTR)text;
 
-    if (!isW && is_textT(text, isW))
+    if (!isW && is_text(text))
     {
 	INT len = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)text, -1, NULL, 0);
 	wstr = Alloc(len * sizeof(WCHAR));
@@ -517,7 +511,7 @@ static inline LPWSTR textdupTtoW(LPCWSTR text, BOOL isW)
 
 static inline void textfreeT(LPWSTR wstr, BOOL isW)
 {
-    if (!isW && is_textT(wstr, isW)) Free (wstr);
+    if (!isW && is_text(wstr)) Free (wstr);
 }
 
 /*
@@ -530,7 +524,7 @@ static BOOL textsetptrT(LPWSTR *dest, LPCWSTR src, BOOL isW)
     
     if (src == LPSTR_TEXTCALLBACKW)
     {
-	if (is_textW(*dest)) Free(*dest);
+	if (is_text(*dest)) Free(*dest);
 	*dest = LPSTR_TEXTCALLBACKW;
     }
     else
@@ -946,7 +940,7 @@ static BOOL notify_dispinfoT(const LISTVIEW_INFO *infoPtr, UINT notificationCode
     UINT realNotifCode;
     LPWSTR pszTempBuf = NULL, savPszText = NULL;
 
-    if ((pdi->item.mask & LVIF_TEXT) && is_textT(pdi->item.pszText, isW))
+    if ((pdi->item.mask & LVIF_TEXT) && is_text(pdi->item.pszText))
     {
 	convertToAnsi = (isW && infoPtr->notifyFormat == NFR_ANSI);
 	convertToUnicode = (!isW && infoPtr->notifyFormat == NFR_UNICODE);
@@ -1855,8 +1849,9 @@ static INT LISTVIEW_ProcessLetterKeys(LISTVIEW_INFO *infoPtr, WPARAM charCode, L
                 }
             }
 
-            /* found something or second search completed with any result */
-            if (nItem != -1 || endidx != infoPtr->nItemCount)
+            if ( nItem != -1 || /* found something */
+                 endidx != infoPtr->nItemCount || /* second search done */
+                (startidx == 0 && endidx == infoPtr->nItemCount) /* full range for first search */ )
                 break;
         };
     }
@@ -2325,7 +2320,7 @@ static void LISTVIEW_GetItemMetrics(const LISTVIEW_INFO *infoPtr, const LVITEMW 
 	
 	/* we need the text in non owner draw mode */
 	assert(lpLVItem->mask & LVIF_TEXT);
-	if (is_textT(lpLVItem->pszText, TRUE))
+	if (is_text(lpLVItem->pszText))
         {
     	    HFONT hFont = infoPtr->hFont ? infoPtr->hFont : infoPtr->hDefaultFont;
     	    HDC hdc = GetDC(infoPtr->hwndSelf);
@@ -3704,7 +3699,9 @@ static LRESULT LISTVIEW_MouseHover(LISTVIEW_INFO *infoPtr, INT x, INT y)
  * RETURN:
  *   None.
  */
-static void LISTVIEW_MarqueeHighlight(LISTVIEW_INFO *infoPtr, LPPOINT coords_orig, LPPOINT coords_offs, LPPOINT offset, INT scroll)
+static void LISTVIEW_MarqueeHighlight(LISTVIEW_INFO *infoPtr, const POINT *coords_orig,
+                                      const POINT *coords_offs, const POINT *offset,
+                                      INT scroll)
 {
     BOOL controlDown = FALSE;
     LVITEMW item;
@@ -4318,7 +4315,7 @@ static BOOL LISTVIEW_SetItemT(LISTVIEW_INFO *infoPtr, LVITEMW *lpLVItem, BOOL is
 	return FALSE;
 
     /* For efficiency, we transform the lpLVItem->pszText to Unicode here */
-    if ((lpLVItem->mask & LVIF_TEXT) && is_textW(lpLVItem->pszText))
+    if ((lpLVItem->mask & LVIF_TEXT) && is_text(lpLVItem->pszText))
     {
 	pszText = lpLVItem->pszText;
 	lpLVItem->pszText = textdupTtoW(lpLVItem->pszText, isW);
@@ -5307,7 +5304,7 @@ static BOOL LISTVIEW_DeleteAllItems(LISTVIEW_INFO *infoPtr, BOOL destroy)
 	    for (j = 0; j < DPA_GetPtrCount(hdpaSubItems); j++)
 	    {
 	        hdrItem = DPA_GetPtr(hdpaSubItems, j);
-		if (is_textW(hdrItem->pszText)) Free(hdrItem->pszText);
+		if (is_text(hdrItem->pszText)) Free(hdrItem->pszText);
 		Free(hdrItem);
 	    }
 	    DPA_Destroy(hdpaSubItems);
@@ -5449,7 +5446,7 @@ static BOOL LISTVIEW_DeleteColumn(LISTVIEW_INFO *infoPtr, INT nColumn)
 	    if (nSubItem > 0)
 	    {
 		/* free string */
-		if (is_textW(lpDelItem->hdr.pszText))
+		if (is_text(lpDelItem->hdr.pszText))
 		    Free(lpDelItem->hdr.pszText);
 
 		/* free item */
@@ -5598,7 +5595,7 @@ static BOOL LISTVIEW_DeleteItem(LISTVIEW_INFO *infoPtr, INT nItem)
 	for (i = 0; i < DPA_GetPtrCount(hdpaSubItems); i++)
     	{
             hdrItem = DPA_GetPtr(hdpaSubItems, i);
-	    if (is_textW(hdrItem->pszText)) Free(hdrItem->pszText);
+	    if (is_text(hdrItem->pszText)) Free(hdrItem->pszText);
             Free(hdrItem);
         }
         DPA_Destroy(hdpaSubItems);
@@ -6036,7 +6033,7 @@ static BOOL LISTVIEW_EnsureVisible(LISTVIEW_INFO *infoPtr, INT nItem, BOOL bPart
     {
 	INT diff = nVertDiff / nScrollPosHeight;
 	if (nVertDiff % nScrollPosHeight) diff += nVertAdjust;
-	LISTVIEW_VScroll(infoPtr, SB_INTERNAL, diff, 0);
+	LISTVIEW_VScroll(infoPtr, SB_INTERNAL, diff);
     }
 
     return TRUE;
@@ -6598,7 +6595,7 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
 
     /* Apps depend on calling back for text if it is NULL or LPSTR_TEXTCALLBACKW */
     if ((lpLVItem->mask & LVIF_TEXT) && !(lpLVItem->mask & LVIF_NORECOMPUTE) &&
-        !is_textW(pItemHdr->pszText))
+        !is_text(pItemHdr->pszText))
     {
 	dispInfo.item.mask |= LVIF_TEXT;
 	dispInfo.item.pszText = lpLVItem->pszText;
@@ -6646,7 +6643,7 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
     else if (lpLVItem->mask & LVIF_TEXT)
     {
 	/* if LVN_GETDISPINFO's disabled with LVIF_NORECOMPUTE return callback placeholder */
-	if (isW || !is_textW(pItemHdr->pszText)) lpLVItem->pszText = pItemHdr->pszText;
+	if (isW || !is_text(pItemHdr->pszText)) lpLVItem->pszText = pItemHdr->pszText;
 	else textcpynT(lpLVItem->pszText, isW, pItemHdr->pszText, TRUE, lpLVItem->cchTextMax);
     }
 
@@ -7353,7 +7350,7 @@ static INT LISTVIEW_GetStringWidthT(const LISTVIEW_INFO *infoPtr, LPCWSTR lpszTe
     SIZE stringSize;
     
     stringSize.cx = 0;    
-    if (is_textT(lpszText, isW))
+    if (is_text(lpszText))
     {
     	HFONT hFont = infoPtr->hFont ? infoPtr->hFont : infoPtr->hDefaultFont;
     	HDC hdc = GetDC(infoPtr->hwndSelf);
@@ -7819,7 +7816,7 @@ static BOOL LISTVIEW_Scroll(LISTVIEW_INFO *infoPtr, INT dx, INT dy)
     }	
 
     if (dx != 0) LISTVIEW_HScroll(infoPtr, SB_INTERNAL, dx, 0);
-    if (dy != 0) LISTVIEW_VScroll(infoPtr, SB_INTERNAL, dy, 0);
+    if (dy != 0) LISTVIEW_VScroll(infoPtr, SB_INTERNAL, dy);
   
     return TRUE;
 }
@@ -8677,7 +8674,7 @@ static BOOL LISTVIEW_SetItemCount(LISTVIEW_INFO *infoPtr, INT nItems, DWORD dwFl
  *   SUCCESS : TRUE
  *   FAILURE : FALSE
  */
-static BOOL LISTVIEW_SetItemPosition(LISTVIEW_INFO *infoPtr, INT nItem, POINT *pt)
+static BOOL LISTVIEW_SetItemPosition(LISTVIEW_INFO *infoPtr, INT nItem, const POINT *pt)
 {
     POINT Origin, Pt;
 
@@ -9452,7 +9449,7 @@ static void scroll_list(LISTVIEW_INFO *infoPtr, INT dx, INT dy)
  *
  */
 static LRESULT LISTVIEW_VScroll(LISTVIEW_INFO *infoPtr, INT nScrollCode, 
-				INT nScrollDiff, HWND hScrollWnd)
+				INT nScrollDiff)
 {
     INT nOldScrollPos, nNewScrollPos;
     SCROLLINFO scrollInfo;
@@ -9657,7 +9654,7 @@ static LRESULT LISTVIEW_MouseWheel(LISTVIEW_INFO *infoPtr, INT wheelDelta)
         *  should be fixed in the future.
         */
         LISTVIEW_VScroll(infoPtr, SB_INTERNAL, (gcWheelDelta < 0) ?
-                -LISTVIEW_SCROLL_ICON_LINE_SIZE : LISTVIEW_SCROLL_ICON_LINE_SIZE, 0);
+                -LISTVIEW_SCROLL_ICON_LINE_SIZE : LISTVIEW_SCROLL_ICON_LINE_SIZE);
         break;
 
     case LV_VIEW_DETAILS:
@@ -9665,7 +9662,7 @@ static LRESULT LISTVIEW_MouseWheel(LISTVIEW_INFO *infoPtr, INT wheelDelta)
         {
             int cLineScroll = min(LISTVIEW_GetCountPerColumn(infoPtr), pulScrollLines);
             cLineScroll *= (gcWheelDelta / WHEEL_DELTA);
-            LISTVIEW_VScroll(infoPtr, SB_INTERNAL, cLineScroll, 0);
+            LISTVIEW_VScroll(infoPtr, SB_INTERNAL, cLineScroll);
         }
         break;
 
@@ -11496,7 +11493,7 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return LISTVIEW_ThemeChanged(infoPtr);
 
   case WM_VSCROLL:
-    return LISTVIEW_VScroll(infoPtr, (INT)LOWORD(wParam), 0, (HWND)lParam);
+    return LISTVIEW_VScroll(infoPtr, (INT)LOWORD(wParam), 0);
 
   case WM_MOUSEWHEEL:
       if (wParam & (MK_SHIFT | MK_CONTROL))

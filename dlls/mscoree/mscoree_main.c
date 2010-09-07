@@ -32,6 +32,7 @@
 
 #include "initguid.h"
 #include "cor.h"
+#include "corerror.h"
 #include "mscoree.h"
 #include "mscoree_private.h"
 
@@ -70,6 +71,28 @@ static BOOL get_mono_path(LPWSTR path)
 
     len = sizeof(WCHAR) * MAX_PATH;
     if (RegQueryValueExW(key, install_root, 0, NULL, (LPBYTE)path, &len))
+    {
+        RegCloseKey(key);
+        return FALSE;
+    }
+    RegCloseKey(key);
+
+    return TRUE;
+}
+
+static BOOL get_install_root(LPWSTR install_dir)
+{
+    const WCHAR dotnet_key[] = {'S','O','F','T','W','A','R','E','\\','M','i','c','r','o','s','o','f','t','\\','.','N','E','T','F','r','a','m','e','w','o','r','k','\\',0};
+    const WCHAR install_root[] = {'I','n','s','t','a','l','l','R','o','o','t',0};
+
+    DWORD len;
+    HKEY key;
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, dotnet_key, 0, KEY_READ, &key))
+        return FALSE;
+
+    len = MAX_PATH;
+    if (RegQueryValueExW(key, install_root, 0, NULL, (LPBYTE)install_dir, &len))
     {
         RegCloseKey(key);
         return FALSE;
@@ -336,32 +359,54 @@ HRESULT WINAPI _CorValidateImage(PVOID* imageBase, LPCWSTR imageName)
 
 HRESULT WINAPI GetCORSystemDirectory(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
 {
-    FIXME("(%p, %d, %p): stub!\n", pbuffer, cchBuffer, dwLength);
-
-    if (!dwLength)
-        return E_POINTER;
-
-    *dwLength = 0;
-
-    return S_OK;
-}
-
-HRESULT WINAPI GetCORVersion(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
-{
-    static const WCHAR version[] = {'v','1','.','1','.','4','3','2','2',0};
+    static const WCHAR slash[] = {'\\',0};
+    WCHAR system_dir[MAX_PATH];
+    WCHAR version[MAX_PATH];
 
     FIXME("(%p, %d, %p): semi-stub!\n", pbuffer, cchBuffer, dwLength);
 
     if (!dwLength)
         return E_POINTER;
 
-    *dwLength = lstrlenW(version);
+    if (!pbuffer)
+        return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+
+    if (!get_install_root(system_dir))
+    {
+        ERR("error reading registry key for installroot, returning empty path\n");
+        *dwLength = 0;
+    }
+    else
+    {
+        GetCORVersion(version, MAX_PATH, dwLength);
+        lstrcatW(system_dir, version);
+        lstrcatW(system_dir, slash);
+        *dwLength = lstrlenW(system_dir) + 1;
+
+        if (cchBuffer < *dwLength)
+            return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+
+        lstrcpyW(pbuffer, system_dir);
+    }
+
+    return S_OK;
+}
+
+HRESULT WINAPI GetCORVersion(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
+{
+    static const WCHAR version[] = {'v','2','.','0','.','5','0','7','2','7',0};
+
+    FIXME("(%p, %d, %p): semi-stub!\n", pbuffer, cchBuffer, dwLength);
+
+    if (!dwLength || !pbuffer)
+        return E_POINTER;
+
+    *dwLength = lstrlenW(version) + 1;
 
     if (cchBuffer < *dwLength)
-        return ERROR_INSUFFICIENT_BUFFER;
+        return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
 
-    if (pbuffer)
-        lstrcpyW(pbuffer, version);
+    lstrcpyW(pbuffer, version);
 
     return S_OK;
 }
@@ -370,10 +415,37 @@ HRESULT WINAPI GetRequestedRuntimeInfo(LPCWSTR pExe, LPCWSTR pwszVersion, LPCWST
     DWORD startupFlags, DWORD runtimeInfoFlags, LPWSTR pDirectory, DWORD dwDirectory, DWORD *dwDirectoryLength,
     LPWSTR pVersion, DWORD cchBuffer, DWORD *dwlength)
 {
-    FIXME("(%s, %s, %s, 0x%08x, 0x%08x, %p, 0x%08x, %p, %p, 0x%08x, %p) stub\n", debugstr_w(pExe),
+    HRESULT ret;
+    DWORD ver_len, dir_len;
+    WCHAR dirW[MAX_PATH], verW[MAX_PATH];
+
+    FIXME("(%s, %s, %s, 0x%08x, 0x%08x, %p, 0x%08x, %p, %p, 0x%08x, %p) semi-stub\n", debugstr_w(pExe),
           debugstr_w(pwszVersion), debugstr_w(pConfigurationFile), startupFlags, runtimeInfoFlags, pDirectory,
           dwDirectory, dwDirectoryLength, pVersion, cchBuffer, dwlength);
-    return GetCORVersion(pVersion, cchBuffer, dwlength);
+
+    if (!pwszVersion && !(runtimeInfoFlags & RUNTIME_INFO_UPGRADE_VERSION))
+        return CLR_E_SHIM_RUNTIME;
+
+    ret = GetCORSystemDirectory(dirW, dwDirectory, &dir_len);
+
+    if (ret == S_OK)
+    {
+        if (dwDirectoryLength)
+            *dwDirectoryLength = dir_len;
+        if (pDirectory)
+            lstrcpyW(pDirectory, dirW);
+
+        ret = GetCORVersion(verW, cchBuffer, &ver_len);
+
+        if (ret == S_OK)
+        {
+            if (dwlength)
+                *dwlength = ver_len;
+            if (pVersion)
+                lstrcpyW(pVersion, verW);
+        }
+    }
+    return ret;
 }
 
 HRESULT WINAPI LoadLibraryShim( LPCWSTR szDllName, LPCWSTR szVersion, LPVOID pvReserved, HMODULE * phModDll)

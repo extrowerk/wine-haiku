@@ -26,6 +26,7 @@ PUBLIC_IDL_H_SRCS = \
 	ctfutb.idl \
 	ctxtcall.idl \
 	d3d10.idl \
+	d3dcommon.idl \
 	ddstream.idl \
 	devicetopology.idl \
 	dimm.idl \
@@ -60,6 +61,7 @@ PUBLIC_IDL_H_SRCS = \
 	mstask.idl \
 	msxml.idl \
 	msxml2.idl \
+	msxml6.idl \
 	netcon.idl \
 	netfw.idl \
 	oaidl.idl \
@@ -155,6 +157,7 @@ SRCDIR_INCLUDES = \
 	d3d10effect.h \
 	d3d10misc.h \
 	d3d10shader.h \
+	d3d11shader.h \
 	d3d8.h \
 	d3d8caps.h \
 	d3d8types.h \
@@ -162,6 +165,7 @@ SRCDIR_INCLUDES = \
 	d3d9caps.h \
 	d3d9types.h \
 	d3dcaps.h \
+	d3dcompiler.h \
 	d3dhal.h \
 	d3drm.h \
 	d3drmdef.h \
@@ -278,6 +282,7 @@ SRCDIR_INCLUDES = \
 	imagehlp.h \
 	imm.h \
 	in6addr.h \
+	inaddr.h \
 	initguid.h \
 	intshcut.h \
 	ipexport.h \
@@ -375,6 +380,7 @@ SRCDIR_INCLUDES = \
 	msvcrt/wctype.h \
 	mswsock.h \
 	msxml2did.h \
+	msxml6did.h \
 	msxmldid.h \
 	nb30.h \
 	ndrtypes.h \
@@ -480,6 +486,7 @@ SRCDIR_INCLUDES = \
 	vfw.h \
 	vfwmsgs.h \
 	vmrender.idl \
+	werapi.h \
 	wfext.h \
 	wia.h \
 	winbase.h \
@@ -552,7 +559,7 @@ IDL_H_SRCS = $(PUBLIC_IDL_H_SRCS) $(PRIVATE_IDL_H_SRCS)
 
 @MAKE_RULES@
 
-OBJDIR_INCLUDES = $(PUBLIC_IDL_H_SRCS:.idl=.h) $(IDL_TLB_SRCS:.idl=.tlb)
+OBJDIR_INCLUDES = $(PUBLIC_IDL_H_SRCS:.idl=.h)
 
 all: $(IDL_H_SRCS:.idl=.h) $(IDL_TLB_SRCS:.idl=.tlb)
 

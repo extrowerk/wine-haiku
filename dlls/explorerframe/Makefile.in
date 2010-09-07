@@ -1,0 +1,17 @@
+EXTRADEFS = -DCOM_NO_WINDOWS_H
+TOPSRCDIR = @top_srcdir@
+TOPOBJDIR = ../..
+SRCDIR    = @srcdir@
+VPATH     = @srcdir@
+MODULE    = explorerframe.dll
+IMPORTS   = uuid ole32 shell32 user32
+
+C_SRCS = \
+	explorerframe_main.c \
+	nstc.c
+
+RC_SRCS = \
+	eframe.rc \
+	version.rc
+
+@MAKE_DLL_RULES@

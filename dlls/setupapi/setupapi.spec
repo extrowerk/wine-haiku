@@ -273,7 +273,7 @@
 @ stdcall SetupDiBuildClassInfoList(long ptr long ptr)
 @ stdcall SetupDiBuildClassInfoListExA(long ptr long ptr str ptr)
 @ stdcall SetupDiBuildClassInfoListExW(long ptr long ptr wstr ptr)
-@ stub SetupDiBuildDriverInfoList
+@ stdcall SetupDiBuildDriverInfoList(ptr ptr long)
 @ stdcall SetupDiCallClassInstaller(long ptr ptr)
 @ stub SetupDiCancelDriverInfoSearch
 @ stub SetupDiChangeState
@@ -297,7 +297,7 @@
 @ stdcall SetupDiCreateDeviceInterfaceRegKeyA(ptr ptr long long ptr ptr)
 @ stdcall SetupDiCreateDeviceInterfaceRegKeyW(ptr ptr long long ptr ptr)
 @ stdcall SetupDiDeleteDevRegKey(ptr ptr long long long)
-@ stub SetupDiDeleteDeviceInfo
+@ stdcall SetupDiDeleteDeviceInfo(ptr ptr)
 @ stub SetupDiDeleteDeviceInterfaceData
 @ stdcall SetupDiDeleteDeviceInterfaceRegKey(ptr ptr long)
 @ stub SetupDiDeleteDeviceRegKey
@@ -363,7 +363,7 @@
 @ stdcall SetupDiInstallClassW(long wstr long ptr)
 @ stub SetupDiInstallDevice
 @ stub SetupDiInstallDriverFiles
-@ stub SetupDiLoadClassIcon
+@ stdcall SetupDiLoadClassIcon(ptr ptr ptr)
 @ stub SetupDiMoveDuplicateDevice
 @ stdcall SetupDiOpenClassRegKey(ptr long)
 @ stdcall SetupDiOpenClassRegKeyExA(ptr long long str ptr)
@@ -391,8 +391,8 @@
 @ stub SetupDiSetSelectedDriverA
 @ stub SetupDiSetSelectedDriverW
 @ stub SetupDiUnremoveDevice
-@ stub SetupDuplicateDiskSpaceListA
-@ stub SetupDuplicateDiskSpaceListW
+@ stdcall SetupDuplicateDiskSpaceListA(ptr ptr long long)
+@ stdcall SetupDuplicateDiskSpaceListW(ptr ptr long long)
 @ stdcall SetupEnumInfSectionsA(long long ptr long ptr)
 @ stdcall SetupEnumInfSectionsW(long long ptr long ptr)
 @ stdcall SetupFindFirstLineA(long str str ptr)
@@ -469,8 +469,8 @@
 @ stdcall SetupPromptForDiskA(ptr str str str str str long ptr long ptr)
 @ stdcall SetupPromptForDiskW(ptr wstr wstr wstr wstr wstr long ptr long ptr)
 @ stdcall SetupPromptReboot(ptr ptr long)
-@ stub SetupQueryDrivesInDiskSpaceListA
-@ stub SetupQueryDrivesInDiskSpaceListW
+@ stdcall SetupQueryDrivesInDiskSpaceListA(ptr ptr long ptr)
+@ stdcall SetupQueryDrivesInDiskSpaceListW(ptr ptr long ptr)
 @ stub SetupQueryFileLogA
 @ stub SetupQueryFileLogW
 @ stdcall SetupQueryInfFileInformationA(ptr long str long ptr)
@@ -482,7 +482,7 @@
 @ stub SetupQuerySourceListA
 @ stub SetupQuerySourceListW
 @ stdcall SetupQuerySpaceRequiredOnDriveA(long str ptr ptr long)
-@ stub SetupQuerySpaceRequiredOnDriveW
+@ stdcall SetupQuerySpaceRequiredOnDriveW(long wstr ptr ptr long)
 @ stdcall SetupQueueCopyA(long str str str str str str str long)
 @ stdcall SetupQueueCopyIndirectA(ptr)
 @ stdcall SetupQueueCopyIndirectW(ptr)

@@ -1494,10 +1494,10 @@ LRESULT WINAPI DefMDIChildProcW( HWND hwnd, UINT message,
                 return SendMessageW( GetParent(client), message, wParam, lParam);
             break;
         case SC_NEXTWINDOW:
-            SendMessageW( client, WM_MDINEXT, 0, 0);
+            SendMessageW( client, WM_MDINEXT, (WPARAM)ci->hwndActiveChild, 0);
             return 0;
         case SC_PREVWINDOW:
-            SendMessageW( client, WM_MDINEXT, 0, 1);
+            SendMessageW( client, WM_MDINEXT, (WPARAM)ci->hwndActiveChild, 1);
             return 0;
         }
         break;
@@ -1720,13 +1720,12 @@ void WINAPI CalcChildScroll( HWND hwnd, INT scroll )
             if (style & WS_VISIBLE)
             {
                 RECT rect;
-                GetWindowRect( list[i], &rect );
+                WIN_GetRectangles( list[i], COORDS_PARENT, &rect, NULL );
                 UnionRect( &childRect, &rect, &childRect );
             }
         }
         HeapFree( GetProcessHeap(), 0, list );
     }
-    MapWindowPoints( 0, hwnd, (POINT *)&childRect, 2 );
     UnionRect( &childRect, &clientRect, &childRect );
 
     /* set common info values */

@@ -194,13 +194,13 @@ BOOL WINAPI CryptVerifyMessageSignature(PCRYPT_VERIFY_MESSAGE_PARA pVerifyPara,
 
     if (ppSignerCert)
         *ppSignerCert = NULL;
-    if (pcbDecoded)
-        *pcbDecoded = 0;
     if (!pVerifyPara ||
      pVerifyPara->cbSize != sizeof(CRYPT_VERIFY_MESSAGE_PARA) ||
      GET_CMSG_ENCODING_TYPE(pVerifyPara->dwMsgAndCertEncodingType) !=
      PKCS_7_ASN_ENCODING)
     {
+        if(pcbDecoded)
+            *pcbDecoded = 0;
         SetLastError(E_INVALIDARG);
         return FALSE;
     }
@@ -210,9 +210,6 @@ BOOL WINAPI CryptVerifyMessageSignature(PCRYPT_VERIFY_MESSAGE_PARA pVerifyPara,
     if (msg)
     {
         ret = CryptMsgUpdate(msg, pbSignedBlob, cbSignedBlob, TRUE);
-        if (ret && pcbDecoded)
-            ret = CryptMsgGetParam(msg, CMSG_CONTENT_PARAM, 0, pbDecoded,
-             pcbDecoded);
         if (ret)
         {
             CERT_INFO *certInfo = CRYPT_GetSignerCertInfoFromMsg(msg,
@@ -244,8 +241,24 @@ BOOL WINAPI CryptVerifyMessageSignature(PCRYPT_VERIFY_MESSAGE_PARA pVerifyPara,
             }
             CryptMemFree(certInfo);
         }
+        if (ret)
+        {
+            /* The caller is expected to pass a valid pointer to pcbDecoded
+             * when the message verifies successfully.
+             */
+            if (pcbDecoded)
+                ret = CryptMsgGetParam(msg, CMSG_CONTENT_PARAM, 0, pbDecoded,
+                 pcbDecoded);
+            else
+            {
+                SetLastError(CRYPT_E_NOT_FOUND);
+                ret = FALSE;
+            }
+        }
         CryptMsgClose(msg);
     }
+    if(!ret && pcbDecoded)
+        *pcbDecoded = 0;
     TRACE("returning %d\n", ret);
     return ret;
 }

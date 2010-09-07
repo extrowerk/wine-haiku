@@ -25,9 +25,9 @@
 
 LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 {
-    0 "objecto desconhecido" /* undocumented */
+    0 "objeto desconhecido" /* undocumented */
     ROLE_SYSTEM_TITLEBAR    "barra de título"
     ROLE_SYSTEM_MENUBAR     "barra de menu"
     ROLE_SYSTEM_SCROLLBAR   "barra de rolagem"
@@ -96,7 +96,7 @@ STRINGTABLE DISCARDABLE
 
 LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 {
     0 "objecto desconhecido" /* undocumented */
     ROLE_SYSTEM_TITLEBAR    "barra de título"

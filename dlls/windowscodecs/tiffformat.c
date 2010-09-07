@@ -59,6 +59,7 @@ MAKE_FUNCPTR(TIFFClientOpen);
 MAKE_FUNCPTR(TIFFClose);
 MAKE_FUNCPTR(TIFFCurrentDirectory);
 MAKE_FUNCPTR(TIFFGetField);
+MAKE_FUNCPTR(TIFFIsByteSwapped);
 MAKE_FUNCPTR(TIFFReadDirectory);
 MAKE_FUNCPTR(TIFFReadEncodedStrip);
 MAKE_FUNCPTR(TIFFSetDirectory);
@@ -85,6 +86,7 @@ static void *load_libtiff(void)
         LOAD_FUNCPTR(TIFFClose);
         LOAD_FUNCPTR(TIFFCurrentDirectory);
         LOAD_FUNCPTR(TIFFGetField);
+        LOAD_FUNCPTR(TIFFIsByteSwapped);
         LOAD_FUNCPTR(TIFFReadDirectory);
         LOAD_FUNCPTR(TIFFReadEncodedStrip);
         LOAD_FUNCPTR(TIFFSetDirectory);
@@ -197,9 +199,13 @@ typedef struct {
 
 typedef struct {
     const WICPixelFormatGUID *format;
+    int bps;
+    int samples;
     int bpp;
+    int planar;
     int indexed;
     int reverse_bgr;
+    int invert_grayscale;
     UINT width, height;
     UINT tile_width, tile_height;
     UINT tile_stride;
@@ -225,6 +231,7 @@ static HRESULT tiff_get_decode_info(TIFF *tiff, tiff_decode_info *decode_info)
 
     decode_info->indexed = 0;
     decode_info->reverse_bgr = 0;
+    decode_info->invert_grayscale = 0;
 
     ret = pTIFFGetField(tiff, TIFFTAG_PHOTOMETRIC, &photometric);
     if (!ret)
@@ -235,10 +242,37 @@ static HRESULT tiff_get_decode_info(TIFF *tiff, tiff_decode_info *decode_info)
 
     ret = pTIFFGetField(tiff, TIFFTAG_BITSPERSAMPLE, &bps);
     if (!ret) bps = 1;
+    decode_info->bps = bps;
+
+    ret = pTIFFGetField(tiff, TIFFTAG_SAMPLESPERPIXEL, &samples);
+    if (!ret) samples = 1;
+    decode_info->samples = samples;
+
+    if (samples == 1)
+        planar = 1;
+    else
+    {
+        ret = pTIFFGetField(tiff, TIFFTAG_PLANARCONFIG, &planar);
+        if (!ret) planar = 1;
+        if (planar != 1)
+        {
+            FIXME("unhandled planar configuration %u\n", planar);
+            return E_FAIL;
+        }
+    }
+    decode_info->planar = planar;
 
     switch(photometric)
     {
+    case 0: /* WhiteIsZero */
+        decode_info->invert_grayscale = 1;
     case 1: /* BlackIsZero */
+        if (samples != 1)
+        {
+            FIXME("unhandled grayscale sample count %u\n", samples);
+            return E_FAIL;
+        }
+
         decode_info->bpp = bps;
         switch (bps)
         {
@@ -257,29 +291,35 @@ static HRESULT tiff_get_decode_info(TIFF *tiff, tiff_decode_info *decode_info)
         }
         break;
     case 2: /* RGB */
-        if (bps != 8)
-        {
-            FIXME("unhandled RGB bit count %u\n", bps);
-            return E_FAIL;
-        }
-        ret = pTIFFGetField(tiff, TIFFTAG_SAMPLESPERPIXEL, &samples);
+        decode_info->bpp = bps * samples;
+
         if (samples != 3)
         {
             FIXME("unhandled RGB sample count %u\n", samples);
             return E_FAIL;
         }
-        ret = pTIFFGetField(tiff, TIFFTAG_PLANARCONFIG, &planar);
-        if (!ret) planar = 1;
-        if (planar != 1)
+
+        switch(bps)
         {
-            FIXME("unhandled planar configuration %u\n", planar);
+        case 8:
+            decode_info->reverse_bgr = 1;
+            decode_info->format = &GUID_WICPixelFormat24bppBGR;
+            break;
+        case 16:
+            decode_info->format = &GUID_WICPixelFormat48bppRGB;
+            break;
+        default:
+            FIXME("unhandled RGB bit count %u\n", bps);
             return E_FAIL;
         }
-        decode_info->bpp = bps * samples;
-        decode_info->reverse_bgr = 1;
-        decode_info->format = &GUID_WICPixelFormat24bppBGR;
         break;
     case 3: /* RGB Palette */
+        if (samples != 1)
+        {
+            FIXME("unhandled indexed sample count %u\n", samples);
+            return E_FAIL;
+        }
+
         decode_info->indexed = 1;
         decode_info->bpp = bps;
         switch (bps)
@@ -295,7 +335,6 @@ static HRESULT tiff_get_decode_info(TIFF *tiff, tiff_decode_info *decode_info)
             return E_FAIL;
         }
         break;
-    case 0: /* WhiteIsZero */
     case 4: /* Transparency mask */
     case 5: /* CMYK */
     case 6: /* YCbCr */
@@ -322,6 +361,8 @@ static HRESULT tiff_get_decode_info(TIFF *tiff, tiff_decode_info *decode_info)
     ret = pTIFFGetField(tiff, TIFFTAG_ROWSPERSTRIP, &decode_info->tile_height);
     if (ret)
     {
+        if (decode_info->tile_height > decode_info->height)
+            decode_info->tile_height = decode_info->height;
         decode_info->tile_width = decode_info->width;
         decode_info->tile_stride = ((decode_info->bpp * decode_info->tile_width + 7)/8);
         decode_info->tile_size = decode_info->tile_height * decode_info->tile_stride;
@@ -659,6 +700,9 @@ static HRESULT TiffFrameDecode_ReadTile(TiffFrameDecode *This, UINT tile_x, UINT
 {
     HRESULT hr=S_OK;
     tsize_t ret;
+    int swap_bytes;
+
+    swap_bytes = pTIFFIsByteSwapped(This->parent->tiff);
 
     ret = pTIFFSetDirectory(This->parent->tiff, This->index);
 
@@ -690,6 +734,50 @@ static HRESULT TiffFrameDecode_ReadTile(TiffFrameDecode *This, UINT tile_x, UINT
                 pixel += 3;
             }
         }
+    }
+
+    if (hr == S_OK && swap_bytes && This->decode_info.bps > 8)
+    {
+        UINT row, i, samples_per_row;
+        BYTE *sample, temp;
+
+        samples_per_row = This->decode_info.tile_width * This->decode_info.samples;
+
+        switch(This->decode_info.bps)
+        {
+        case 16:
+            for (row=0; row<This->decode_info.tile_height; row++)
+            {
+                sample = This->cached_tile + row * This->decode_info.tile_stride;
+                for (i=0; i<samples_per_row; i++)
+                {
+                    temp = sample[1];
+                    sample[1] = sample[0];
+                    sample[0] = temp;
+                    sample += 2;
+                }
+            }
+            break;
+        default:
+            ERR("unhandled bps for byte swap %u\n", This->decode_info.bps);
+            return E_FAIL;
+        }
+    }
+
+    if (hr == S_OK && This->decode_info.invert_grayscale)
+    {
+        BYTE *byte, *end;
+
+        if (This->decode_info.samples != 1)
+        {
+            ERR("cannot invert grayscale image with %u samples\n", This->decode_info.samples);
+            return E_FAIL;
+        }
+
+        end = This->cached_tile+This->decode_info.tile_size;
+
+        for (byte = This->cached_tile; byte != end; byte++)
+            *byte = ~(*byte);
     }
 
     if (hr == S_OK)

@@ -74,6 +74,10 @@ XContext winContext = 0;
 /* X context to associate a struct x11drv_win_data to an hwnd */
 static XContext win_data_context;
 
+/* time of last user event and window where it's stored */
+static Time last_user_time;
+static Window user_time_window;
+
 static const char whole_window_prop[] = "__wine_x11_whole_window";
 static const char client_window_prop[]= "__wine_x11_client_window";
 static const char icon_window_prop[]  = "__wine_x11_icon_window";
@@ -103,6 +107,8 @@ static void remove_startup_notification(Display *display, Window window)
     if (GetEnvironmentVariableA("DESKTOP_STARTUP_ID", id, sizeof(id)) == 0)
         return;
     SetEnvironmentVariableA("DESKTOP_STARTUP_ID", NULL);
+
+    if ((src = strstr( id, "_TIME" ))) update_user_time( atol( src + 5 ));
 
     pos = snprintf(message, sizeof(message), "remove: ID=");
     message[pos++] = '"';
@@ -1100,6 +1106,11 @@ static void set_initial_wm_hints( Display *display, struct x11drv_win_data *data
     XChangeProperty( display, data->whole_window, x11drv_atom(XdndAware),
                      XA_ATOM, 32, PropModeReplace, (unsigned char*)&dndVersion, 1 );
 
+    update_user_time( 0 );  /* make sure that the user time window exists */
+    if (user_time_window)
+        XChangeProperty( display, data->whole_window, x11drv_atom(_NET_WM_USER_TIME_WINDOW),
+                         XA_WINDOW, 32, PropModeReplace, (unsigned char *)&user_time_window, 1 );
+
     data->wm_hints = XAllocWMHints();
     wine_tsx11_unlock();
 
@@ -1217,6 +1228,27 @@ static void set_wm_hints( Display *display, struct x11drv_win_data *data )
     wine_tsx11_unlock();
 }
 
+
+/***********************************************************************
+ *     update_user_time
+ */
+void update_user_time( Time time )
+{
+    wine_tsx11_lock();
+    if (!user_time_window)
+    {
+        user_time_window = XCreateWindow( gdi_display, root_window, -1, -1, 1, 1, 0, 0, InputOnly,
+                                          DefaultVisual(gdi_display,DefaultScreen(gdi_display)), 0, NULL );
+        TRACE( "user time window %lx\n", user_time_window );
+    }
+    if (time && (!last_user_time || (long)(time - last_user_time) > 0))
+    {
+        last_user_time = time;
+        XChangeProperty( gdi_display, user_time_window, x11drv_atom(_NET_WM_USER_TIME),
+                         XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&time, 1 );
+    }
+    wine_tsx11_unlock();
+}
 
 /***********************************************************************
  *     update_net_wm_states
@@ -1830,6 +1862,7 @@ void CDECL X11DRV_DestroyWindow( HWND hwnd )
     }
 
     if (thread_data->last_focus == hwnd) thread_data->last_focus = 0;
+    if (thread_data->last_xic_hwnd == hwnd) thread_data->last_xic_hwnd = 0;
     if (data->hWMIconBitmap) DeleteObject( data->hWMIconBitmap );
     if (data->hWMIconMask) DeleteObject( data->hWMIconMask);
     wine_tsx11_lock();
@@ -1897,9 +1930,10 @@ BOOL CDECL X11DRV_CreateDesktopWindow( HWND hwnd )
     SERVER_START_REQ( get_window_rectangles )
     {
         req->handle = wine_server_user_handle( hwnd );
+        req->relative = COORDS_CLIENT;
         wine_server_call( req );
-        width  = reply->window.right - reply->window.left;
-        height = reply->window.bottom - reply->window.top;
+        width  = reply->window.right;
+        height = reply->window.bottom;
     }
     SERVER_END_REQ;
 
@@ -2048,6 +2082,8 @@ XIC X11DRV_get_ic( HWND hwnd )
     XIM xim;
 
     if (!data) return 0;
+
+    x11drv_thread_data()->last_xic_hwnd = hwnd;
     if (data->xic) return data->xic;
     if (!(xim = x11drv_thread_data()->xim)) return 0;
     return X11DRV_CreateIC( xim, data );
@@ -2636,7 +2672,7 @@ LRESULT CDECL X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
      * with a ButtonPress event */
     wine_tsx11_lock();
     XUngrabPointer( display, CurrentTime );
-    XSendEvent(display, root_window, False, SubstructureNotifyMask, &xev);
+    XSendEvent(display, root_window, False, SubstructureNotifyMask | SubstructureRedirectMask, &xev);
     wine_tsx11_unlock();
     return 0;
 }

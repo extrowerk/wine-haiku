@@ -36,6 +36,7 @@
 
 #define NS_OK                     ((nsresult)0x00000000L)
 #define NS_ERROR_FAILURE          ((nsresult)0x80004005L)
+#define NS_ERROR_OUT_OF_MEMORY    ((nsresult)0x8007000EL)
 #define NS_NOINTERFACE            ((nsresult)0x80004002L)
 #define NS_ERROR_NOT_IMPLEMENTED  ((nsresult)0x80004001L)
 #define NS_ERROR_NOT_AVAILABLE    ((nsresult)0x80040111L)
@@ -120,6 +121,7 @@ typedef enum {
     IHTMLInputElement_tid,
     IHTMLLocation_tid,
     IHTMLOptionElement_tid,
+    IHTMLRect_tid,
     IHTMLScreen_tid,
     IHTMLScriptElement_tid,
     IHTMLSelectElement_tid,
@@ -445,6 +447,13 @@ typedef struct nsWineURI nsWineURI;
 HRESULT set_wine_url(nsWineURI*,LPCWSTR);
 nsresult on_start_uri_open(NSContainer*,nsIURI*,PRBool*);
 
+/* Keep sync with request_method_strings in nsio.c */
+typedef enum {
+    METHOD_GET,
+    METHOD_PUT,
+    METHOD_POST
+} REQUEST_METHOD;
+
 typedef struct {
     const nsIHttpChannelVtbl *lpHttpChannelVtbl;
     const nsIUploadChannelVtbl *lpUploadChannelVtbl;
@@ -454,23 +463,29 @@ typedef struct {
 
     nsWineURI *uri;
     nsIInputStream *post_data_stream;
+    BOOL parse_stream;
     nsILoadGroup *load_group;
     nsIInterfaceRequestor *notif_callback;
     nsISupports *owner;
     nsLoadFlags load_flags;
     nsIURI *original_uri;
+    nsIURI *referrer;
     char *content_type;
     char *charset;
     PRUint32 response_status;
+    REQUEST_METHOD request_method;
     struct list response_headers;
+    struct list request_headers;
     UINT url_scheme;
 } nsChannel;
 
-struct ResponseHeader {
+typedef struct {
     struct list entry;
     WCHAR *header;
     WCHAR *data;
-};
+} http_header_t;
+
+HRESULT set_http_header(struct list*,const WCHAR*,int,const WCHAR*,int);
 
 typedef struct {
     HRESULT (*qi)(HTMLDOMNode*,REFIID,void**);
@@ -571,6 +586,7 @@ struct HTMLDocumentNode {
     nsDocumentEventListener *nsevent_listener;
     BOOL *event_vector;
 
+    BOOL skip_mutation_notif;
     mutation_queue_t *mutation_queue;
     mutation_queue_t *mutation_queue_tail;
 
@@ -712,6 +728,7 @@ void register_nsservice(nsIComponentRegistrar*,nsIServiceManager*);
 void init_nsio(nsIComponentManager*,nsIComponentRegistrar*);
 void release_nsio(void);
 BOOL install_wine_gecko(BOOL);
+BOOL is_gecko_path(const char*);
 
 HRESULT nsuri_to_url(LPCWSTR,BOOL,BSTR*);
 HRESULT create_doc_uri(HTMLWindow*,WCHAR*,nsWineURI**);
@@ -942,6 +959,19 @@ static inline LPWSTR heap_strdupW(LPCWSTR str)
     return ret;
 }
 
+static inline LPWSTR heap_strndupW(LPCWSTR str, unsigned len)
+{
+    LPWSTR ret = NULL;
+
+    if(str) {
+        ret = heap_alloc((len+1)*sizeof(WCHAR));
+        memcpy(ret, str, len*sizeof(WCHAR));
+        ret[len] = 0;
+    }
+
+    return ret;
+}
+
 static inline char *heap_strdupA(const char *str)
 {
     char *ret = NULL;
@@ -998,5 +1028,6 @@ static inline void windowref_release(windowref_t *ref)
 
 HDC get_display_dc(void);
 HINSTANCE get_shdoclc(void);
+void set_statustext(HTMLDocumentObj*,INT,LPCWSTR);
 
 extern HINSTANCE hInst;

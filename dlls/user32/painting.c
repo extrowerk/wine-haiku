@@ -160,10 +160,17 @@ static void update_visible_region( struct dce *dce )
     if (dce->clip_rgn) CombineRgn( vis_rgn, vis_rgn, dce->clip_rgn,
                                    (flags & DCX_INTERSECTRGN) ? RGN_AND : RGN_DIFF );
 
-    /* map region to DC coordinates */
-    OffsetRgn( vis_rgn, -win_rect.left, -win_rect.top );
-    SelectVisRgn( dce->hdc, vis_rgn );
-    DeleteObject( vis_rgn );
+    __wine_set_visible_region( dce->hdc, vis_rgn, &win_rect );
+}
+
+
+/***********************************************************************
+ *		reset_dce_attrs
+ */
+static void reset_dce_attrs( struct dce *dce )
+{
+    RestoreDC( dce->hdc, 1 );  /* initial save level is always 1 */
+    SaveDC( dce->hdc );  /* save the state again for next time */
 }
 
 
@@ -329,6 +336,7 @@ void free_dce( struct dce *dce, HWND hwnd )
         if (!--dce->count)
         {
             /* turn it into a cache entry */
+            reset_dce_attrs( dce );
             release_dce( dce );
             dce->flags |= DCX_CACHE;
         }
@@ -388,23 +396,18 @@ static void make_dc_dirty( struct dce *dce )
  * rectangle. In addition, pWnd->parent DCEs may need to be updated if
  * DCX_CLIPCHILDREN flag is set.
  */
-void invalidate_dce( HWND hwnd, const RECT *rect )
+void invalidate_dce( HWND hwnd, const RECT *extra_rect )
 {
-    RECT window_rect, extra_rect;
+    RECT window_rect;
     struct dce *dce;
     HWND hwndScope = GetAncestor( hwnd, GA_PARENT );
 
     if (!hwndScope) return;
 
     GetWindowRect( hwnd, &window_rect );
-    if (rect)
-    {
-        extra_rect = *rect;
-        MapWindowPoints( hwndScope, 0, (POINT *)&extra_rect, 2 );
-    }
 
     TRACE("%p scope hwnd = %p %s (%s)\n",
-          hwnd, hwndScope, wine_dbgstr_rect(&window_rect), wine_dbgstr_rect(rect) );
+          hwnd, hwndScope, wine_dbgstr_rect(&window_rect), wine_dbgstr_rect(extra_rect) );
 
     /* walk all DCEs and fixup non-empty entries */
 
@@ -431,7 +434,7 @@ void invalidate_dce( HWND hwnd, const RECT *rect )
                 RECT dce_rect, tmp;
                 GetWindowRect( dce->hwnd, &dce_rect );
                 if (IntersectRect( &tmp, &dce_rect, &window_rect ) ||
-                    (rect && IntersectRect( &tmp, &dce_rect, &extra_rect )))
+                    (extra_rect && IntersectRect( &tmp, &dce_rect, extra_rect )))
                     make_dc_dirty( dce );
             }
         }
@@ -455,6 +458,7 @@ static INT release_dc( HWND hwnd, HDC hdc, BOOL end_paint )
     dce = (struct dce *)GetDCHook( hdc, NULL );
     if (dce && dce->count)
     {
+        if (!(dce->flags & DCX_NORESETATTRS)) reset_dce_attrs( dce );
         if (end_paint || (dce->flags & DCX_CACHE)) delete_clip_rgn( dce );
         if (dce->flags & DCX_CACHE) dce->count = 0;
         ret = TRUE;
@@ -633,8 +637,7 @@ static HRGN send_ncpaint( HWND hwnd, HWND *child, UINT *flags )
 
         /* check if update rgn overlaps with nonclient area */
         type = GetRgnBox( whole_rgn, &update );
-        GetClientRect( hwnd, &client );
-        MapWindowPoints( hwnd, 0, (POINT *)&client, 2 );
+        WIN_GetRectangles( hwnd, COORDS_SCREEN, 0, &client );
 
         if ((*flags & UPDATE_NONCLIENT) ||
             update.left < client.left || update.top < client.top ||
@@ -897,7 +900,8 @@ BOOL WINAPI EndPaint( HWND hwnd, const PAINTSTRUCT *lps )
  */
 HDC WINAPI GetDCEx( HWND hwnd, HRGN hrgnClip, DWORD flags )
 {
-    static const DWORD clip_flags = DCX_PARENTCLIP | DCX_CLIPSIBLINGS | DCX_CLIPCHILDREN | DCX_WINDOW;
+    const DWORD clip_flags = DCX_PARENTCLIP | DCX_CLIPSIBLINGS | DCX_CLIPCHILDREN | DCX_WINDOW;
+    const DWORD user_flags = clip_flags | DCX_NORESETATTRS; /* flags that can be set by user */
     struct dce *dce;
     BOOL bUpdateVisRgn = TRUE;
     HWND parent;
@@ -1020,18 +1024,14 @@ HDC WINAPI GetDCEx( HWND hwnd, HRGN hrgnClip, DWORD flags )
         bUpdateVisRgn = TRUE;
     }
 
+    if (GetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_LAYOUTRTL) SetLayout( dce->hdc, LAYOUT_RTL );
+
     dce->hwnd = hwnd;
-    dce->flags = (dce->flags & ~clip_flags) | (flags & clip_flags);
+    dce->flags = (dce->flags & ~user_flags) | (flags & user_flags);
 
     if (SetHookFlags( dce->hdc, DCHF_VALIDATEVISRGN )) bUpdateVisRgn = TRUE;  /* DC was dirty */
 
     if (bUpdateVisRgn) update_visible_region( dce );
-
-    if (!(flags & DCX_NORESETATTRS))
-    {
-        RestoreDC( dce->hdc, 1 );  /* initial save level is always 1 */
-        SaveDC( dce->hdc );  /* save the state again for next time */
-    }
 
     TRACE("(%p,%p,0x%x): returning %p\n", hwnd, hrgnClip, flags, dce->hdc);
     return dce->hdc;
@@ -1485,8 +1485,7 @@ INT WINAPI ScrollWindowEx( HWND hwnd, INT dx, INT dy,
             RECT r, dummy;
             for (i = 0; list[i]; i++)
             {
-                GetWindowRect( list[i], &r );
-                MapWindowPoints( 0, hwnd, (POINT *)&r, 2 );
+                WIN_GetRectangles( list[i], COORDS_PARENT, &r, NULL );
                 if (!rect || IntersectRect(&dummy, &r, rect))
                     SetWindowPos( list[i], 0, r.left + dx, r.top  + dy, 0, 0,
                                   SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE |

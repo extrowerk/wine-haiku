@@ -93,12 +93,8 @@ void WINAPI SwitchToThisWindow( HWND hwnd, BOOL alt_tab )
  */
 BOOL WINAPI GetWindowRect( HWND hwnd, LPRECT rect )
 {
-    BOOL ret = WIN_GetRectangles( hwnd, rect, NULL );
-    if (ret)
-    {
-        MapWindowPoints( GetAncestor( hwnd, GA_PARENT ), 0, (POINT *)rect, 2 );
-        TRACE( "hwnd %p (%s)\n", hwnd, wine_dbgstr_rect(rect) );
-    }
+    BOOL ret = WIN_GetRectangles( hwnd, COORDS_SCREEN, rect, NULL );
+    if (ret) TRACE( "hwnd %p %s\n", hwnd, wine_dbgstr_rect(rect) );
     return ret;
 }
 
@@ -235,15 +231,7 @@ int WINAPI SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL bRedraw )
  */
 BOOL WINAPI GetClientRect( HWND hwnd, LPRECT rect )
 {
-    BOOL ret;
-
-    if ((ret = WIN_GetRectangles( hwnd, NULL, rect )))
-    {
-        rect->right -= rect->left;
-        rect->bottom -= rect->top;
-        rect->left = rect->top = 0;
-    }
-    return ret;
+    return WIN_GetRectangles( hwnd, COORDS_CLIENT, NULL, rect );
 }
 
 
@@ -407,7 +395,7 @@ HWND WINAPI ChildWindowFromPointEx( HWND hwndParent, POINT pt, UINT uFlags)
 
     for (i = 0; list[i]; i++)
     {
-        if (!WIN_GetRectangles( list[i], &rect, NULL )) continue;
+        if (!WIN_GetRectangles( list[i], COORDS_PARENT, &rect, NULL )) continue;
         if (!PtInRect( &rect, pt )) continue;
         if (uFlags & (CWP_SKIPINVISIBLE|CWP_SKIPDISABLED))
         {
@@ -783,16 +771,14 @@ static POINT WINPOS_FindIconPos( HWND hwnd, POINT pt )
     tmp = CreateRectRgn( 0, 0, 0, 0 );
     for (child = GetWindow( parent, GW_HWNDFIRST ); child; child = GetWindow( child, GW_HWNDNEXT ))
     {
-        WND *childPtr;
         if (child == hwnd) continue;
         if ((GetWindowLongW( child, GWL_STYLE ) & (WS_VISIBLE|WS_MINIMIZE)) != (WS_VISIBLE|WS_MINIMIZE))
             continue;
-        if (!(childPtr = WIN_GetPtr( child )) || childPtr == WND_OTHER_PROCESS)
-            continue;
-        SetRectRgn( tmp, childPtr->rectWindow.left, childPtr->rectWindow.top,
-                    childPtr->rectWindow.right, childPtr->rectWindow.bottom );
-        CombineRgn( hrgn, hrgn, tmp, RGN_OR );
-        WIN_ReleasePtr( childPtr );
+        if (WIN_GetRectangles( child, COORDS_PARENT, &rect, NULL ))
+        {
+            SetRectRgn( tmp, rect.left, rect.top, rect.right, rect.bottom );
+            CombineRgn( hrgn, hrgn, tmp, RGN_OR );
+        }
     }
     DeleteObject( tmp );
 
@@ -880,7 +866,15 @@ UINT WINPOS_MinMaximize( HWND hwnd, UINT cmd, LPRECT rect )
         WINPOS_GetMinMaxInfo( hwnd, &size, &wpl.ptMaxPosition, NULL, NULL );
 
         old_style = WIN_SetStyle( hwnd, WS_MAXIMIZE, WS_MINIMIZE );
-        if (old_style & WS_MINIMIZE) WINPOS_ShowIconTitle( hwnd, FALSE );
+        if (old_style & WS_MINIMIZE)
+        {
+            if ((wndPtr = WIN_GetPtr( hwnd )) && wndPtr != WND_OTHER_PROCESS)
+            {
+                wndPtr->flags |= WIN_RESTORE_MAX;
+                WIN_ReleasePtr( wndPtr );
+            }
+            WINPOS_ShowIconTitle( hwnd, FALSE );
+        }
 
         if (!(old_style & WS_MAXIMIZE)) swpFlags |= SWP_STATECHANGED;
         SetRect( rect, wpl.ptMaxPosition.x, wpl.ptMaxPosition.y,
@@ -888,6 +882,12 @@ UINT WINPOS_MinMaximize( HWND hwnd, UINT cmd, LPRECT rect )
         break;
 
     case SW_SHOWNOACTIVATE:
+        if ((wndPtr = WIN_GetPtr( hwnd )) && wndPtr != WND_OTHER_PROCESS)
+        {
+            wndPtr->flags &= ~WIN_RESTORE_MAX;
+            WIN_ReleasePtr( wndPtr );
+        }
+        /* fall through */
     case SW_SHOWNORMAL:
     case SW_RESTORE:
         old_style = WIN_SetStyle( hwnd, 0, WS_MINIMIZE | WS_MAXIMIZE );
@@ -1055,9 +1055,11 @@ static BOOL show_window( HWND hwnd, INT cmd )
     {
         /* should happen only in CreateWindowEx() */
 	int wParam = SIZE_RESTORED;
-        RECT client = wndPtr->rectClient;
-        LPARAM lparam = MAKELONG( client.right - client.left, client.bottom - client.top );
+        RECT client;
+        LPARAM lparam;
 
+        WIN_GetRectangles( hwnd, COORDS_PARENT, NULL, &client );
+        lparam = MAKELONG( client.right - client.left, client.bottom - client.top );
 	wndPtr->flags &= ~WIN_NEED_SIZE;
 	if (wndPtr->dwStyle & WS_MAXIMIZE) wParam = SIZE_MAXIMIZED;
         else if (wndPtr->dwStyle & WS_MINIMIZE)
@@ -1502,6 +1504,7 @@ static void dump_winpos_flags(UINT flags)
 static BOOL SWP_DoWinPosChanging( WINDOWPOS* pWinpos, RECT* pNewWindowRect, RECT* pNewClientRect )
 {
     WND *wndPtr;
+    RECT window_rect, client_rect;
 
     /* Send WM_WINDOWPOSCHANGING message */
 
@@ -1513,24 +1516,32 @@ static BOOL SWP_DoWinPosChanging( WINDOWPOS* pWinpos, RECT* pNewWindowRect, RECT
 
     /* Calculate new position and size */
 
-    *pNewWindowRect = wndPtr->rectWindow;
-    *pNewClientRect = (wndPtr->dwStyle & WS_MINIMIZE) ? wndPtr->rectWindow
-                                                    : wndPtr->rectClient;
+    WIN_GetRectangles( pWinpos->hwnd, COORDS_PARENT, &window_rect, &client_rect );
+    *pNewWindowRect = window_rect;
+    *pNewClientRect = (wndPtr->dwStyle & WS_MINIMIZE) ? window_rect : client_rect;
 
     if (!(pWinpos->flags & SWP_NOSIZE))
     {
-        pNewWindowRect->right  = pNewWindowRect->left + pWinpos->cx;
-        pNewWindowRect->bottom = pNewWindowRect->top + pWinpos->cy;
+        if (wndPtr->dwStyle & WS_MINIMIZE)
+        {
+            pNewWindowRect->right  = pNewWindowRect->left + GetSystemMetrics(SM_CXICON);
+            pNewWindowRect->bottom = pNewWindowRect->top + GetSystemMetrics(SM_CYICON);
+        }
+        else
+        {
+            pNewWindowRect->right  = pNewWindowRect->left + pWinpos->cx;
+            pNewWindowRect->bottom = pNewWindowRect->top + pWinpos->cy;
+        }
     }
     if (!(pWinpos->flags & SWP_NOMOVE))
     {
         pNewWindowRect->left    = pWinpos->x;
         pNewWindowRect->top     = pWinpos->y;
-        pNewWindowRect->right  += pWinpos->x - wndPtr->rectWindow.left;
-        pNewWindowRect->bottom += pWinpos->y - wndPtr->rectWindow.top;
+        pNewWindowRect->right  += pWinpos->x - window_rect.left;
+        pNewWindowRect->bottom += pWinpos->y - window_rect.top;
 
-        OffsetRect( pNewClientRect, pWinpos->x - wndPtr->rectWindow.left,
-                                    pWinpos->y - wndPtr->rectWindow.top );
+        OffsetRect( pNewClientRect, pWinpos->x - window_rect.left,
+                                    pWinpos->y - window_rect.top );
     }
     pWinpos->flags |= SWP_NOCLIENTMOVE | SWP_NOCLIENTSIZE;
 
@@ -1538,7 +1549,7 @@ static BOOL SWP_DoWinPosChanging( WINDOWPOS* pWinpos, RECT* pNewWindowRect, RECT
            pWinpos->hwnd, pWinpos->hwndInsertAfter, pWinpos->x, pWinpos->y,
            pWinpos->cx, pWinpos->cy, pWinpos->flags );
     TRACE( "current %s style %08x new %s\n",
-           wine_dbgstr_rect( &wndPtr->rectWindow ), wndPtr->dwStyle,
+           wine_dbgstr_rect( &window_rect ), wndPtr->dwStyle,
            wine_dbgstr_rect( pNewWindowRect ));
 
     WIN_ReleasePtr( wndPtr );
@@ -1696,9 +1707,9 @@ static UINT SWP_DoNCCalcSize( WINDOWPOS* pWinpos, const RECT* pNewWindowRect, RE
                               RECT *validRects )
 {
     UINT wvrFlags = 0;
-    WND *wndPtr;
+    RECT window_rect, client_rect;
 
-    if (!(wndPtr = WIN_GetPtr( pWinpos->hwnd )) || wndPtr == WND_OTHER_PROCESS) return 0;
+    WIN_GetRectangles( pWinpos->hwnd, COORDS_PARENT, &window_rect, &client_rect );
 
       /* Send WM_NCCALCSIZE message to get new client area */
     if( (pWinpos->flags & (SWP_FRAMECHANGED | SWP_NOSIZE)) != SWP_NOSIZE )
@@ -1707,34 +1718,31 @@ static UINT SWP_DoNCCalcSize( WINDOWPOS* pWinpos, const RECT* pNewWindowRect, RE
         WINDOWPOS winposCopy;
 
         params.rgrc[0] = *pNewWindowRect;
-        params.rgrc[1] = wndPtr->rectWindow;
-        params.rgrc[2] = wndPtr->rectClient;
+        params.rgrc[1] = window_rect;
+        params.rgrc[2] = client_rect;
         params.lppos = &winposCopy;
         winposCopy = *pWinpos;
-        WIN_ReleasePtr( wndPtr );
 
         wvrFlags = SendMessageW( pWinpos->hwnd, WM_NCCALCSIZE, TRUE, (LPARAM)&params );
 
         *pNewClientRect = params.rgrc[0];
 
-        if (!(wndPtr = WIN_GetPtr( pWinpos->hwnd )) || wndPtr == WND_OTHER_PROCESS) return 0;
-
         TRACE( "hwnd %p old win %s old client %s new win %s new client %s\n", pWinpos->hwnd,
-               wine_dbgstr_rect(&wndPtr->rectWindow), wine_dbgstr_rect(&wndPtr->rectClient),
+               wine_dbgstr_rect(&window_rect), wine_dbgstr_rect(&client_rect),
                wine_dbgstr_rect(pNewWindowRect), wine_dbgstr_rect(pNewClientRect) );
 
-        if( pNewClientRect->left != wndPtr->rectClient.left ||
-            pNewClientRect->top != wndPtr->rectClient.top )
+        if( pNewClientRect->left != client_rect.left ||
+            pNewClientRect->top != client_rect.top )
             pWinpos->flags &= ~SWP_NOCLIENTMOVE;
 
         if( (pNewClientRect->right - pNewClientRect->left !=
-             wndPtr->rectClient.right - wndPtr->rectClient.left))
+             client_rect.right - client_rect.left))
             pWinpos->flags &= ~SWP_NOCLIENTSIZE;
         else
             wvrFlags &= ~WVR_HREDRAW;
 
         if (pNewClientRect->bottom - pNewClientRect->top !=
-             wndPtr->rectClient.bottom - wndPtr->rectClient.top)
+             client_rect.bottom - client_rect.top)
             pWinpos->flags &= ~SWP_NOCLIENTSIZE;
         else
             wvrFlags &= ~WVR_VREDRAW;
@@ -1745,8 +1753,8 @@ static UINT SWP_DoNCCalcSize( WINDOWPOS* pWinpos, const RECT* pNewWindowRect, RE
     else
     {
         if (!(pWinpos->flags & SWP_NOMOVE) &&
-            (pNewClientRect->left != wndPtr->rectClient.left ||
-             pNewClientRect->top != wndPtr->rectClient.top))
+            (pNewClientRect->left != client_rect.left ||
+             pNewClientRect->top != client_rect.top))
             pWinpos->flags &= ~SWP_NOCLIENTMOVE;
     }
 
@@ -1755,9 +1763,8 @@ static UINT SWP_DoNCCalcSize( WINDOWPOS* pWinpos, const RECT* pNewWindowRect, RE
         SetRectEmpty( &validRects[0] );
         SetRectEmpty( &validRects[1] );
     }
-    else get_valid_rects( &wndPtr->rectClient, pNewClientRect, wvrFlags, validRects );
+    else get_valid_rects( &client_rect, pNewClientRect, wvrFlags, validRects );
 
-    WIN_ReleasePtr( wndPtr );
     return wvrFlags;
 }
 
@@ -1765,6 +1772,7 @@ static UINT SWP_DoNCCalcSize( WINDOWPOS* pWinpos, const RECT* pNewWindowRect, RE
 static BOOL fixup_flags( WINDOWPOS *winpos )
 {
     HWND parent;
+    RECT window_rect;
     WND *wndPtr = WIN_GetPtr( winpos->hwnd );
     BOOL ret = TRUE;
 
@@ -1796,11 +1804,12 @@ static BOOL fixup_flags( WINDOWPOS *winpos )
         if (!(winpos->flags & SWP_SHOWWINDOW)) winpos->flags |= SWP_NOREDRAW;
     }
 
-    if ((wndPtr->rectWindow.right - wndPtr->rectWindow.left == winpos->cx) &&
-        (wndPtr->rectWindow.bottom - wndPtr->rectWindow.top == winpos->cy))
+    WIN_GetRectangles( winpos->hwnd, COORDS_PARENT, &window_rect, NULL );
+    if ((window_rect.right - window_rect.left == winpos->cx) &&
+        (window_rect.bottom - window_rect.top == winpos->cy))
         winpos->flags |= SWP_NOSIZE;    /* Already the right size */
 
-    if ((wndPtr->rectWindow.left == winpos->x) && (wndPtr->rectWindow.top == winpos->y))
+    if ((window_rect.left == winpos->x) && (window_rect.top == winpos->y))
         winpos->flags |= SWP_NOMOVE;    /* Already the right position */
 
     if ((wndPtr->dwStyle & (WS_POPUP | WS_CHILD)) != WS_CHILD)
@@ -1877,10 +1886,11 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
     USER_Driver->pWindowPosChanging( hwnd, insert_after, swp_flags,
                                      window_rect, client_rect, &visible_rect );
 
+    WIN_GetRectangles( hwnd, COORDS_SCREEN, &old_window_rect, NULL );
+
     if (!(win = WIN_GetPtr( hwnd ))) return FALSE;
     if (win == WND_DESKTOP || win == WND_OTHER_PROCESS) return FALSE;
 
-    old_window_rect = win->rectWindow;
     SERVER_START_REQ( set_window_pos )
     {
         req->handle        = wine_server_user_handle( hwnd );
@@ -2418,12 +2428,10 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
       /* Get min/max info */
 
     WINPOS_GetMinMaxInfo( hwnd, NULL, NULL, &minTrack, &maxTrack );
-    GetWindowRect( hwnd, &sizingRect );
+    WIN_GetRectangles( hwnd, COORDS_PARENT, &sizingRect, NULL );
     if (style & WS_CHILD)
     {
         parent = GetParent(hwnd);
-        /* make sizing rect relative to parent */
-        MapWindowPoints( 0, parent, (POINT*)&sizingRect, 2 );
         GetClientRect( parent, &mouseRect );
     }
     else

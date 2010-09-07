@@ -23,6 +23,8 @@
 #include <commctrl.h>
 #include <prsht.h>
 #include <shlguid.h>
+#include <shtypes.h>
+#include <shobjidl.h>
 
 #ifdef WINE_NO_UNICODE_MACROS
 #undef GetObject
@@ -34,9 +36,6 @@ extern "C" {
 
 /* Except for specific structs, this header is byte packed */
 #include <pshpack1.h>
-
-#include <shtypes.h>
-#include <shobjidl.h>
 
 #ifndef HPSXA_DEFINED
 #define HPSXA_DEFINED
@@ -62,6 +61,7 @@ HRESULT      WINAPI SHGetInstanceExplorer(IUnknown**);
 HRESULT      WINAPI SHGetFolderPathAndSubDirA(HWND,int,HANDLE,DWORD,LPCSTR,LPSTR);
 HRESULT      WINAPI SHGetFolderPathAndSubDirW(HWND,int,HANDLE,DWORD,LPCWSTR,LPWSTR);
 #define             SHGetFolderPathAndSubDir WINELIB_NAME_AW(SHGetFolderPathAndSubDir);
+HRESULT      WINAPI SHGetKnownFolderPath(REFKNOWNFOLDERID,DWORD,HANDLE,PWSTR*);
 BOOL         WINAPI SHGetPathFromIDListA(LPCITEMIDLIST,LPSTR);
 BOOL         WINAPI SHGetPathFromIDListW(LPCITEMIDLIST,LPWSTR);
 #define             SHGetPathFromIDList WINELIB_NAME_AW(SHGetPathFromIDList)
@@ -82,6 +82,8 @@ VOID         WINAPI SHUpdateImageW(LPCWSTR,INT,UINT,INT);
 int          WINAPI RestartDialog(HWND,LPCWSTR,DWORD);
 int          WINAPI RestartDialogEx(HWND,LPCWSTR,DWORD,DWORD);
 BOOL         WINAPI IsUserAnAdmin(void);
+UINT         WINAPI Shell_MergeMenus(HMENU,HMENU,UINT,UINT,UINT,ULONG);
+BOOL         WINAPI Shell_GetImageLists(HIMAGELIST*,HIMAGELIST*);
 
 #define SHFMT_ERROR     0xFFFFFFFFL  /* Error on last format, drive may be formattable */
 #define SHFMT_CANCEL    0xFFFFFFFEL  /* Last format was cancelled */
@@ -115,6 +117,11 @@ BOOL WINAPI SHObjectProperties(HWND,DWORD,LPCWSTR,LPCWSTR);
 #define PCS_PATHTOOLONG     0x00000008
 
 int WINAPI PathCleanupSpec(LPCWSTR,LPWSTR);
+
+/* Shell_MergeMenus flags */
+#define MM_ADDSEPARATOR     0x00000001
+#define MM_SUBMENUSHAVEIDS  0x00000002
+#define MM_DONTREMOVESEPS   0x00000004
 
 /*****************************************************************************
  * IContextMenu interface
@@ -542,6 +549,8 @@ DECLARE_INTERFACE_(IShellFolderViewCB,IUnknown)
  * IShellFolderView interface
  */
 
+#include <pshpack8.h>
+
 typedef struct _ITEMSPACING
 {
     int cxSmall;
@@ -549,6 +558,8 @@ typedef struct _ITEMSPACING
     int cxLarge;
     int cyLarge;
 } ITEMSPACING;
+
+#include <poppack.h>
 
 #define INTERFACE IShellFolderView
 DEFINE_GUID(IID_IShellFolderView,0x37a378c0,0xf82d,0x11ce,0xae,0x65,0x08,0x00,0x2b,0x2e,0x12,0x62);
@@ -779,6 +790,8 @@ typedef HRESULT (CALLBACK *LPFNVIEWCALLBACK)(
 	WPARAM wParam,
 	LPARAM lParam);
 
+#include <pshpack8.h>
+
 typedef struct _CSFV
 {
   UINT             cbSize;
@@ -789,6 +802,8 @@ typedef struct _CSFV
   LPFNVIEWCALLBACK pfnCallback;
   FOLDERVIEWMODE   fvm;
 } CSFV, *LPCSFV;
+
+#include <poppack.h>
 
 HRESULT WINAPI SHCreateShellFolderViewEx(LPCSFV pshfvi, IShellView **ppshv);
 
@@ -850,6 +865,8 @@ HRESULT WINAPI SHCreateShellFolderViewEx(LPCSFV pshfvi, IShellView **ppshv);
 #define SFVM_GET_WEBVIEW_THEME        86 /* undocumented */
 #define SFVM_GETDEFERREDVIEWSETTINGS  92 /* undocumented */
 
+#include <pshpack8.h>
+
 typedef struct _SFV_CREATE
 {
     UINT cbSize;
@@ -857,6 +874,8 @@ typedef struct _SFV_CREATE
     IShellView *psvOuter;
     IShellFolderViewCB *psfvcb;
 } SFV_CREATE;
+
+#include <poppack.h>
 
 HRESULT WINAPI SHCreateShellFolderView(const SFV_CREATE *pscfv, IShellView **ppsv);
 
@@ -1285,10 +1304,16 @@ typedef struct _SHChangeNotifyEntry
 #define SHCNF_PRINTERW		0x0006
 #define SHCNF_TYPE		0x00FF
 #define SHCNF_FLUSH		0x1000
-#define SHCNF_FLUSHNOWAIT	0x2000
+#define SHCNF_FLUSHNOWAIT	0x3000
+#define SHCNF_NOTIFYRECURSIVE	0x10000
 
 #define SHCNF_PATH              WINELIB_NAME_AW(SHCNF_PATH)
 #define SHCNF_PRINTER           WINELIB_NAME_AW(SHCNF_PRINTER)
+
+#define SHCNRF_InterruptLevel 0x0001
+#define SHCNRF_ShellLevel 0x0002
+#define SHCNRF_RecursiveInterrupt 0x1000
+#define SHCNRF_NewDelivery 0x8000
 
 void WINAPI SHChangeNotify(LONG wEventId, UINT uFlags, LPCVOID dwItem1, LPCVOID dwItem2);
 

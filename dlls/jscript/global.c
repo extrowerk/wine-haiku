@@ -106,51 +106,14 @@ static WCHAR int_to_char(int i)
     return 'A'+i-10;
 }
 
-static HRESULT constructor_call(DispatchEx *constr, WORD flags, DISPPARAMS *dp,
+static HRESULT constructor_call(jsdisp_t *constr, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
     if(flags != DISPATCH_PROPERTYGET)
         return jsdisp_call_value(constr, flags, dp, retv, ei, sp);
 
-    V_VT(retv) = VT_DISPATCH;
-    V_DISPATCH(retv) = (IDispatch*)_IDispatchEx_(constr);
-    IDispatchEx_AddRef(_IDispatchEx_(constr));
-    return S_OK;
-}
-
-static HRESULT JSGlobal_NaN(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
-{
-    TRACE("\n");
-
-    switch(flags) {
-    case DISPATCH_PROPERTYGET:
-        num_set_nan(retv);
-        break;
-
-    default:
-        FIXME("unimplemented flags %x\n", flags);
-        return E_NOTIMPL;
-    }
-
-    return S_OK;
-}
-
-static HRESULT JSGlobal_Infinity(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
-{
-    TRACE("\n");
-
-    switch(flags) {
-    case DISPATCH_PROPERTYGET:
-        num_set_inf(retv, TRUE);
-        break;
-
-    default:
-        FIXME("unimplemented flags %x\n", flags);
-        return E_NOTIMPL;
-    }
-
+    jsdisp_addref(constr);
+    var_set_jsdisp(retv, constr);
     return S_OK;
 }
 
@@ -1063,9 +1026,6 @@ static const builtin_prop_t JSGlobal_props[] = {
     {EvalErrorW,                 JSGlobal_EvalError,                 PROPF_CONSTR|1},
     {FunctionW,                  JSGlobal_Function,                  PROPF_CONSTR|1},
     {_GetObjectW,                JSGlobal_GetObject,                 PROPF_METHOD|2},
-    {InfinityW,                  JSGlobal_Infinity,                  0},
-/*  {MathW,                      JSGlobal_Math,                      0},  */
-    {NaNW,                       JSGlobal_NaN,                       0},
     {NumberW,                    JSGlobal_Number,                    PROPF_CONSTR|1},
     {ObjectW,                    JSGlobal_Object,                    PROPF_CONSTR|1},
     {RangeErrorW,                JSGlobal_RangeError,                PROPF_CONSTR|1},
@@ -1102,7 +1062,7 @@ static const builtin_info_t JSGlobal_info = {
     NULL
 };
 
-static HRESULT init_constructors(script_ctx_t *ctx, DispatchEx *object_prototype)
+static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
 {
     HRESULT hres;
 
@@ -1151,7 +1111,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, DispatchEx *object_prototype
 
 HRESULT init_global(script_ctx_t *ctx)
 {
-    DispatchEx *math, *object_prototype;
+    jsdisp_t *math, *object_prototype;
     VARIANT var;
     HRESULT hres;
 
@@ -1175,15 +1135,23 @@ HRESULT init_global(script_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
+    var_set_jsdisp(&var, math);
+    hres = jsdisp_propput_name(ctx->global, MathW, &var, NULL/*FIXME*/, NULL/*FIXME*/);
+    jsdisp_release(math);
+    if(FAILED(hres))
+        return hres;
+
     V_VT(&var) = VT_EMPTY;
     hres = jsdisp_propput_name(ctx->global, undefinedW, &var, NULL/*FIXME*/, NULL/*FIXME*/);
     if(FAILED(hres))
         return hres;
 
-    V_VT(&var) = VT_DISPATCH;
-    V_DISPATCH(&var) = (IDispatch*)_IDispatchEx_(math);
-    hres = jsdisp_propput_name(ctx->global, MathW, &var, NULL/*FIXME*/, NULL/*FIXME*/);
-    jsdisp_release(math);
+    num_set_nan(&var);
+    hres = jsdisp_propput_name(ctx->global, NaNW, &var, NULL/*FIXME*/, NULL/*FIXME*/);
+    if(FAILED(hres))
+        return hres;
 
+    num_set_inf(&var, TRUE);
+    hres = jsdisp_propput_name(ctx->global, InfinityW, &var, NULL/*FIXME*/, NULL/*FIXME*/);
     return hres;
 }

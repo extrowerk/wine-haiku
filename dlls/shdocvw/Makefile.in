@@ -5,7 +5,7 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = shdocvw.dll
 IMPORTLIB = shdocvw
-IMPORTS   = uuid shell32 shlwapi user32 gdi32 advapi32 kernel32
+IMPORTS   = uuid shell32 comctl32 shlwapi user32 gdi32 advapi32
 DELAYIMPORTS = version urlmon ole32 oleaut32
 
 C_SRCS = \
@@ -28,7 +28,21 @@ C_SRCS = \
 	view.c \
 	webbrowser.c
 
-RC_SRCS = shdocvw.rc
+RC_SRCS = \
+	De.rc \
+	En.rc \
+	Es.rc \
+	Fr.rc \
+	It.rc \
+	Ko.rc \
+	Lt.rc \
+	Nl.rc \
+	Pl.rc \
+	Ro.rc \
+	Sv.rc \
+	Uk.rc \
+	shdocvw.rc
+
 IDL_TLB_SRCS = shdocvw_v1.idl
 
 @MAKE_DLL_RULES@

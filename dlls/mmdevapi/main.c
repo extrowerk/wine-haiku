@@ -29,7 +29,6 @@
 #include <OpenAL/alc.h>
 #endif
 
-#define CINTERFACE
 #define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
@@ -38,7 +37,9 @@
 
 #include "ole2.h"
 #include "olectl.h"
+#include "propsys.h"
 #include "initguid.h"
+#include "propkeydef.h"
 #include "mmdeviceapi.h"
 #include "dshow.h"
 #include "dsound.h"
