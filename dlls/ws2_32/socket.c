@@ -476,7 +476,7 @@ static NTSTATUS sock_get_ntstatus( int err )
         case EDESTADDRREQ:      return STATUS_INVALID_PARAMETER;
         case EMSGSIZE:          return STATUS_BUFFER_OVERFLOW;
         case EPROTONOSUPPORT:
-        case ESOCKTNOSUPPORT:
+        //case ESOCKTNOSUPPORT:
         case EPFNOSUPPORT:
         case EAFNOSUPPORT:
         case EPROTOTYPE:        return STATUS_NOT_SUPPORTED;
@@ -521,7 +521,7 @@ static UINT sock_get_error( int err )
 	case EPROTOTYPE:	return WSAEPROTOTYPE;
 	case ENOPROTOOPT:	return WSAENOPROTOOPT;
 	case EPROTONOSUPPORT:	return WSAEPROTONOSUPPORT;
-	case ESOCKTNOSUPPORT:	return WSAESOCKTNOSUPPORT;
+	//case ESOCKTNOSUPPORT:	return WSAESOCKTNOSUPPORT;
 	case EOPNOTSUPP:	return WSAEOPNOTSUPP;
 	case EPFNOSUPPORT:	return WSAEPFNOSUPPORT;
 	case EAFNOSUPPORT:	return WSAEAFNOSUPPORT;
@@ -537,7 +537,7 @@ static UINT sock_get_error( int err )
 	case EISCONN:		return WSAEISCONN;
 	case ENOTCONN:		return WSAENOTCONN;
 	case ESHUTDOWN:		return WSAESHUTDOWN;
-	case ETOOMANYREFS:	return WSAETOOMANYREFS;
+	//case ETOOMANYREFS:	return WSAETOOMANYREFS;
 	case ETIMEDOUT:		return WSAETIMEDOUT;
 	case ECONNREFUSED:	return WSAECONNREFUSED;
 	case ELOOP:		return WSAELOOP;

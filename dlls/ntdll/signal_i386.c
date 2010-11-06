@@ -1836,6 +1836,7 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  *
  * Handler for SIGSEGV and related errors.
  */
+#ifndef __HAIKU__
 static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     WORD fs, gs;
@@ -2046,7 +2047,7 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     wait_suspend( &context );
     restore_context( &context, sigcontext );
 }
-
+#endif
 
 /***********************************************************************
  *           __wine_set_signal_handler   (NTDLL.@)
@@ -2215,18 +2216,18 @@ void signal_init_process(void)
     sig_act.sa_flags |= SA_ONSTACK;
 #endif
 
-    sig_act.sa_handler = int_handler;
-    if (sigaction( SIGINT, &sig_act, NULL ) == -1) goto error;
-    sig_act.sa_handler = fpe_handler;
-    if (sigaction( SIGFPE, &sig_act, NULL ) == -1) goto error;
-    sig_act.sa_handler = abrt_handler;
-    if (sigaction( SIGABRT, &sig_act, NULL ) == -1) goto error;
-    sig_act.sa_handler = quit_handler;
-    if (sigaction( SIGQUIT, &sig_act, NULL ) == -1) goto error;
-    sig_act.sa_handler = usr1_handler;
-    if (sigaction( SIGUSR1, &sig_act, NULL ) == -1) goto error;
+//    sig_act.sa_handler = int_handler;
+//    if (sigaction( SIGINT, &sig_act, NULL ) == -1) goto error;
+//    sig_act.sa_handler = fpe_handler;
+//    if (sigaction( SIGFPE, &sig_act, NULL ) == -1) goto error;
+//    sig_act.sa_handler = abrt_handler;
+//    if (sigaction( SIGABRT, &sig_act, NULL ) == -1) goto error;
+//    sig_act.sa_handler = quit_handler;
+//    if (sigaction( SIGQUIT, &sig_act, NULL ) == -1) goto error;
+//    sig_act.sa_handler = usr1_handler;
+//    if (sigaction( SIGUSR1, &sig_act, NULL ) == -1) goto error;
 
-    sig_act.sa_handler = segv_handler;
+//    sig_act.sa_handler = segv_handler;
     if (sigaction( SIGSEGV, &sig_act, NULL ) == -1) goto error;
     if (sigaction( SIGILL, &sig_act, NULL ) == -1) goto error;
 #ifdef SIGBUS
@@ -2234,13 +2235,13 @@ void signal_init_process(void)
 #endif
 
 #ifdef SIGTRAP
-    sig_act.sa_handler = trap_handler;
-    if (sigaction( SIGTRAP, &sig_act, NULL ) == -1) goto error;
+//    sig_act.sa_handler = trap_handler;
+//    if (sigaction( SIGTRAP, &sig_act, NULL ) == -1) goto error;
 #endif
 
 #ifdef __HAVE_VM86
-    sig_act.sa_handler = usr2_handler;
-    if (sigaction( SIGUSR2, &sig_act, NULL ) == -1) goto error;
+//    sig_act.sa_handler = usr2_handler;
+//    if (sigaction( SIGUSR2, &sig_act, NULL ) == -1) goto error;
 #endif
 
     wine_ldt_init_locking( ldt_lock, ldt_unlock );

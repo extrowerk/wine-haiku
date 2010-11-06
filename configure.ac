@@ -1896,6 +1896,9 @@ then
     AC_CHECK_LIB(poll,poll,[AC_DEFINE(HAVE_POLL,1) AC_SUBST(LIBPOLL,"-lpoll")])
 fi
 
+dnl Check for -lnetwork for Haiku
+AC_SEARCH_LIBS(connect, network)
+
 dnl Check for -lnsl for Solaris
 AC_SEARCH_LIBS(gethostbyname, nsl)
 
@@ -2345,7 +2348,7 @@ WINE_CONFIG_DLL(d3dx9_33)
 WINE_CONFIG_DLL(d3dx9_34)
 WINE_CONFIG_DLL(d3dx9_35)
 dnl WINE_CONFIG_DLL(d3dx9_36,,[d3dx9])
-WINE_CONFIG_TEST(dlls/d3dx9_36/tests)
+dnl WINE_CONFIG_TEST(dlls/d3dx9_36/tests)
 WINE_CONFIG_DLL(d3dx9_37)
 WINE_CONFIG_DLL(d3dx9_38)
 WINE_CONFIG_DLL(d3dx9_39)
@@ -2408,8 +2411,8 @@ WINE_CONFIG_DLL(explorerframe)
 WINE_CONFIG_TEST(dlls/explorerframe/tests)
 WINE_CONFIG_DLL(faultrep)
 WINE_CONFIG_DLL(fltlib)
-WINE_CONFIG_DLL(fusion)
-WINE_CONFIG_TEST(dlls/fusion/tests)
+dnl WINE_CONFIG_DLL(fusion)
+dnl WINE_CONFIG_TEST(dlls/fusion/tests)
 WINE_CONFIG_DLL(fwpuclnt)
 WINE_CONFIG_DLL(gameux)
 WINE_CONFIG_TEST(dlls/gameux/tests)
@@ -2812,7 +2815,7 @@ WINE_CONFIG_PROGRAM(wineboot,installbin)
 WINE_CONFIG_PROGRAM(winebrowser,install)
 WINE_CONFIG_PROGRAM(winecfg,installbin)
 WINE_CONFIG_PROGRAM(wineconsole,installbin)
-WINE_CONFIG_PROGRAM(winedbg,installbin)
+dnl WINE_CONFIG_PROGRAM(winedbg,installbin)
 WINE_CONFIG_PROGRAM(winedevice,install)
 WINE_CONFIG_PROGRAM(winefile,installbin)
 WINE_CONFIG_PROGRAM(winemenubuilder,install)

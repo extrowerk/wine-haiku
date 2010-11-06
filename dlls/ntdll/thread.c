@@ -17,6 +17,7 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#include <stdio.h>
 
 #include "config.h"
 #include "wine/port.h"
@@ -244,6 +245,8 @@ HANDLE thread_init(void)
     teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
 
     thread_data = (struct ntdll_thread_data *)teb->SpareBytes1;
+    fprintf(stderr,"00 %d\n",thread_data->fs);
+    fprintf(stderr,"01 %d\n",thread_data->gs);
     thread_data->request_fd = -1;
     thread_data->reply_fd   = -1;
     thread_data->wait_fd[0] = -1;
@@ -259,6 +262,10 @@ HANDLE thread_init(void)
     debug_init();
 
     /* setup the server connection */
+    fprintf(stderr,"1 %d\n",thread_data);
+    fprintf(stderr,"2 %d\n",thread_data->request_fd);
+    fprintf(stderr,"3 %d\n",ntdll_get_thread_data());
+    fprintf(stderr,"4 %d\n",ntdll_get_thread_data()->request_fd);
     server_init_process();
     info_size = server_init_thread( peb );
 
@@ -495,8 +502,8 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
     if ((status = virtual_alloc_thread_stack( teb, stack_reserve, stack_commit ))) goto error;
 
     pthread_attr_init( &attr );
-    pthread_attr_setstack( &attr, teb->DeallocationStack,
-                           (char *)teb->Tib.StackBase - (char *)teb->DeallocationStack );
+//    pthread_attr_setstack( &attr, teb->DeallocationStack,
+//                           (char *)teb->Tib.StackBase - (char *)teb->DeallocationStack );
     pthread_attr_setscope( &attr, PTHREAD_SCOPE_SYSTEM ); /* force creating a kernel thread */
     interlocked_xchg_add( &nb_threads, 1 );
     if (pthread_create( &pthread_id, &attr, (void * (*)(void *))start_thread, info ))

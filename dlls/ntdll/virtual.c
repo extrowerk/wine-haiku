@@ -1846,7 +1846,7 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG zero_
     else if (type & MEM_RESET)
     {
         if (!(view = VIRTUAL_FindView( base, size ))) status = STATUS_NOT_MAPPED_VIEW;
-        else madvise( base, size, MADV_DONTNEED );
+        else posix_madvise( base, size, POSIX_MADV_DONTNEED );
     }
     else  /* commit the pages */
     {
@@ -2247,7 +2247,7 @@ NTSTATUS WINAPI NtLockVirtualMemory( HANDLE process, PVOID *addr, SIZE_T *size, 
     *size = ROUND_SIZE( *addr, *size );
     *addr = ROUND_ADDR( *addr, page_mask );
 
-    if (mlock( *addr, *size )) status = STATUS_ACCESS_DENIED;
+    /*if (mlock( *addr, *size ))*/ status = STATUS_ACCESS_DENIED;
     return status;
 }
 
@@ -2284,7 +2284,7 @@ NTSTATUS WINAPI NtUnlockVirtualMemory( HANDLE process, PVOID *addr, SIZE_T *size
     *size = ROUND_SIZE( *addr, *size );
     *addr = ROUND_ADDR( *addr, page_mask );
 
-    if (munlock( *addr, *size )) status = STATUS_ACCESS_DENIED;
+    /*if (munlock( *addr, *size ))*/ status = STATUS_ACCESS_DENIED;
     return status;
 }
 

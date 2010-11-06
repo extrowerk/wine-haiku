@@ -408,6 +408,8 @@ unsigned short wine_ldt_alloc_fs(void)
         else global_fs_sel = (ldt_info.entry_number << 3) | 3;
 #elif defined(__FreeBSD__)
         global_fs_sel = GSEL( GUFS_SEL, SEL_UPL );
+//#elif defined(__HAIKU__)
+//		global_fs_sel = wine_get_fs();
 #endif
     }
     if (global_fs_sel > 0) return global_fs_sel;
