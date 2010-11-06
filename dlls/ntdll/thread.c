@@ -17,8 +17,6 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-#include <stdio.h>
-
 #include "config.h"
 #include "wine/port.h"
 
@@ -245,8 +243,8 @@ HANDLE thread_init(void)
     teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
 
     thread_data = (struct ntdll_thread_data *)teb->SpareBytes1;
-    fprintf(stderr,"00 %d\n",thread_data->fs);
-    fprintf(stderr,"01 %d\n",thread_data->gs);
+    fprintf(stderr,"00 %08x\n",thread_data->fs);
+    fprintf(stderr,"01 %08x\n",thread_data->gs);
     thread_data->request_fd = -1;
     thread_data->reply_fd   = -1;
     thread_data->wait_fd[0] = -1;

@@ -354,6 +354,8 @@ fi
 
 dnl **** Check for some libraries ****
 
+dnl Check for -lbsd for Haiku
+AC_CHECK_LIB(bsd,wait4)
 dnl Check for -li386 for NetBSD and OpenBSD
 AC_CHECK_LIB(i386,i386_set_ldt)
 dnl Check for -lossaudio for NetBSD
@@ -1937,7 +1939,7 @@ then
 fi
 
 dnl Check for -lnetwork for Haiku
-AC_SEARCH_LIBS(connect, network)
+AC_SEARCH_LIBS(socket, network)
 
 dnl Check for -lnsl for Solaris
 AC_SEARCH_LIBS(gethostbyname, nsl)
@@ -2360,7 +2362,7 @@ WINE_CONFIG_DLL(d3dcompiler_40)
 WINE_CONFIG_DLL(d3dcompiler_41)
 WINE_CONFIG_DLL(d3dcompiler_42)
 WINE_CONFIG_DLL(d3dcompiler_43,,[d3dcompiler])
-WINE_CONFIG_TEST(dlls/d3dcompiler_43/tests)
+dnl WINE_CONFIG_TEST(dlls/d3dcompiler_43/tests)
 WINE_CONFIG_DLL(d3dim,,[d3dim])
 WINE_CONFIG_DLL(d3drm,,[d3drm])
 WINE_CONFIG_TEST(dlls/d3drm/tests)
@@ -2539,8 +2541,8 @@ WINE_CONFIG_DLL(msadp32.acm)
 WINE_CONFIG_DLL(mscat32)
 WINE_CONFIG_DLL(mscms,,[mscms])
 WINE_CONFIG_TEST(dlls/mscms/tests)
-WINE_CONFIG_DLL(mscoree)
-WINE_CONFIG_TEST(dlls/mscoree/tests)
+dnl WINE_CONFIG_DLL(mscoree)
+dnl WINE_CONFIG_TEST(dlls/mscoree/tests)
 WINE_CONFIG_DLL(msctf)
 WINE_CONFIG_TEST(dlls/msctf/tests)
 WINE_CONFIG_DLL(msdaps)
