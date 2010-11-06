@@ -6,7 +6,7 @@
  * Copyright 2000 Jason Mawdsley
  * Copyright 2001 CodeWeavers Inc.
  * Copyright 2002 Dimitrie O. Paun
- * Copyright 2009 Nikolay Sivov
+ * Copyright 2009, 2010 Nikolay Sivov
  * Copyright 2009 Owen Rudge for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
@@ -5840,7 +5840,7 @@ static HWND CreateEditLabelT(LISTVIEW_INFO *infoPtr, LPCWSTR text, BOOL isW)
 
     TRACE("(%p, text=%s, isW=%d)\n", infoPtr, debugtext_t(text, isW), isW);
 
-    /* Window will be resized and positioned after LVN_BEGINLABELEDIT */
+    /* window will be resized and positioned after LVN_BEGINLABELEDIT */
     if (isW)
 	hedit = CreateWindowW(WC_EDITW, text, style, 0, 0, 0, 0, infoPtr->hwndSelf, 0, hinst, 0);
     else
@@ -5872,21 +5872,21 @@ static HWND CreateEditLabelT(LISTVIEW_INFO *infoPtr, LPCWSTR text, BOOL isW)
  */
 static HWND LISTVIEW_EditLabelT(LISTVIEW_INFO *infoPtr, INT nItem, BOOL isW)
 {
-    WCHAR szDispText[DISP_TEXT_SIZE] = { 0 };
+    WCHAR disptextW[DISP_TEXT_SIZE] = { 0 };
+    HWND hwndSelf = infoPtr->hwndSelf;
     NMLVDISPINFOW dispInfo;
+    HFONT hOldFont = NULL;
+    TEXTMETRICW tm;
     RECT rect;
     SIZE sz;
-    HWND hwndSelf = infoPtr->hwndSelf;
     HDC hdc;
-    HFONT hOldFont = NULL;
-    TEXTMETRICW textMetric;
 
     TRACE("(nItem=%d, isW=%d)\n", nItem, isW);
 
     if (~infoPtr->dwStyle & LVS_EDITLABELS) return 0;
 
-    /* Is the EditBox still there, if so remove it */
-    if(infoPtr->hwndEdit != 0)
+    /* remove existing edit box */
+    if (infoPtr->hwndEdit)
     {
         SetFocus(infoPtr->hwndSelf);
         infoPtr->hwndEdit = 0;
@@ -5908,7 +5908,7 @@ static HWND LISTVIEW_EditLabelT(LISTVIEW_INFO *infoPtr, INT nItem, BOOL isW)
     dispInfo.item.iItem = nItem;
     dispInfo.item.iSubItem = 0;
     dispInfo.item.stateMask = ~0;
-    dispInfo.item.pszText = szDispText;
+    dispInfo.item.pszText = disptextW;
     dispInfo.item.cchTextMax = DISP_TEXT_SIZE;
     if (!LISTVIEW_GetItemT(infoPtr, &dispInfo.item, isW)) return 0;
 
@@ -5924,27 +5924,36 @@ static HWND LISTVIEW_EditLabelT(LISTVIEW_INFO *infoPtr, INT nItem, BOOL isW)
 	return 0;
     }
 
-    /* Now position and display edit box */
+    TRACE("disp text=%s\n", debugtext_t(dispInfo.item.pszText, isW));
+
+    /* position and display edit box */
     hdc = GetDC(infoPtr->hwndSelf);
 
-    /* Select the font to get appropriate metric dimensions */
-    if(infoPtr->hFont != 0)
+    /* select the font to get appropriate metric dimensions */
+    if (infoPtr->hFont)
         hOldFont = SelectObject(hdc, infoPtr->hFont);
 
-    /* Get String Length in pixels */
-    GetTextExtentPoint32W(hdc, dispInfo.item.pszText, lstrlenW(dispInfo.item.pszText), &sz);
+    /* use real edit box content, it could be altered during LVN_BEGINLABELEDIT notification */
+    GetWindowTextW(infoPtr->hwndEdit, disptextW, DISP_TEXT_SIZE);
+    TRACE("edit box text=%s\n", debugstr_w(disptextW));
 
-    /* Add Extra spacing for the next character */
-    GetTextMetricsW(hdc, &textMetric);
-    sz.cx += (textMetric.tmMaxCharWidth * 2);
+    /* get string length in pixels */
+    GetTextExtentPoint32W(hdc, disptextW, lstrlenW(disptextW), &sz);
 
-    if(infoPtr->hFont != 0)
+    /* add extra spacing for the next character */
+    GetTextMetricsW(hdc, &tm);
+    sz.cx += tm.tmMaxCharWidth * 2;
+
+    if (infoPtr->hFont)
         SelectObject(hdc, hOldFont);
 
     ReleaseDC(infoPtr->hwndSelf, hdc);
 
-    MoveWindow(infoPtr->hwndEdit, rect.left - 2, rect.top - 1, sz.cx,
-                                  rect.bottom - rect.top + 2, FALSE);
+    sz.cy = rect.bottom - rect.top + 2;
+    rect.left -= 2;
+    rect.top  -= 1;
+    TRACE("moving edit=(%d,%d)-(%d,%d)\n", rect.left, rect.top, sz.cx, sz.cy);
+    MoveWindow(infoPtr->hwndEdit, rect.left, rect.top, sz.cx, sz.cy, FALSE);
     ShowWindow(infoPtr->hwndEdit, SW_NORMAL);
     SetFocus(infoPtr->hwndEdit);
     SendMessageW(infoPtr->hwndEdit, EM_SETSEL, 0, -1);
@@ -6074,7 +6083,7 @@ static INT LISTVIEW_FindItemW(const LISTVIEW_INFO *infoPtr, INT nStart,
     }
 
     if (!lpFindInfo || nItem < 0) return -1;
-    
+
     lvItem.mask = 0;
     if (lpFindInfo->flags & (LVFI_STRING | LVFI_PARTIAL) ||
         lpFindInfo->flags &  LVFI_SUBSTRING)
@@ -6210,24 +6219,6 @@ static INT LISTVIEW_FindItemA(const LISTVIEW_INFO *infoPtr, INT nStart,
     textfreeT(strW, FALSE);
     return res;
 }
-
-/***
- * DESCRIPTION:
- * Retrieves the background image of the listview control.
- *
- * PARAMETER(S):
- * [I] infoPtr : valid pointer to the listview structure
- * [O] lpBkImage : background image attributes
- *
- * RETURN:
- *   SUCCESS : TRUE
- *   FAILURE : FALSE
- */
-/* static BOOL LISTVIEW_GetBkImage(const LISTVIEW_INFO *infoPtr, LPLVBKIMAGE lpBkImage)   */
-/* {   */
-/*   FIXME (listview, "empty stub!\n"); */
-/*   return FALSE;   */
-/* }   */
 
 /***
  * DESCRIPTION:
@@ -9842,7 +9833,7 @@ static LRESULT LISTVIEW_LButtonDblClk(LISTVIEW_INFO *infoPtr, WORD wKey, INT x, 
 {
     LVHITTESTINFO htInfo;
 
-    TRACE("(key=%hu, X=%hu, Y=%hu)\n", wKey, x, y);
+    TRACE("(key=%hu, X=%u, Y=%u)\n", wKey, x, y);
     
     /* Cancel the item edition if any */
     if (infoPtr->itemEdit.fEnabled)
@@ -9886,7 +9877,7 @@ static LRESULT LISTVIEW_LButtonDown(LISTVIEW_INFO *infoPtr, WORD wKey, INT x, IN
   POINT pt = { x, y };
   INT nItem;
 
-  TRACE("(key=%hu, X=%hu, Y=%hu)\n", wKey, x, y);
+  TRACE("(key=%hu, X=%u, Y=%u)\n", wKey, x, y);
 
   /* send NM_RELEASEDCAPTURE notification */
   if (!notify(infoPtr, NM_RELEASEDCAPTURE)) return 0;
@@ -10002,7 +9993,7 @@ static LRESULT LISTVIEW_LButtonUp(LISTVIEW_INFO *infoPtr, WORD wKey, INT x, INT 
 {
     LVHITTESTINFO lvHitTestInfo;
     
-    TRACE("(key=%hu, X=%hu, Y=%hu)\n", wKey, x, y);
+    TRACE("(key=%hu, X=%u, Y=%u)\n", wKey, x, y);
 
     if (!infoPtr->bLButtonDown) return 0;
 
@@ -10462,7 +10453,7 @@ static LRESULT LISTVIEW_RButtonDblClk(const LISTVIEW_INFO *infoPtr, WORD wKey, I
 {
     LVHITTESTINFO lvHitTestInfo;
     
-    TRACE("(key=%hu,X=%hu,Y=%hu)\n", wKey, x, y);
+    TRACE("(key=%hu,X=%u,Y=%u)\n", wKey, x, y);
 
     /* send NM_RELEASEDCAPTURE notification */
     if (!notify(infoPtr, NM_RELEASEDCAPTURE)) return 0;
@@ -10493,7 +10484,7 @@ static LRESULT LISTVIEW_RButtonDown(LISTVIEW_INFO *infoPtr, WORD wKey, INT x, IN
     LVHITTESTINFO lvHitTestInfo;
     INT nItem;
 
-    TRACE("(key=%hu,X=%hu,Y=%hu)\n", wKey, x, y);
+    TRACE("(key=%hu,X=%u,Y=%u)\n", wKey, x, y);
 
     /* send NM_RELEASEDCAPTURE notification */
     if (!notify(infoPtr, NM_RELEASEDCAPTURE)) return 0;
@@ -10541,7 +10532,7 @@ static LRESULT LISTVIEW_RButtonUp(LISTVIEW_INFO *infoPtr, WORD wKey, INT x, INT 
     LVHITTESTINFO lvHitTestInfo;
     POINT pt;
 
-    TRACE("(key=%hu,X=%hu,Y=%hu)\n", wKey, x, y);
+    TRACE("(key=%hu,X=%u,Y=%u)\n", wKey, x, y);
 
     if (!infoPtr->bRButtonDown) return 0;
  

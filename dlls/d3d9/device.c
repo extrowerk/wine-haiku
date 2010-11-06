@@ -1551,7 +1551,9 @@ static HRESULT WINAPI IDirect3DDevice9Impl_EndStateBlock(IDirect3DDevice9Ex *ifa
     if (!object)
     {
         ERR("Failed to allocate stateblock memory.\n");
+        wined3d_mutex_lock();
         IWineD3DStateBlock_Release(wined3d_stateblock);
+        wined3d_mutex_unlock();
         return E_OUTOFMEMORY;
     }
 
@@ -1559,7 +1561,9 @@ static HRESULT WINAPI IDirect3DDevice9Impl_EndStateBlock(IDirect3DDevice9Ex *ifa
     if (FAILED(hr))
     {
         WARN("Failed to initialize stateblock, hr %#x.\n", hr);
+        wined3d_mutex_lock();
         IWineD3DStateBlock_Release(wined3d_stateblock);
+        wined3d_mutex_unlock();
         HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
@@ -1681,11 +1685,18 @@ static const WINED3DTEXTURESTAGESTATETYPE tss_lookup[] =
     WINED3DTSS_CONSTANT,                /* 32, D3DTSS_CONSTANT */
 };
 
-static HRESULT  WINAPI  IDirect3DDevice9Impl_GetTextureStageState(LPDIRECT3DDEVICE9EX iface, DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD* pValue) {
+static HRESULT  WINAPI  IDirect3DDevice9Impl_GetTextureStageState(LPDIRECT3DDEVICE9EX iface, DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD *pValue)
+{
     IDirect3DDevice9Impl *This = (IDirect3DDevice9Impl *)iface;
     HRESULT hr;
 
     TRACE("iface %p, stage %u, state %#x, value %p.\n", iface, Stage, Type, pValue);
+
+    if (Type >= sizeof(tss_lookup) / sizeof(*tss_lookup))
+    {
+        WARN("Invalid Type %#x passed.\n", Type);
+        return D3D_OK;
+    }
 
     wined3d_mutex_lock();
     hr = IWineD3DDevice_GetTextureStageState(This->WineD3DDevice, Stage, tss_lookup[Type], pValue);
@@ -1694,11 +1705,18 @@ static HRESULT  WINAPI  IDirect3DDevice9Impl_GetTextureStageState(LPDIRECT3DDEVI
     return hr;
 }
 
-static HRESULT  WINAPI  IDirect3DDevice9Impl_SetTextureStageState(LPDIRECT3DDEVICE9EX iface, DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value) {
+static HRESULT  WINAPI  IDirect3DDevice9Impl_SetTextureStageState(LPDIRECT3DDEVICE9EX iface, DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value)
+{
     IDirect3DDevice9Impl *This = (IDirect3DDevice9Impl *)iface;
     HRESULT hr;
 
     TRACE("iface %p, stage %u, state %#x, value %#x.\n", iface, Stage, Type, Value);
+
+    if (Type >= sizeof(tss_lookup) / sizeof(*tss_lookup))
+    {
+        WARN("Invalid Type %#x passed.\n", Type);
+        return D3D_OK;
+    }
 
     wined3d_mutex_lock();
     hr = IWineD3DDevice_SetTextureStageState(This->WineD3DDevice, Stage, tss_lookup[Type], Value);
@@ -3228,11 +3246,14 @@ static void setup_fpu(void)
 }
 
 HRESULT device_init(IDirect3DDevice9Impl *device, IWineD3D *wined3d, UINT adapter, D3DDEVTYPE device_type,
-        HWND focus_window, DWORD flags, D3DPRESENT_PARAMETERS *parameters)
+        HWND focus_window, DWORD flags, D3DPRESENT_PARAMETERS *parameters, D3DDISPLAYMODEEX *mode)
 {
     WINED3DPRESENT_PARAMETERS *wined3d_parameters;
     UINT i, count = 1;
     HRESULT hr;
+
+    if (mode)
+        FIXME("Ignoring display mode.\n");
 
     device->lpVtbl = &Direct3DDevice9_Vtbl;
     device->device_parent_vtbl = &d3d9_wined3d_device_parent_vtbl;

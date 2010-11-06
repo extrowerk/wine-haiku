@@ -1,8 +1,9 @@
 /*
- *    XPath query result node list implementation (TODO: XSLPattern support)
+ *    XPath/XSLPattern query result node list implementation
  *
  * Copyright 2005 Mike McCormack
  * Copyright 2007 Mikolaj Zalewski
+ * Copyright 2010 Adam Martinson for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -41,7 +42,6 @@
  *    execution of the query
  *  - supports IXMLDOMSelection (TODO)
  *
- * TODO: XSLPattern support
  */
 
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
@@ -49,6 +49,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 #ifdef HAVE_LIBXML2
 
 #include <libxml/xpath.h>
+#include <libxml/xpathInternals.h>
+
+int registerNamespaces(xmlXPathContextPtr ctxt);
+BOOL is_xpathmode(const xmlDocPtr doc);
+xmlChar* XSLPattern_to_XPath(xmlXPathContextPtr ctxt, xmlChar const* xslpat_str);
 
 typedef struct _queryresult
 {
@@ -372,6 +377,117 @@ static dispex_static_data_t queryresult_dispex = {
     queryresult_iface_tids
 };
 
+#define XSLPATTERN_CHECK_ARGS(n) \
+    if (nargs != n) { \
+        FIXME("XSLPattern syntax error: Expected %i arguments, got %i\n", n, nargs); \
+        xmlXPathSetArityError(pctx); \
+        return; \
+    }
+
+
+void XSLPattern_index(xmlXPathParserContextPtr pctx, int nargs)
+{
+    XSLPATTERN_CHECK_ARGS(0);
+
+    xmlXPathPositionFunction(pctx, 0);
+    xmlXPathReturnNumber(pctx, xmlXPathPopNumber(pctx) - 1.0);
+}
+
+void XSLPattern_end(xmlXPathParserContextPtr pctx, int nargs)
+{
+    double pos, last;
+    XSLPATTERN_CHECK_ARGS(0);
+
+    xmlXPathPositionFunction(pctx, 0);
+    pos = xmlXPathPopNumber(pctx);
+    xmlXPathLastFunction(pctx, 0);
+    last = xmlXPathPopNumber(pctx);
+    xmlXPathReturnBoolean(pctx, pos == last);
+}
+
+void XSLPattern_nodeType(xmlXPathParserContextPtr pctx, int nargs)
+{
+    XSLPATTERN_CHECK_ARGS(0);
+    xmlXPathReturnNumber(pctx, pctx->context->node->type);
+}
+
+void XSLPattern_OP_IEq(xmlXPathParserContextPtr pctx, int nargs)
+{
+    xmlChar *arg1, *arg2;
+    XSLPATTERN_CHECK_ARGS(2);
+
+    arg2 = xmlXPathPopString(pctx);
+    arg1 = xmlXPathPopString(pctx);
+    xmlXPathReturnBoolean(pctx, xmlStrcasecmp(arg1, arg2) == 0);
+    xmlFree(arg1);
+    xmlFree(arg2);
+}
+
+void XSLPattern_OP_INEq(xmlXPathParserContextPtr pctx, int nargs)
+{
+    xmlChar *arg1, *arg2;
+    XSLPATTERN_CHECK_ARGS(2);
+
+    arg2 = xmlXPathPopString(pctx);
+    arg1 = xmlXPathPopString(pctx);
+    xmlXPathReturnBoolean(pctx, xmlStrcasecmp(arg1, arg2) != 0);
+    xmlFree(arg1);
+    xmlFree(arg2);
+}
+
+void XSLPattern_OP_ILt(xmlXPathParserContextPtr pctx, int nargs)
+{
+    xmlChar *arg1, *arg2;
+    XSLPATTERN_CHECK_ARGS(2);
+
+    arg2 = xmlXPathPopString(pctx);
+    arg1 = xmlXPathPopString(pctx);
+    xmlXPathReturnBoolean(pctx, xmlStrcasecmp(arg1, arg2) < 0);
+    xmlFree(arg1);
+    xmlFree(arg2);
+}
+
+void XSLPattern_OP_ILEq(xmlXPathParserContextPtr pctx, int nargs)
+{
+    xmlChar *arg1, *arg2;
+    XSLPATTERN_CHECK_ARGS(2);
+
+    arg2 = xmlXPathPopString(pctx);
+    arg1 = xmlXPathPopString(pctx);
+    xmlXPathReturnBoolean(pctx, xmlStrcasecmp(arg1, arg2) <= 0);
+    xmlFree(arg1);
+    xmlFree(arg2);
+}
+
+void XSLPattern_OP_IGt(xmlXPathParserContextPtr pctx, int nargs)
+{
+    xmlChar *arg1, *arg2;
+    XSLPATTERN_CHECK_ARGS(2);
+
+    arg2 = xmlXPathPopString(pctx);
+    arg1 = xmlXPathPopString(pctx);
+    xmlXPathReturnBoolean(pctx, xmlStrcasecmp(arg1, arg2) > 0);
+    xmlFree(arg1);
+    xmlFree(arg2);
+}
+
+void XSLPattern_OP_IGEq(xmlXPathParserContextPtr pctx, int nargs)
+{
+    xmlChar *arg1, *arg2;
+    XSLPATTERN_CHECK_ARGS(2);
+
+    arg2 = xmlXPathPopString(pctx);
+    arg1 = xmlXPathPopString(pctx);
+    xmlXPathReturnBoolean(pctx, xmlStrcasecmp(arg1, arg2) >= 0);
+    xmlFree(arg1);
+    xmlFree(arg2);
+}
+
+static void query_serror(void* ctx, xmlErrorPtr err)
+{
+    LIBXML2_CALLBACK_SERROR(queryresult_create, err);
+}
+
 HRESULT queryresult_create(xmlNodePtr node, LPCWSTR szQuery, IXMLDOMNodeList **out)
 {
     queryresult *This = heap_alloc_zero(sizeof(queryresult));
@@ -394,8 +510,40 @@ HRESULT queryresult_create(xmlNodePtr node, LPCWSTR szQuery, IXMLDOMNodeList **o
     This->node = node;
     xmldoc_add_ref(This->node->doc);
 
+    ctxt->error = query_serror;
     ctxt->node = node;
-    This->result = xmlXPathEval(str, ctxt);
+    registerNamespaces(ctxt);
+
+    if (is_xpathmode(This->node->doc))
+    {
+        xmlXPathRegisterAllFunctions(ctxt);
+    }
+    else
+    {
+        xmlChar* tmp;
+        int len;
+        tmp = XSLPattern_to_XPath(ctxt, str);
+        len = (xmlStrlen(tmp)+1)*sizeof(xmlChar);
+        str = heap_realloc(str, len);
+        memcpy(str, tmp, len);
+        xmlFree(tmp);
+
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"not", xmlXPathNotFunction);
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"boolean", xmlXPathBooleanFunction);
+
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"index", XSLPattern_index);
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"end", XSLPattern_end);
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"nodeType", XSLPattern_nodeType);
+
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"OP_IEq", XSLPattern_OP_IEq);
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"OP_INEq", XSLPattern_OP_INEq);
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"OP_ILt", XSLPattern_OP_ILt);
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"OP_ILEq", XSLPattern_OP_ILEq);
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"OP_IGt", XSLPattern_OP_IGt);
+        xmlXPathRegisterFunc(ctxt, (xmlChar const*)"OP_IGEq", XSLPattern_OP_IGEq);
+    }
+
+    This->result = xmlXPathEvalExpression(str, ctxt);
     if (!This->result || This->result->type != XPATH_NODESET)
     {
         hr = E_FAIL;

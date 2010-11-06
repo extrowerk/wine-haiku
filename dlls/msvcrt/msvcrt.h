@@ -116,6 +116,7 @@ struct __thread_data {
     MSVCRT_wchar_t                 *wasctime_buffer;    /* buffer for wasctime */
     struct MSVCRT_tm                time_buffer;        /* buffer for localtime/gmtime */
     char                           *strerror_buffer;    /* buffer for strerror */
+    MSVCRT_wchar_t                 *wcserror_buffer;    /* buffer for wcserror */
     int                             fpecode;
     MSVCRT_terminate_function       terminate_handler;
     MSVCRT_unexpected_function      unexpected_handler;
@@ -544,6 +545,7 @@ struct MSVCRT__stat64 {
 #define MSVCRT_ENOSYS  40
 #define MSVCRT_ENOTEMPTY 41
 #define MSVCRT_EILSEQ    42
+#define MSVCRT_STRUNCATE 80
 
 #define MSVCRT_LC_ALL          0
 #define MSVCRT_LC_COLLATE      1
@@ -717,6 +719,8 @@ typedef void (__cdecl *MSVCRT___sighandler_t)(int);
 
 #define MSVCRT__TRUNCATE ((MSVCRT_size_t)-1)
 
+#define _MAX__TIME64_T    (((MSVCRT___time64_t)0x00000007 << 32) | 0x93406FFF)
+
 void  __cdecl    MSVCRT_free(void*);
 void* __cdecl    MSVCRT_malloc(MSVCRT_size_t);
 void* __cdecl    MSVCRT_calloc(MSVCRT_size_t,MSVCRT_size_t);
@@ -844,6 +848,17 @@ void __cdecl    _wsearchenv(const MSVCRT_wchar_t*, const MSVCRT_wchar_t*, MSVCRT
 MSVCRT_intptr_t __cdecl MSVCRT__spawnvpe(int, const char*, const char* const*, const char* const*);
 void __cdecl MSVCRT__invalid_parameter(const MSVCRT_wchar_t *expr, const MSVCRT_wchar_t *func,
                                        const MSVCRT_wchar_t *file, unsigned int line, MSVCRT_uintptr_t arg);
+
+/* Maybe one day we'll enable the invalid parameter handlers with the full set of information (msvcrXXd)
+ *      #define MSVCRT_INVALID_PMT(x) MSVCRT_call_invalid_parameter_handler(x, __FUNCTION__, __FILE__, __LINE__, 0)
+ *      #define MSVCRT_CHECK_PMT(x)   ((x) ? TRUE : MSVCRT_INVALID_PMT(#x),FALSE)
+ * Until this is done, just keep the same semantics for CHECK_PMT(), but without generating / sending
+ * any information
+ * NB : MSVCRT_call_invalid_parameter_handler is a wrapper around MSVCRT__invalid_parameter in order
+ * to do the Ansi to Unicode transformation
+ */
+#define MSVCRT_INVALID_PMT(x) MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0)
+#define MSVCRT_CHECK_PMT(x)   ((x) || (MSVCRT_INVALID_PMT(0),FALSE))
 #endif
 
 #endif /* __WINE_MSVCRT_H */

@@ -1,10 +1,7 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 TESTDLL   = mscoree.dll
 
 C_SRCS = \
+	metahost.c \
 	mscoree.c
 
 @MAKE_TEST_RULES@

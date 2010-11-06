@@ -31,7 +31,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
-#include "wownt32.h"
 #include "gdi_private.h"
 #include "wine/exception.h"
 #include "wine/unicode.h"
@@ -318,7 +317,7 @@ HFONT WINAPI CreateFontIndirectExA( const ENUMLOGFONTEXDVA *penumexA )
 }
 
 /***********************************************************************
- *           CreateFontIndirectExA   (GDI32.@)
+ *           CreateFontIndirectExW   (GDI32.@)
  */
 HFONT WINAPI CreateFontIndirectExW( const ENUMLOGFONTEXDVW *penumex )
 {

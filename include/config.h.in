@@ -466,6 +466,9 @@
 /* Define to 1 if you have the <mach-o/dyld_images.h> header file. */
 #undef HAVE_MACH_O_DYLD_IMAGES_H
 
+/* Define to 1 if you have the <mach-o/loader.h> header file. */
+#undef HAVE_MACH_O_LOADER_H
+
 /* Define to 1 if you have the <mach-o/nlist.h> header file. */
 #undef HAVE_MACH_O_NLIST_H
 
@@ -1099,11 +1102,17 @@
 /* Define if you have the XKB extension */
 #undef HAVE_XKB
 
+/* Define if libxml2 has the xmlDocProperties enum */
+#undef HAVE_XMLDOC_PROPERTIES
+
 /* Define if libxml2 has the xmlNewDocPI function */
 #undef HAVE_XMLNEWDOCPI
 
 /* Define if libxml2 has the xmlReadMemory function */
 #undef HAVE_XMLREADMEMORY
+
+/* Define if libxml2 has the xmlSchemaSetValidStructuredErrors function */
+#undef HAVE_XMLSCHEMASSETVALIDSTRUCTUREDERRORS
 
 /* Define if Xrender has the XRenderSetPictureTransform function */
 #undef HAVE_XRENDERSETPICTURETRANSFORM

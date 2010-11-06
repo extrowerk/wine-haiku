@@ -679,11 +679,8 @@ static HRESULT WINAPI ddraw_surface7_Lock(IDirectDrawSurface7 *iface,
         }
     }
 
-    hr = IWineD3DSurface_LockRect(This->WineD3DSurface,
-                                  &LockedRect,
-                                  Rect,
-                                  Flags);
-    if(hr != D3D_OK)
+    hr = IWineD3DSurface_Map(This->WineD3DSurface, &LockedRect, Rect, Flags);
+    if (FAILED(hr))
     {
         LeaveCriticalSection(&ddraw_cs);
         switch(hr)
@@ -744,8 +741,8 @@ static HRESULT WINAPI ddraw_surface7_Unlock(IDirectDrawSurface7 *iface, RECT *pR
     TRACE("iface %p, rect %s.\n", iface, wine_dbgstr_rect(pRect));
 
     EnterCriticalSection(&ddraw_cs);
-    hr = IWineD3DSurface_UnlockRect(This->WineD3DSurface);
-    if(SUCCEEDED(hr))
+    hr = IWineD3DSurface_Unmap(This->WineD3DSurface);
+    if (SUCCEEDED(hr))
     {
         This->surface_desc.lpSurface = NULL;
     }
@@ -856,7 +853,7 @@ static HRESULT WINAPI ddraw_surface7_Blt(IDirectDrawSurface7 *iface, RECT *DestR
     IDirectDrawSurfaceImpl *Src = (IDirectDrawSurfaceImpl *)SrcSurface;
     HRESULT hr;
 
-    TRACE("iface %p, dst_rect %s, src_surface %p, src_rect %p, flags %#x, fx %p.\n",
+    TRACE("iface %p, dst_rect %s, src_surface %p, src_rect %s, flags %#x, fx %p.\n",
             iface, wine_dbgstr_rect(DestRect), SrcSurface, wine_dbgstr_rect(SrcRect), Flags, DDBltFx);
 
     /* Check for validity of the flags here. WineD3D Has the software-opengl selection path and would have
@@ -907,13 +904,8 @@ static HRESULT WINAPI ddraw_surface7_Blt(IDirectDrawSurface7 *iface, RECT *DestR
      * and replace the ddraw surfaces with the wined3d surfaces
      * So far no blitting operations using surfaces in the bltfx struct are supported anyway.
      */
-    hr = IWineD3DSurface_Blt(This->WineD3DSurface,
-                             DestRect,
-                             Src ? Src->WineD3DSurface : NULL,
-                             SrcRect,
-                             Flags,
-                             (WINEDDBLTFX *) DDBltFx,
-                             WINED3DTEXF_POINT);
+    hr = IWineD3DSurface_Blt(This->WineD3DSurface, DestRect, Src ? Src->WineD3DSurface : NULL,
+            SrcRect, Flags, (WINEDDBLTFX *)DDBltFx, WINED3DTEXF_LINEAR);
 
     LeaveCriticalSection(&ddraw_cs);
     switch(hr)
@@ -927,7 +919,7 @@ static HRESULT WINAPI ddraw_surface7_Blt(IDirectDrawSurface7 *iface, RECT *DestR
 static HRESULT WINAPI ddraw_surface3_Blt(IDirectDrawSurface3 *iface, RECT *dst_rect,
         IDirectDrawSurface3 *src_surface, RECT *src_rect, DWORD flags, DDBLTFX *fx)
 {
-    TRACE("iface %p, dst_rect %s, src_surface %p, src_rect %p, flags %#x, fx %p.\n",
+    TRACE("iface %p, dst_rect %s, src_surface %p, src_rect %s, flags %#x, fx %p.\n",
             iface, wine_dbgstr_rect(dst_rect), src_surface, wine_dbgstr_rect(src_rect), flags, fx);
 
     return ddraw_surface7_Blt((IDirectDrawSurface7 *)surface_from_surface3(iface), dst_rect,
@@ -3302,7 +3294,7 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
             /* Copy the main memory texture into the surface that corresponds
              * to the OpenGL texture object. */
 
-            hr = IWineD3DSurface_LockRect(src_surface->WineD3DSurface, &src_rect, NULL, 0);
+            hr = IWineD3DSurface_Map(src_surface->WineD3DSurface, &src_rect, NULL, 0);
             if (FAILED(hr))
             {
                 ERR("Failed to lock source surface, hr %#x.\n", hr);
@@ -3310,11 +3302,11 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
                 return D3DERR_TEXTURE_LOAD_FAILED;
             }
 
-            hr = IWineD3DSurface_LockRect(dst_surface->WineD3DSurface, &dst_rect, NULL, 0);
+            hr = IWineD3DSurface_Map(dst_surface->WineD3DSurface, &dst_rect, NULL, 0);
             if (FAILED(hr))
             {
                 ERR("Failed to lock destination surface, hr %#x.\n", hr);
-                IWineD3DSurface_UnlockRect(src_surface->WineD3DSurface);
+                IWineD3DSurface_Unmap(src_surface->WineD3DSurface);
                 LeaveCriticalSection(&ddraw_cs);
                 return D3DERR_TEXTURE_LOAD_FAILED;
             }
@@ -3324,8 +3316,8 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
             else
                 memcpy(dst_rect.pBits, src_rect.pBits, src_rect.Pitch * src_desc->dwHeight);
 
-            IWineD3DSurface_UnlockRect(src_surface->WineD3DSurface);
-            IWineD3DSurface_UnlockRect(dst_surface->WineD3DSurface);
+            IWineD3DSurface_Unmap(src_surface->WineD3DSurface);
+            IWineD3DSurface_Unmap(dst_surface->WineD3DSurface);
         }
 
         if (src_surface->surface_desc.ddsCaps.dwCaps & DDSCAPS_MIPMAP)
@@ -3519,10 +3511,15 @@ HRESULT ddraw_surface_init(IDirectDrawSurfaceImpl *surface, IDirectDrawImpl *ddr
         desc->ddsCaps.dwCaps |= DDSCAPS_LOCALVIDMEM | DDSCAPS_VIDEOMEMORY;
     }
 
-    if (desc->ddsCaps.dwCaps & (DDSCAPS_PRIMARYSURFACE | DDSCAPS_3DDEVICE))
+    if (desc->ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE)
     {
         usage |= WINED3DUSAGE_RENDERTARGET;
         desc->ddsCaps.dwCaps |= DDSCAPS_VISIBLE;
+    }
+
+    if ((desc->ddsCaps.dwCaps & DDSCAPS_3DDEVICE) && !(desc->ddsCaps.dwCaps & DDSCAPS_ZBUFFER))
+    {
+        usage |= WINED3DUSAGE_RENDERTARGET;
     }
 
     if (desc->ddsCaps.dwCaps & (DDSCAPS_OVERLAY))
@@ -3588,13 +3585,7 @@ HRESULT ddraw_surface_init(IDirectDrawSurfaceImpl *surface, IDirectDrawImpl *ddr
     }
 
     surface->surface_desc.dwFlags |= DDSD_PIXELFORMAT;
-    hr = IWineD3DSurface_GetDesc(surface->WineD3DSurface, &wined3d_desc);
-    if (FAILED(hr))
-    {
-        ERR("Failed to get wined3d surface desc, hr %#x.\n", hr);
-        IWineD3DSurface_Release(surface->WineD3DSurface);
-        return hr;
-    }
+    IWineD3DSurface_GetDesc(surface->WineD3DSurface, &wined3d_desc);
 
     format = wined3d_desc.format;
     if (format == WINED3DFMT_UNKNOWN)

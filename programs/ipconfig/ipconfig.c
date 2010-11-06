@@ -130,26 +130,49 @@ static void print_field(int msg, const WCHAR *value)
     ipconfig_printfW(formatW, field, value);
 }
 
+static void print_value(const WCHAR *value)
+{
+    static const WCHAR formatW[] = {' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+                                    ' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+                                    ' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+                                    ' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+                                    '%','s','\n',0};
+
+    ipconfig_printfW(formatW, value);
+}
+
+static BOOL socket_address_to_string(WCHAR *buf, DWORD len, SOCKET_ADDRESS *addr)
+{
+    return WSAAddressToStringW(addr->lpSockaddr,
+                               addr->iSockaddrLength, NULL,
+                               buf, &len) == 0;
+}
+
 static void print_basic_information(void)
 {
     IP_ADAPTER_ADDRESSES *adapters;
     ULONG out = 0;
 
-    if (GetAdaptersAddresses(AF_UNSPEC, 0, NULL, NULL, &out) == ERROR_BUFFER_OVERFLOW)
+    if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_GATEWAYS,
+                             NULL, NULL, &out) == ERROR_BUFFER_OVERFLOW)
     {
         adapters = HeapAlloc(GetProcessHeap(), 0, out);
         if (!adapters)
             exit(1);
 
-        if (GetAdaptersAddresses(AF_UNSPEC, 0, NULL, adapters, &out) == ERROR_SUCCESS)
+        if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_GATEWAYS,
+                                 NULL, adapters, &out) == ERROR_SUCCESS)
         {
             IP_ADAPTER_ADDRESSES *p;
 
             for (p = adapters; p; p = p->Next)
             {
                 static const WCHAR newlineW[] = {'\n',0};
+                static const WCHAR emptyW[] = {0};
 
                 IP_ADAPTER_UNICAST_ADDRESS *addr;
+                IP_ADAPTER_GATEWAY_ADDRESS_LH *gateway;
+                WCHAR addr_buf[54];
 
                 ipconfig_message_printfW(STRING_ADAPTER_FRIENDLY, iftype_to_string(p->IfType), p->FriendlyName);
                 ipconfig_printfW(newlineW);
@@ -157,17 +180,25 @@ static void print_basic_information(void)
 
                 for (addr = p->FirstUnicastAddress; addr; addr = addr->Next)
                 {
-                    WCHAR addr_buf[54];
-                    DWORD len = sizeof(addr_buf)/sizeof(WCHAR);
-
-                    if (WSAAddressToStringW(addr->Address.lpSockaddr,
-                                            addr->Address.iSockaddrLength, NULL,
-                                            addr_buf, &len) == 0)
+                    if (socket_address_to_string(addr_buf, sizeof(addr_buf)/sizeof(WCHAR), &addr->Address))
                         print_field(STRING_IP_ADDRESS, addr_buf);
                     /* FIXME: Output corresponding subnet mask. */
                 }
 
-                /* FIXME: Output default gateway address. */
+                if (p->FirstGatewayAddress)
+                {
+                    if (socket_address_to_string(addr_buf, sizeof(addr_buf)/sizeof(WCHAR), &p->FirstGatewayAddress->Address))
+                        print_field(STRING_DEFAULT_GATEWAY, addr_buf);
+
+                    for (gateway = p->FirstGatewayAddress->Next; gateway; gateway = gateway->Next)
+                    {
+                        if (socket_address_to_string(addr_buf, sizeof(addr_buf)/sizeof(WCHAR), &gateway->Address))
+                            print_value(addr_buf);
+                    }
+                }
+                else
+                    print_field(STRING_DEFAULT_GATEWAY, emptyW);
+
                 ipconfig_printfW(newlineW);
             }
         }
@@ -242,6 +273,7 @@ static const WCHAR *boolean_to_string(int value)
 static void print_full_information(void)
 {
     static const WCHAR newlineW[] = {'\n',0};
+    static const WCHAR emptyW[] = {0};
 
     FIXED_INFO *info;
     IP_ADAPTER_ADDRESSES *adapters;
@@ -257,7 +289,7 @@ static void print_full_information(void)
         {
             WCHAR hostnameW[MAX_HOSTNAME_LEN + 4];
 
-            MultiByteToWideChar(CP_ACP, 0, info->HostName, -1, hostnameW, sizeof(hostnameW));
+            MultiByteToWideChar(CP_ACP, 0, info->HostName, -1, hostnameW, sizeof(hostnameW)/sizeof(hostnameW[0]));
             print_field(STRING_HOSTNAME, hostnameW);
 
             /* FIXME: Output primary DNS suffix. */
@@ -273,13 +305,15 @@ static void print_full_information(void)
         HeapFree(GetProcessHeap(), 0, info);
     }
 
-    if (GetAdaptersAddresses(AF_UNSPEC, 0, NULL, NULL, &out) == ERROR_BUFFER_OVERFLOW)
+    if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_GATEWAYS,
+                             NULL, NULL, &out) == ERROR_BUFFER_OVERFLOW)
     {
         adapters = HeapAlloc(GetProcessHeap(), 0, out);
         if (!adapters)
             exit(1);
 
-        if (GetAdaptersAddresses(AF_UNSPEC, 0, NULL, adapters, &out) == ERROR_SUCCESS)
+        if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_GATEWAYS,
+                                 NULL, adapters, &out) == ERROR_SUCCESS)
         {
             IP_ADAPTER_ADDRESSES *p;
 
@@ -287,6 +321,8 @@ static void print_full_information(void)
             {
                 IP_ADAPTER_UNICAST_ADDRESS *addr;
                 WCHAR physaddr_buf[3 * MAX_ADAPTER_ADDRESS_LENGTH];
+                IP_ADAPTER_GATEWAY_ADDRESS_LH *gateway;
+                WCHAR addr_buf[54];
 
                 ipconfig_message_printfW(STRING_ADAPTER_FRIENDLY, iftype_to_string(p->IfType), p->FriendlyName);
                 ipconfig_printfW(newlineW);
@@ -299,17 +335,24 @@ static void print_full_information(void)
 
                 for (addr = p->FirstUnicastAddress; addr; addr = addr->Next)
                 {
-                    WCHAR addr_buf[54];
-                    DWORD len = sizeof(addr_buf)/sizeof(WCHAR);
-
-                    if (WSAAddressToStringW(addr->Address.lpSockaddr,
-                                            addr->Address.iSockaddrLength, NULL,
-                                            addr_buf, &len) == 0)
+                    if (socket_address_to_string(addr_buf, sizeof(addr_buf)/sizeof(WCHAR), &addr->Address))
                         print_field(STRING_IP_ADDRESS, addr_buf);
                     /* FIXME: Output corresponding subnet mask. */
                 }
 
-                /* FIXME: Output default gateway address. */
+                if (p->FirstGatewayAddress)
+                {
+                    if (socket_address_to_string(addr_buf, sizeof(addr_buf)/sizeof(WCHAR), &p->FirstGatewayAddress->Address))
+                        print_field(STRING_DEFAULT_GATEWAY, addr_buf);
+
+                    for (gateway = p->FirstGatewayAddress->Next; gateway; gateway = gateway->Next)
+                    {
+                        if (socket_address_to_string(addr_buf, sizeof(addr_buf)/sizeof(WCHAR), &gateway->Address))
+                            print_value(addr_buf);
+                    }
+                }
+                else
+                    print_field(STRING_DEFAULT_GATEWAY, emptyW);
 
                 ipconfig_printfW(newlineW);
             }

@@ -28,9 +28,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
-#ifdef HAVE_TERMIOS_H
-#include <termios.h>
-#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -66,7 +63,6 @@ struct console_input
     user_handle_t                win;           /* window handle if backend supports it */
     struct event                *event;         /* event to wait on for input queue */
     struct fd                   *fd;            /* for bare console, attached input fd */
-    struct termios               termios;       /* for bare console, saved termio info */
 };
 
 static void console_input_dump( struct object *obj, int verbose );
@@ -197,7 +193,10 @@ static struct fd *console_input_get_fd( struct object* obj )
 {
     struct console_input *console_input = (struct console_input*)obj;
     assert( obj->ops == &console_input_ops );
-    return console_input->fd ? (struct fd*)grab_object( console_input->fd ) : NULL;
+    if (console_input->fd)
+        return (struct fd*)grab_object( console_input->fd );
+    set_error( STATUS_OBJECT_TYPE_MISMATCH );
+    return NULL;
 }
 
 static enum server_fd_type console_get_fd_type( struct fd *fd )
@@ -328,36 +327,10 @@ static struct object *create_console_input( struct thread* renderer, int fd )
     }
     if (fd != -1) /* bare console */
     {
-        struct termios  term;
-
         if (!(console_input->fd = create_anonymous_fd( &console_fd_ops, fd, &console_input->obj,
                                                        FILE_SYNCHRONOUS_IO_NONALERT )))
         {
             release_object( console_input );
-            return NULL;
-        }
-        if (tcgetattr(fd, &term) < 0)
-        {
-            release_object( console_input );
-            set_error( STATUS_INVALID_HANDLE );
-            return NULL;
-        }
-        console_input->termios = term;
-        term.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN);
-        term.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-        term.c_cflag &= ~(CSIZE | PARENB);
-        term.c_cflag |= CS8;
-        /* FIXME: we should actually disable output processing here
-         * and let kernel32/console.c do the job (with support of enable/disable of
-         * processed output)
-         */
-        /* term.c_oflag &= ~(OPOST); */
-        term.c_cc[VMIN] = 1;
-        term.c_cc[VTIME] = 0;
-        if (tcsetattr(fd, TCSANOW, &term) < 0)
-        {
-            release_object( console_input );
-            set_error( STATUS_INVALID_HANDLE );
             return NULL;
         }
         allow_fd_caching( console_input->fd );
@@ -408,7 +381,11 @@ static struct screen_buffer *create_console_output( struct console_input *consol
     struct screen_buffer *screen_buffer;
     int	i;
 
-    if (!(screen_buffer = alloc_object( &screen_buffer_ops ))) return NULL;
+    if (!(screen_buffer = alloc_object( &screen_buffer_ops )))
+    {
+        if (fd != -1) close( fd );
+        return NULL;
+    }
     screen_buffer->mode           = ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT;
     screen_buffer->input          = console_input;
     screen_buffer->cursor_size    = 100;
@@ -1129,10 +1106,7 @@ static void console_input_destroy( struct object *obj )
     }
     release_object( console_in->event );
     if (console_in->fd)
-    {
-        tcsetattr(get_unix_fd(console_in->fd), TCSANOW, &console_in->termios);
         release_object( console_in->fd );
-    }
 
     for (i = 0; i < console_in->history_size; i++)
         free( console_in->history[i] );
@@ -1177,7 +1151,10 @@ static struct fd *screen_buffer_get_fd( struct object *obj )
 {
     struct screen_buffer *screen_buffer = (struct screen_buffer*)obj;
     assert( obj->ops == &screen_buffer_ops );
-    return screen_buffer->fd ? (struct fd*)grab_object( screen_buffer->fd ) : NULL;
+    if (screen_buffer->fd)
+        return (struct fd*)grab_object( screen_buffer->fd );
+    set_error( STATUS_OBJECT_TYPE_MISMATCH );
+    return NULL;
 }
 
 /* write data into a screen buffer */
@@ -1409,6 +1386,7 @@ DECL_HANDLER(alloc_console)
     struct thread *renderer;
     struct console_input *console;
     int fd;
+    int attach = 0;
 
     switch (req->pid)
     {
@@ -1421,12 +1399,14 @@ DECL_HANDLER(alloc_console)
             return;
         }
         grab_object( process );
+        attach = 1;
         break;
     case 0xffffffff:
         /* no renderer, console to be attached to current process */
         renderer = NULL;
         process = current->process;
         grab_object( process );
+        attach = 1;
         break;
     default:
         /* renderer is current, console to be attached to req->pid */
@@ -1434,7 +1414,7 @@ DECL_HANDLER(alloc_console)
         if (!(process = get_process_from_id( req->pid ))) return;
     }
 
-    if (process != current->process && process->console)
+    if (attach && process->console)
     {
         set_error( STATUS_ACCESS_DENIED );
         goto the_end;
@@ -1456,8 +1436,11 @@ DECL_HANDLER(alloc_console)
             if (!console->evt ||
                 (evt = alloc_handle( current->process, console->evt, SYNCHRONIZE|GENERIC_READ|GENERIC_WRITE, 0 )))
             {
-                process->console = (struct console_input*)grab_object( console );
-                console->num_proc++;
+                if (attach)
+                {
+                    process->console = (struct console_input*)grab_object( console );
+                    console->num_proc++;
+                }
                 reply->handle_in = in;
                 reply->event = evt;
                 release_object( console );
@@ -1465,7 +1448,7 @@ DECL_HANDLER(alloc_console)
             }
             close_handle( current->process, in );
         }
-        free_console( process );
+        release_object( console );
     }
  the_end:
     release_object( process );
@@ -1628,6 +1611,7 @@ DECL_HANDLER(create_console_output)
     if (console_input_is_bare( console ) ^ (fd != -1))
     {
         close( fd );
+        release_object( console );
         set_error( STATUS_INVALID_HANDLE );
         return;
     }

@@ -48,7 +48,7 @@ static const char elem_test_str[] =
     "<textarea id=\"X\">text text</textarea>"
     "<table id=\"tbl\"><tbody><tr></tr><tr id=\"row2\"><td>td1 text</td><td>td2 text</td></tr></tbody></table>"
     "<script id=\"sc\" type=\"text/javascript\"><!--\nfunction Testing() {}\n// -->\n</script>"
-    "<test />"
+    "<test /><object></object><embed />"
     "<img id=\"imgid\" name=\"WineImg\"/>"
     "<iframe src=\"about:blank\" id=\"ifr\"></iframe>"
     "<form id=\"frm\"></form>"
@@ -100,7 +100,9 @@ typedef enum {
     ET_TD,
     ET_IFRAME,
     ET_FORM,
-    ET_FRAME
+    ET_FRAME,
+    ET_OBJECT,
+    ET_EMBED
 } elem_type_t;
 
 static const IID * const none_iids[] = {
@@ -324,6 +326,30 @@ static const IID * const frame_iids[] = {
     NULL
 };
 
+static const IID * const object_iids[] = {
+    &IID_IHTMLDOMNode,
+    &IID_IHTMLDOMNode2,
+    &IID_IHTMLElement,
+    &IID_IHTMLElement2,
+    &IID_IHTMLElement3,
+    &IID_IHTMLObjectElement,
+    &IID_IDispatchEx,
+    /* FIXME: No IConnectionPointContainer */
+    NULL
+};
+
+static const IID * const embed_iids[] = {
+    &IID_IHTMLDOMNode,
+    &IID_IHTMLDOMNode2,
+    &IID_IHTMLElement,
+    &IID_IHTMLElement2,
+    &IID_IHTMLElement3,
+    &IID_IHTMLEmbedElement,
+    &IID_IDispatchEx,
+    /* FIXME: No IConnectionPointContainer */
+    NULL
+};
+
 static const IID * const iframe_iids[] = {
     &IID_IHTMLDOMNode,
     &IID_IHTMLDOMNode2,
@@ -421,7 +447,9 @@ static const elem_type_info_t elem_type_infos[] = {
     {"TD",        td_iids,          NULL},
     {"IFRAME",    iframe_iids,      &DIID_DispHTMLIFrame},
     {"FORM",      form_iids,        &DIID_DispHTMLFormElement},
-    {"FRAME",     frame_iids,       &DIID_DispHTMLFrameElement}
+    {"FRAME",     frame_iids,       &DIID_DispHTMLFrameElement},
+    {"OBJECT",    object_iids,      &DIID_DispHTMLObjectElement},
+    {"EMBED",     embed_iids,       &DIID_DispHTMLEmbed}
 };
 
 static const char *dbgstr_guid(REFIID riid)
@@ -943,6 +971,7 @@ static void _test_window_name(unsigned line, IHTMLWindow2 *window, const char *e
         ok_(__FILE__,line)(!strcmp_wa(name, exname), "name = %s\n", wine_dbgstr_w(name));
     else
         ok_(__FILE__,line)(!name, "name = %s\n", wine_dbgstr_w(name));
+    SysFreeString(name);
 }
 
 #define set_window_name(w,n) _set_window_name(__LINE__,w,n)
@@ -1225,6 +1254,20 @@ static void _test_textarea_put_readonly(unsigned line, IUnknown *unk, VARIANT_BO
     _test_textarea_readonly(line, unk, b);
 }
 
+#define test_textarea_type(t) _test_textarea_type(__LINE__,t)
+static void _test_textarea_type(unsigned line, IUnknown *unk)
+{
+    IHTMLTextAreaElement *textarea = _get_textarea_iface(line, unk);
+    BSTR type = (void*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLTextAreaElement_get_type(textarea, &type);
+    IHTMLTextAreaElement_Release(textarea);
+    ok_(__FILE__,line)(hres == S_OK, "get_type failed: %08x\n", hres);
+    ok_(__FILE__,line)(!strcmp_wa(type, "textarea"), "type = %s, expected textarea\n", wine_dbgstr_w(type));
+    SysFreeString(type);
+}
+
 #define test_comment_text(c,t) _test_comment_text(__LINE__,c,t)
 static void _test_comment_text(unsigned line, IUnknown *unk, const char *extext)
 {
@@ -1433,6 +1476,7 @@ static void _test_select_value(unsigned line, IHTMLSelectElement *select, const 
         ok_(__FILE__,line) (!strcmp_wa(val, exval), "unexpected value %s\n", wine_dbgstr_w(val));
     else
         ok_(__FILE__,line) (val == NULL, "val=%s, expected NULL\n", wine_dbgstr_w(val));
+    SysFreeString(val);
 }
 
 #define test_select_set_value(s,v) _test_select_set_value(__LINE__,s,v)
@@ -1456,6 +1500,7 @@ static void _test_select_type(unsigned line, IHTMLSelectElement *select, const c
     hres = IHTMLSelectElement_get_type(select, &type);
     ok_(__FILE__,line) (hres == S_OK, "get_type failed: %08x\n", hres);
     ok_(__FILE__,line) (!strcmp_wa(type, extype), "type=%s, expected %s\n", wine_dbgstr_w(type), extype);
+    SysFreeString(type);
 }
 
 #define test_range_text(r,t) _test_range_text(__LINE__,r,t)
@@ -2559,6 +2604,7 @@ static void _test_form_action(unsigned line, IUnknown *unk, const char *ex)
     else
         ok_(__FILE__,line)(!action, "action=%p\n", action);
 
+    SysFreeString(action);
     IHTMLFormElement_Release(form);
 }
 
@@ -2575,6 +2621,107 @@ static void _test_form_put_action(unsigned line, IUnknown *unk, const char *acti
     IHTMLFormElement_Release(form);
 
     _test_form_action(line, unk, action);
+}
+
+#define test_form_method(f,a) _test_form_method(__LINE__,f,a)
+static void _test_form_method(unsigned line, IUnknown *unk, const char *ex)
+{
+    IHTMLFormElement *form = _get_form_iface(line, unk);
+    BSTR method = (void*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLFormElement_get_method(form, &method);
+    ok_(__FILE__,line)(hres == S_OK, "get_method failed: %08x\n", hres);
+    if(ex)
+        ok_(__FILE__,line)(!strcmp_wa(method, ex), "method=%s, expected %s\n", wine_dbgstr_w(method), ex);
+    else
+        ok_(__FILE__,line)(!method, "method=%p\n", method);
+
+    SysFreeString(method);
+    IHTMLFormElement_Release(form);
+}
+
+#define test_form_put_method(f,r,a) _test_form_put_method(__LINE__,f,r,a)
+static void _test_form_put_method(unsigned line, IUnknown *unk, HRESULT exp_hres, const char *method)
+{
+    IHTMLFormElement *form = _get_form_iface(line, unk);
+    BSTR tmp = a2bstr(method);
+    HRESULT hres;
+
+    hres = IHTMLFormElement_put_method(form, tmp);
+    ok_(__FILE__,line)(hres == exp_hres, "put_method returned: %08x, expected %08x\n", hres, exp_hres);
+    SysFreeString(tmp);
+    IHTMLFormElement_Release(form);
+
+    if(exp_hres == S_OK)
+        _test_form_method(line, unk, method);
+}
+
+#define test_form_name(f,a) _test_form_name(__LINE__,f,a)
+static void _test_form_name(unsigned line, IUnknown *unk, const char *ex)
+{
+    IHTMLFormElement *form = _get_form_iface(line, unk);
+    BSTR name = (void*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLFormElement_get_name(form, &name);
+    ok_(__FILE__,line)(hres == S_OK, "get_name failed: %08x\n", hres);
+    if(ex)
+        ok_(__FILE__,line)(!strcmp_wa(name, ex), "name=%s, expected %s\n", wine_dbgstr_w(name), ex);
+    else
+        ok_(__FILE__,line)(!name, "name=%p\n", name);
+
+    SysFreeString(name);
+    IHTMLFormElement_Release(form);
+}
+
+#define test_form_put_name(f,a) _test_form_put_name(__LINE__,f,a)
+static void _test_form_put_name(unsigned line, IUnknown *unk, const char *name)
+{
+    IHTMLFormElement *form = _get_form_iface(line, unk);
+    BSTR tmp = a2bstr(name);
+    HRESULT hres;
+
+    hres = IHTMLFormElement_put_name(form, tmp);
+    ok_(__FILE__,line)(hres == S_OK, "put_name failed: %08x\n", hres);
+    SysFreeString(tmp);
+    IHTMLFormElement_Release(form);
+
+    _test_form_name(line, unk, name);
+}
+
+#define test_form_encoding(f,a) _test_form_encoding(__LINE__,f,a)
+static void _test_form_encoding(unsigned line, IUnknown *unk, const char *ex)
+{
+    IHTMLFormElement *form = _get_form_iface(line, unk);
+    BSTR encoding = (void*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLFormElement_get_encoding(form, &encoding);
+    ok_(__FILE__,line)(hres == S_OK, "get_encoding failed: %08x\n", hres);
+    if(ex)
+        ok_(__FILE__,line)(!strcmp_wa(encoding, ex), "encoding=%s, expected %s\n", wine_dbgstr_w(encoding), ex);
+    else
+        ok_(__FILE__,line)(!encoding, "encoding=%p\n", encoding);
+
+    SysFreeString(encoding);
+    IHTMLFormElement_Release(form);
+}
+
+#define test_form_put_encoding(f,r,a) _test_form_put_encoding(__LINE__,f,r,a)
+static void _test_form_put_encoding(unsigned line, IUnknown *unk, HRESULT exp_hres, const char *encoding)
+{
+    IHTMLFormElement *form = _get_form_iface(line, unk);
+    BSTR tmp = a2bstr(encoding);
+    HRESULT hres;
+
+    hres = IHTMLFormElement_put_encoding(form, tmp);
+    ok_(__FILE__,line)(hres == exp_hres, "put_encoding returned: %08x, expected %08x\n", hres, exp_hres);
+    SysFreeString(tmp);
+    IHTMLFormElement_Release(form);
+
+    if(exp_hres == S_OK)
+        _test_form_encoding(line, unk, encoding);
 }
 
 #define get_elem_doc(e) _get_elem_doc(__LINE__,e)
@@ -3429,6 +3576,7 @@ static void test_location(IHTMLDocument2 *doc)
     hres = IHTMLLocation_get_pathname(location, &str);
     ok(hres == S_OK, "get_pathname failed: %08x\n", hres);
     ok(!strcmp_wa(str, "blank"), "unexpected pathname %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
 
     hres = IHTMLLocation_get_href(location, NULL);
     ok(hres == E_POINTER, "get_href passed: %08x\n", hres);
@@ -3436,6 +3584,7 @@ static void test_location(IHTMLDocument2 *doc)
     hres = IHTMLLocation_get_href(location, &str);
     ok(hres == S_OK, "get_href failed: %08x\n", hres);
     ok(!strcmp_wa(str, "about:blank"), "unexpected href %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
 
     ref = IHTMLLocation_Release(location);
     ok(!ref, "location chould be destroyed here\n");
@@ -3927,6 +4076,7 @@ static void test_style4(IHTMLStyle4 *style4)
     ok(hres == S_OK, "get_minHeight failed: %08x\n", hres);
     ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
     ok( !strcmp_wa(V_BSTR(&v), "10px"), "expect 10px got (%s)\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
 
     hres = IHTMLStyle4_put_minHeight(style4, vdefault);
     ok(hres == S_OK, "put_minHeight failed: %08x\n", hres);
@@ -4286,6 +4436,7 @@ static void test_default_style(IHTMLStyle *style)
     hres = IHTMLStyle_get_margin(style, &str);
     ok(hres == S_OK, "get_margin failed: %08x\n", hres);
     ok(!strcmp_wa(str, "1px"), "margin = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
 
     hres = IHTMLStyle_put_margin(style, NULL);
     ok(hres == S_OK, "put_margin failed: %08x\n", hres);
@@ -4307,6 +4458,7 @@ static void test_default_style(IHTMLStyle *style)
     ok(hres == S_OK, "get_marginTop failed: %08x\n", hres);
     ok(V_VT(&v) == VT_BSTR, "V_VT(marginTop) = %d\n", V_VT(&v));
     ok(!strcmp_wa(V_BSTR(&v), "6px"), "V_BSTR(marginTop) = %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
 
     str = NULL;
     hres = IHTMLStyle_get_border(style, &str);
@@ -4762,6 +4914,7 @@ static void test_default_style(IHTMLStyle *style)
     hres = IHTMLStyle_get_paddingLeft(style, &v);
     ok(hres == S_OK, "get_paddingLeft: %08x\n", hres);
     ok(!strcmp_wa(V_BSTR(&v), "10px"), "expecte 10 = %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
 
     hres = IHTMLStyle_put_paddingLeft(style, vDefault);
     ok(hres == S_OK, "put_paddingLeft: %08x\n", hres);
@@ -5784,6 +5937,8 @@ static void test_elems(IHTMLDocument2 *doc)
         ET_TD,
         ET_SCRIPT,
         ET_TEST,
+        ET_OBJECT,
+        ET_EMBED,
         ET_IMG,
         ET_IFRAME,
         ET_FORM
@@ -6254,6 +6409,7 @@ static void test_elems2(IHTMLDocument2 *doc)
         test_textarea_readonly((IUnknown*)elem, VARIANT_FALSE);
         test_textarea_put_readonly((IUnknown*)elem, VARIANT_TRUE);
         test_textarea_put_readonly((IUnknown*)elem, VARIANT_FALSE);
+        test_textarea_type((IUnknown*)elem);
         IHTMLElement_Release(elem);
     }
 
@@ -6265,6 +6421,17 @@ static void test_elems2(IHTMLDocument2 *doc)
         test_form_item(elem);
         test_form_action((IUnknown*)elem, NULL);
         test_form_put_action((IUnknown*)elem, "about:blank");
+        test_form_method((IUnknown*)elem, "get");
+        test_form_put_method((IUnknown*)elem, S_OK, "post");
+        test_form_put_method((IUnknown*)elem, E_INVALIDARG, "put");
+        test_form_method((IUnknown*)elem, "post");
+        test_form_name((IUnknown*)elem, NULL);
+        test_form_put_name((IUnknown*)elem, "Name");
+        test_form_encoding((IUnknown*)elem, "application/x-www-form-urlencoded");
+        test_form_put_encoding((IUnknown*)elem, S_OK, "text/plain");
+        test_form_put_encoding((IUnknown*)elem, S_OK, "multipart/form-data");
+        test_form_put_encoding((IUnknown*)elem, E_INVALIDARG, "image/png");
+        test_form_encoding((IUnknown*)elem, "multipart/form-data");
         IHTMLElement_Release(elem);
     }
 

@@ -9,11 +9,11 @@
 @ stub D3D10DisassembleEffect
 @ stub D3D10DisassembleShader
 @ stdcall D3D10GetGeometryShaderProfile(ptr)
-@ stub D3D10GetInputAndOutputSignatureBlob
-@ stub D3D10GetInputSignatureBlob
-@ stub D3D10GetOutputSignatureBlob
+@ stdcall D3D10GetInputAndOutputSignatureBlob(ptr long ptr) d3dcompiler_43.D3DGetInputAndOutputSignatureBlob
+@ stdcall D3D10GetInputSignatureBlob(ptr long ptr) d3dcompiler_43.D3DGetInputSignatureBlob
+@ stdcall D3D10GetOutputSignatureBlob(ptr long ptr) d3dcompiler_43.D3DGetOutputSignatureBlob
 @ stdcall D3D10GetPixelShaderProfile(ptr)
-@ stub D3D10GetShaderDebugInfo
+@ stdcall D3D10GetShaderDebugInfo(ptr long ptr) d3dcompiler_43.D3DGetDebugInfo
 @ stub D3D10GetVersion
 @ stdcall D3D10GetVertexShaderProfile(ptr)
 @ stub D3D10PreprocessShader

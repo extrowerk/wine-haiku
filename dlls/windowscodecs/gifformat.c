@@ -123,8 +123,15 @@ static HRESULT WINAPI GifFrameDecode_GetPixelFormat(IWICBitmapFrameDecode *iface
 static HRESULT WINAPI GifFrameDecode_GetResolution(IWICBitmapFrameDecode *iface,
     double *pDpiX, double *pDpiY)
 {
-    FIXME("(%p,%p,%p): stub\n", iface, pDpiX, pDpiY);
-    return E_NOTIMPL;
+    GifFrameDecode *This = (GifFrameDecode*)iface;
+    const GifWord aspect_word = This->parent->gif->SAspectRatio;
+    const double aspect = (aspect_word > 0) ? ((aspect_word + 15.0) / 64.0) : 1.0;
+    TRACE("(%p,%p,%p)\n", iface, pDpiX, pDpiY);
+
+    *pDpiX = 96.0 / aspect;
+    *pDpiY = 96.0;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI GifFrameDecode_CopyPalette(IWICBitmapFrameDecode *iface,
@@ -177,9 +184,21 @@ static HRESULT copy_interlaced_pixels(const BYTE *srcbuffer,
     const BYTE *src;
     BYTE *dst;
     UINT y;
+    WICRect rect;
 
-    if (rc->X < 0 || rc->Y < 0 || rc->X+rc->Width > srcwidth || rc->Y+rc->Height > srcheight)
-        return E_INVALIDARG;
+    if (!rc)
+    {
+        rect.X = 0;
+        rect.Y = 0;
+        rect.Width = srcwidth;
+        rect.Height = srcheight;
+        rc = &rect;
+    }
+    else
+    {
+        if (rc->X < 0 || rc->Y < 0 || rc->X+rc->Width > srcwidth || rc->Y+rc->Height > srcheight)
+            return E_INVALIDARG;
+    }
 
     if (dststride < rc->Width)
         return E_INVALIDARG;

@@ -45,6 +45,44 @@ HRESULT WINAPI D3DCompile(const void *data, SIZE_T data_size, const char *filena
         const D3D_SHADER_MACRO *defines, ID3DInclude *include, const char *entrypoint,
         const char *target, UINT sflags, UINT eflags, ID3DBlob **shader, ID3DBlob **error_messages);
 
+typedef enum D3DCOMPILER_STRIP_FLAGS
+{
+    D3DCOMPILER_STRIP_REFLECTION_DATA = 1,
+    D3DCOMPILER_STRIP_DEBUG_INFO = 2,
+    D3DCOMPILER_STRIP_TEST_BLOBS = 4,
+    D3DCOMPILER_STRIP_FORCE_DWORD = 0x7fffffff
+} D3DCOMPILER_STRIP_FLAGS;
+
+HRESULT WINAPI D3DStripShader(const void *data, SIZE_T data_size, UINT flags, ID3DBlob **blob);
+
+typedef enum D3D_BLOB_PART
+{
+    D3D_BLOB_INPUT_SIGNATURE_BLOB,
+    D3D_BLOB_OUTPUT_SIGNATURE_BLOB,
+    D3D_BLOB_INPUT_AND_OUTPUT_SIGNATURE_BLOB,
+    D3D_BLOB_PATCH_CONSTANT_SIGNATURE_BLOB,
+    D3D_BLOB_ALL_SIGNATURE_BLOB,
+    D3D_BLOB_DEBUG_INFO,
+    D3D_BLOB_LEGACY_SHADER,
+    D3D_BLOB_XNA_PREPASS_SHADER,
+    D3D_BLOB_XNA_SHADER,
+    D3D_BLOB_TEST_ALTERNATE_SHADER = 0x8000,
+    D3D_BLOB_TEST_COMPILE_DETAILS,
+    D3D_BLOB_TEST_COMPILE_PERF
+} D3D_BLOB_PART;
+
+HRESULT WINAPI D3DGetBlobPart(const void *data, SIZE_T data_size, D3D_BLOB_PART part, UINT flags, ID3DBlob **blob);
+HRESULT WINAPI D3DGetInputSignatureBlob(const void *data, SIZE_T data_size, ID3DBlob **blob);
+HRESULT WINAPI D3DGetOutputSignatureBlob(const void *data, SIZE_T data_size, ID3DBlob **blob);
+HRESULT WINAPI D3DGetInputAndOutputSignatureBlob(const void *data, SIZE_T data_size, ID3DBlob **blob);
+HRESULT WINAPI D3DGetDebugInfo(const void *data, SIZE_T data_size, ID3DBlob **blob);
+
+HRESULT WINAPI D3DReflect(const void *data, SIZE_T data_size, REFIID riid, void **reflector);
+
 HRESULT WINAPI D3DCreateBlob(SIZE_T data_size, ID3DBlob **blob);
+
+HRESULT WINAPI D3DPreprocess(const void *data, SIZE_T size, const char *filename,
+        const D3D_SHADER_MACRO *defines, ID3DInclude *include,
+        ID3DBlob **shader, ID3DBlob **error_messages);
 
 #endif

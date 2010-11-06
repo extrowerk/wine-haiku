@@ -63,29 +63,7 @@ static const WCHAR mshtml_keyW[] =
      '\\','M','S','H','T','M','L',0};
 
 static HWND install_dialog = NULL;
-static LPWSTR tmp_file_name = NULL;
-static HANDLE tmp_file = INVALID_HANDLE_VALUE;
 static LPWSTR url = NULL;
-
-static void clean_up(void)
-{
-    if(tmp_file != INVALID_HANDLE_VALUE)
-        CloseHandle(tmp_file);
-
-    if(tmp_file_name) {
-        DeleteFileW(tmp_file_name);
-        heap_free(tmp_file_name);
-        tmp_file_name = NULL;
-    }
-
-    if(tmp_file != INVALID_HANDLE_VALUE) {
-        CloseHandle(tmp_file);
-        tmp_file = INVALID_HANDLE_VALUE;
-    }
-
-    if(install_dialog)
-        EndDialog(install_dialog, 0);
-}
 
 static void set_status(DWORD id)
 {
@@ -174,13 +152,10 @@ static BOOL install_cab(LPCWSTR file_name)
     heap_free(file_name_a);
     if(FAILED(hres)) {
         ERR("Could not extract package: %08x\n", hres);
-        clean_up();
         return FALSE;
     }
 
     set_registry(install_dir);
-    clean_up();
-
     return TRUE;
 }
 
@@ -283,6 +258,11 @@ static BOOL install_from_default_dir(void)
     ret = install_from_unix_file(file_name);
 
     heap_free(file_name);
+
+    if (!ret)
+        ret = install_from_unix_file( GECKO_DATADIR "/wine/gecko/" GECKO_FILE_NAME);
+    if (!ret && strcmp( GECKO_DATADIR, "/usr/share" ))
+        ret = install_from_unix_file("/usr/share/wine/gecko/" GECKO_FILE_NAME);
     return ret;
 }
 
@@ -310,26 +290,7 @@ static ULONG WINAPI InstallCallback_Release(IBindStatusCallback *iface)
 static HRESULT WINAPI InstallCallback_OnStartBinding(IBindStatusCallback *iface,
         DWORD dwReserved, IBinding *pib)
 {
-    WCHAR tmp_dir[MAX_PATH];
-
     set_status(IDS_DOWNLOADING);
-
-    GetTempPathW(sizeof(tmp_dir)/sizeof(WCHAR), tmp_dir);
-
-    tmp_file_name = heap_alloc(MAX_PATH*sizeof(WCHAR));
-    GetTempFileNameW(tmp_dir, NULL, 0, tmp_file_name);
-
-    TRACE("creating temp file %s\n", debugstr_w(tmp_file_name));
-
-    tmp_file = CreateFileW(tmp_file_name, GENERIC_WRITE, 0, NULL, 
-                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-
-    if(tmp_file == INVALID_HANDLE_VALUE) {
-        ERR("Could not create file: %d\n", GetLastError());
-        clean_up();
-        return E_FAIL;
-    }
-
     return S_OK;
 }
 
@@ -363,17 +324,10 @@ static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
 {
     if(FAILED(hresult)) {
         ERR("Binding failed %08x\n", hresult);
-        clean_up();
         return S_OK;
     }
 
-    CloseHandle(tmp_file);
-    tmp_file = INVALID_HANDLE_VALUE;
-
     set_status(IDS_INSTALLING);
-
-    install_cab(tmp_file_name);
-
     return S_OK;
 }
 
@@ -388,21 +342,8 @@ static HRESULT WINAPI InstallCallback_GetBindInfo(IBindStatusCallback *iface,
 static HRESULT WINAPI InstallCallback_OnDataAvailable(IBindStatusCallback *iface, DWORD grfBSCF,
         DWORD dwSize, FORMATETC* pformatetc, STGMEDIUM* pstgmed)
 {
-    IStream *str = pstgmed->u.pstm;
-    BYTE buf[1024];
-    DWORD size;
-    HRESULT hres;
-
-    do {
-        DWORD written;
-
-        size = 0;
-        hres = IStream_Read(str, buf, sizeof(buf), &size);
-        if(size)
-            WriteFile(tmp_file, buf, size, &written, NULL);
-    }while(hres == S_OK);
-
-    return S_OK;
+    ERR("\n");
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI InstallCallback_OnObjectAvailable(IBindStatusCallback *iface,
@@ -474,27 +415,23 @@ static LPWSTR get_url(void)
 
 static DWORD WINAPI download_proc(PVOID arg)
 {
-    IMoniker *mon;
-    IBindCtx *bctx;
-    IStream *str = NULL;
+    WCHAR tmp_dir[MAX_PATH], tmp_file[MAX_PATH];
     HRESULT hres;
 
-    CreateURLMoniker(NULL, url, &mon);
-    heap_free(url);
-    url = NULL;
+    GetTempPathW(sizeof(tmp_dir)/sizeof(WCHAR), tmp_dir);
+    GetTempFileNameW(tmp_dir, NULL, 0, tmp_file);
 
-    CreateAsyncBindCtx(0, &InstallCallback, 0, &bctx);
+    TRACE("using temp file %s\n", debugstr_w(tmp_file));
 
-    hres = IMoniker_BindToStorage(mon, bctx, NULL, &IID_IStream, (void**)&str);
-    IBindCtx_Release(bctx);
+    hres = URLDownloadToFileW(NULL, url, tmp_file, 0, &InstallCallback);
     if(FAILED(hres)) {
-        ERR("BindToStorage failed: %08x\n", hres);
+        ERR("URLDownloadToFile failed: %08x\n", hres);
         return 0;
     }
 
-    if(str)
-        IStream_Release(str);
-
+    install_cab(tmp_file);
+    DeleteFileW(tmp_file);
+    EndDialog(install_dialog, 0);
     return 0;
 }
 
@@ -539,9 +476,11 @@ BOOL install_wine_gecko(BOOL silent)
     }else {
         /*
          * Try to find Gecko .cab file in following order:
-         * - directory stored in GeckoCabDir value of HKCU/Software/MSHTML key
-         * - $datadir/gecko
-         * - download from URL stored in GeckoUrl value of HKCU/Software/MSHTML key
+         * - directory stored in GeckoCabDir value of HKCU/Wine/Software/MSHTML key
+         * - $datadir/gecko/
+         * - $GECKO_DATADIR/wine/gecko/
+         * - /usr/share/wine/gecko/
+         * - download from URL stored in GeckoUrl value of HKCU/Wine/Software/MSHTML key
          */
         if(!install_from_registered_dir()
            && !install_from_default_dir()
@@ -549,6 +488,8 @@ BOOL install_wine_gecko(BOOL silent)
             DialogBoxW(hInst, MAKEINTRESOURCEW(ID_DWL_DIALOG), 0, installer_proc);
     }
 
+    heap_free(url);
+    url = NULL;
     ReleaseSemaphore(hsem, 1, NULL);
     CloseHandle(hsem);
 

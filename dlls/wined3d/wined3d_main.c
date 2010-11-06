@@ -32,6 +32,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 struct wined3d_wndproc
 {
     HWND window;
+    BOOL unicode;
     WNDPROC proc;
     IWineD3DDeviceImpl *device;
 };
@@ -70,7 +71,7 @@ wined3d_settings_t wined3d_settings =
     RTL_READTEX,    /* Default render target locking method */
     PCI_VENDOR_NONE,/* PCI Vendor ID */
     PCI_DEVICE_NONE,/* PCI Device ID */
-    0,              /* The default of memory is set in FillGLCaps */
+    0,              /* The default of memory is set in init_driver_info */
     NULL,           /* No wine logo by default */
     FALSE,          /* Disable multisampling for now due to Nvidia driver bugs which happens for some users */
     FALSE,          /* No strict draw ordering. */
@@ -102,19 +103,19 @@ IWineD3D * WINAPI WineDirect3DCreate(UINT version, void *parent)
     return (IWineD3D *)object;
 }
 
-static inline DWORD get_config_key(HKEY defkey, HKEY appkey, const char* name, char* buffer, DWORD size)
+static DWORD get_config_key(HKEY defkey, HKEY appkey, const char *name, char *buffer, DWORD size)
 {
-    if (0 != appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE) buffer, &size )) return 0;
-    if (0 != defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE) buffer, &size )) return 0;
+    if (appkey && !RegQueryValueExA(appkey, name, 0, NULL, (BYTE *)buffer, &size)) return 0;
+    if (defkey && !RegQueryValueExA(defkey, name, 0, NULL, (BYTE *)buffer, &size)) return 0;
     return ERROR_FILE_NOT_FOUND;
 }
 
-static inline DWORD get_config_key_dword(HKEY defkey, HKEY appkey, const char* name, DWORD *data)
+static DWORD get_config_key_dword(HKEY defkey, HKEY appkey, const char *name, DWORD *data)
 {
     DWORD type;
     DWORD size = sizeof(DWORD);
-    if (0 != appkey && !RegQueryValueExA( appkey, name, 0, &type, (LPBYTE) data, &size ) && (type == REG_DWORD)) return 0;
-    if (0 != defkey && !RegQueryValueExA( defkey, name, 0, &type, (LPBYTE) data, &size ) && (type == REG_DWORD)) return 0;
+    if (appkey && !RegQueryValueExA(appkey, name, 0, &type, (BYTE *)data, &size) && (type == REG_DWORD)) return 0;
+    if (defkey && !RegQueryValueExA(defkey, name, 0, &type, (BYTE *)data, &size) && (type == REG_DWORD)) return 0;
     return ERROR_FILE_NOT_FOUND;
 }
 
@@ -200,7 +201,7 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
         }
     }
 
-    if ( 0 != hkey || 0 != appkey )
+    if (hkey || appkey)
     {
         if ( !get_config_key( hkey, appkey, "VertexShaderMode", buffer, size) )
         {
@@ -394,6 +395,7 @@ static LRESULT CALLBACK wined3d_wndproc(HWND window, UINT message, WPARAM wparam
 {
     struct wined3d_wndproc *entry;
     IWineD3DDeviceImpl *device;
+    BOOL unicode;
     WNDPROC proc;
 
     wined3d_mutex_lock();
@@ -407,10 +409,11 @@ static LRESULT CALLBACK wined3d_wndproc(HWND window, UINT message, WPARAM wparam
     }
 
     device = entry->device;
+    unicode = entry->unicode;
     proc = entry->proc;
     wined3d_mutex_unlock();
 
-    return device_process_message(device, window, message, wparam, lparam, proc);
+    return device_process_message(device, window, unicode, message, wparam, lparam, proc);
 }
 
 BOOL wined3d_register_window(HWND window, IWineD3DDeviceImpl *device)
@@ -440,7 +443,14 @@ BOOL wined3d_register_window(HWND window, IWineD3DDeviceImpl *device)
 
     entry = &wndproc_table.entries[wndproc_table.count++];
     entry->window = window;
-    entry->proc = (WNDPROC)SetWindowLongPtrW(window, GWLP_WNDPROC, (LONG_PTR)wined3d_wndproc);
+    entry->unicode = IsWindowUnicode(window);
+    /* Set a window proc that matches the window. Some applications (e.g. NoX)
+     * replace the window proc after we've set ours, and expect to be able to
+     * call the previous one (ours) directly, without using CallWindowProc(). */
+    if (entry->unicode)
+        entry->proc = (WNDPROC)SetWindowLongPtrW(window, GWLP_WNDPROC, (LONG_PTR)wined3d_wndproc);
+    else
+        entry->proc = (WNDPROC)SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)wined3d_wndproc);
     entry->device = device;
 
     wined3d_mutex_unlock();
@@ -460,8 +470,16 @@ void wined3d_unregister_window(HWND window)
             struct wined3d_wndproc *entry = &wndproc_table.entries[i];
             struct wined3d_wndproc *last = &wndproc_table.entries[--wndproc_table.count];
 
-            if (GetWindowLongPtrW(window, GWLP_WNDPROC) == (LONG_PTR)wined3d_wndproc)
-                SetWindowLongPtrW(window, GWLP_WNDPROC, (LONG_PTR)entry->proc);
+            if (entry->unicode)
+            {
+                if (GetWindowLongPtrW(window, GWLP_WNDPROC) == (LONG_PTR)wined3d_wndproc)
+                    SetWindowLongPtrW(window, GWLP_WNDPROC, (LONG_PTR)entry->proc);
+            }
+            else
+            {
+                if (GetWindowLongPtrA(window, GWLP_WNDPROC) == (LONG_PTR)wined3d_wndproc)
+                    SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)entry->proc);
+            }
             if (entry != last) *entry = *last;
             wined3d_mutex_unlock();
 

@@ -311,34 +311,10 @@ IDirect3DDeviceImpl_7_Release(IDirect3DDevice7 *iface)
          * IDirect3DVertexBuffer::Release will unset it.
          */
 
-        /* Restore the render targets */
-        if(This->OffScreenTarget)
-        {
-            WINED3DVIEWPORT vp;
-
-            vp.X = 0;
-            vp.Y = 0;
-            vp.Width = This->ddraw->d3d_target->surface_desc.dwWidth;
-            vp.Height = This->ddraw->d3d_target->surface_desc.dwHeight;
-            vp.MinZ = 0.0;
-            vp.MaxZ = 1.0;
-            IWineD3DDevice_SetViewport(This->wineD3DDevice,
-                                       &vp);
-
-            /* Set the device up to render to the front buffer since the back buffer will
-             * vanish soon.
-             */
-            IWineD3DDevice_SetRenderTarget(This->wineD3DDevice, 0,
-                                           This->ddraw->d3d_target->WineD3DSurface,
-                                           FALSE);
-            /* This->target is the offscreen target.
-             * This->ddraw->d3d_target is the target used by DDraw
-             */
-            TRACE("(%p) Release: Using %p as front buffer, %p as back buffer\n", This, This->ddraw->d3d_target, NULL);
-            IWineD3DDevice_SetFrontBackBuffers(This->wineD3DDevice,
-                                               This->ddraw->d3d_target->WineD3DSurface,
-                                               NULL);
-        }
+        /* Set the device up to render to the front buffer since the back
+         * buffer will vanish soon. */
+        IWineD3DDevice_SetRenderTarget(This->wineD3DDevice, 0,
+                This->ddraw->d3d_target->WineD3DSurface, TRUE);
 
         /* Release the WineD3DDevice. This won't destroy it */
         if(IWineD3DDevice_Release(This->wineD3DDevice) <= 0)
@@ -1146,7 +1122,6 @@ IDirect3DDeviceImpl_7_EnumTextureFormats(IDirect3DDevice7 *iface,
         WINED3DFMT_R8G8_SNORM,
         WINED3DFMT_R5G5_SNORM_L6_UNORM,
         WINED3DFMT_R8G8_SNORM_L8X8_UNORM,
-        WINED3DFMT_R8G8B8A8_SNORM,
         WINED3DFMT_R16G16_SNORM,
         WINED3DFMT_R10G11B11_SNORM,
         WINED3DFMT_R10G10B10_SNORM_A2_UNORM
@@ -3094,7 +3069,7 @@ IDirect3DDeviceImpl_3_SetLightState(IDirect3DDevice3 *iface,
         {
             case D3DLIGHTSTATE_AMBIENT:       /* 2 */
                 rs = D3DRENDERSTATE_AMBIENT;
-                break;		
+                break;
             case D3DLIGHTSTATE_FOGMODE:       /* 4 */
                 rs = D3DRENDERSTATE_FOGVERTEXMODE;
                 break;
@@ -3190,7 +3165,7 @@ IDirect3DDeviceImpl_3_GetLightState(IDirect3DDevice3 *iface,
         {
             case D3DLIGHTSTATE_AMBIENT:       /* 2 */
                 rs = D3DRENDERSTATE_AMBIENT;
-                break;		
+                break;
             case D3DLIGHTSTATE_FOGMODE:       /* 4 */
                 rs = D3DRENDERSTATE_FOGVERTEXMODE;
                 break;
@@ -4345,10 +4320,9 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveVB(IDirect3DDevice7 *iface,
     }
 
     /* check that the buffer is large enough to hold the indices,
-     * reallocate if necessary.
-     */
-    hr = IWineD3DBuffer_GetDesc(This->indexbuffer, &desc);
-    if(desc.Size < IndexCount * sizeof(WORD))
+     * reallocate if necessary. */
+    IWineD3DBuffer_GetDesc(This->indexbuffer, &desc);
+    if (desc.Size < IndexCount * sizeof(WORD))
     {
         UINT size = max(desc.Size * 2, IndexCount * sizeof(WORD));
         IWineD3DBuffer *buffer;
@@ -4390,13 +4364,7 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveVB(IDirect3DDevice7 *iface,
         return hr;
     }
     memcpy(LockedIndices, Indices, IndexCount * sizeof(WORD));
-    hr = IWineD3DBuffer_Unmap(This->indexbuffer);
-    if(hr != D3D_OK)
-    {
-        ERR("(%p) IWineD3DBuffer::Unmap failed with hr = %08x\n", This, hr);
-        LeaveCriticalSection(&ddraw_cs);
-        return hr;
-    }
+    IWineD3DBuffer_Unmap(This->indexbuffer);
 
     /* Set the index stream */
     IWineD3DDevice_SetBaseVertexIndex(This->wineD3DDevice, StartVertex);
@@ -4534,11 +4502,11 @@ IDirect3DDeviceImpl_7_ComputeSphereVisibility(IDirect3DDevice7 *iface,
     if ( hr != DD_OK ) return DDERR_INVALIDPARAMS;
     hr = IDirect3DDeviceImpl_7_GetTransform(iface, D3DTRANSFORMSTATE_VIEW, &temp);
     if ( hr != DD_OK ) return DDERR_INVALIDPARAMS;
-    multiply_matrix_D3D_way(&m, &m, &temp);
+    multiply_matrix(&m, &temp, &m);
 
     hr = IDirect3DDeviceImpl_7_GetTransform(iface, D3DTRANSFORMSTATE_PROJECTION, &temp);
     if ( hr != DD_OK ) return DDERR_INVALIDPARAMS;
-    multiply_matrix_D3D_way(&m, &m, &temp);
+    multiply_matrix(&m, &temp, &m);
 
 /* Left plane */
     vec[0].u1.x = m._14 + m._11;
@@ -4871,7 +4839,7 @@ IDirect3DDeviceImpl_7_GetTextureStageState(IDirect3DDevice7 *iface,
 {
     IDirect3DDeviceImpl *This = (IDirect3DDeviceImpl *)iface;
     HRESULT hr;
-    const struct tss_lookup *l = &tss_lookup[TexStageStateType];
+    const struct tss_lookup *l;
 
     TRACE("iface %p, stage %u, state %#x, value %p.\n",
             iface, Stage, TexStageStateType, State);
@@ -4882,9 +4850,10 @@ IDirect3DDeviceImpl_7_GetTextureStageState(IDirect3DDevice7 *iface,
     if (TexStageStateType > D3DTSS_TEXTURETRANSFORMFLAGS)
     {
         WARN("Invalid TexStageStateType %#x passed.\n", TexStageStateType);
-        *State = 0;
         return DD_OK;
     }
+
+    l = &tss_lookup[TexStageStateType];
 
     EnterCriticalSection(&ddraw_cs);
 
@@ -5004,7 +4973,7 @@ IDirect3DDeviceImpl_7_SetTextureStageState(IDirect3DDevice7 *iface,
                                            DWORD State)
 {
     IDirect3DDeviceImpl *This = (IDirect3DDeviceImpl *)iface;
-    const struct tss_lookup *l = &tss_lookup[TexStageStateType];
+    const struct tss_lookup *l;
     HRESULT hr;
 
     TRACE("iface %p, stage %u, state %#x, value %#x.\n",
@@ -5015,6 +4984,8 @@ IDirect3DDeviceImpl_7_SetTextureStageState(IDirect3DDevice7 *iface,
         WARN("Invalid TexStageStateType %#x passed.\n", TexStageStateType);
         return DD_OK;
     }
+
+    l = &tss_lookup[TexStageStateType];
 
     EnterCriticalSection(&ddraw_cs);
 
@@ -6161,7 +6132,7 @@ static void copy_mipmap_chain(IDirect3DDeviceImpl *device,
             /* Try UpdateSurface that may perform a more direct opengl loading. But skip this if destination is paletted texture and has no palette.
              * Some games like Sacrifice set palette after Load, and it is a waste of effort to try to load texture without palette and generates
              * warnings in wined3d. */
-	    if (!palette_missing)
+            if (!palette_missing)
                 hr = IWineD3DDevice_UpdateSurface(device->wineD3DDevice, src_level->WineD3DSurface, &rect, dest_level->WineD3DSurface,
                                 &point);
 
@@ -7022,46 +6993,14 @@ HRESULT d3d_device_init(IDirect3DDeviceImpl *device, IDirectDrawImpl *ddraw, IDi
     device->wineD3DDevice = ddraw->wineD3DDevice;
     IWineD3DDevice_AddRef(ddraw->wineD3DDevice);
 
-    /* This is for apps which create a non-flip, non-d3d primary surface
-     * and an offscreen D3DDEVICE surface, then render to the offscreen surface
-     * and do a Blt from the offscreen to the primary surface.
-     *
-     * Set the offscreen D3DDDEVICE surface(=target) as the back buffer,
-     * and the primary surface(=This->d3d_target) as the front buffer.
-     *
-     * This way the app will render to the D3DDEVICE surface and WineD3D
-     * will catch the Blt was Back Buffer -> Front buffer blt and perform
-     * a flip instead. This way we don't have to deal with a mixed GL / GDI
-     * environment.
-     *
-     * This should be checked against windowed apps. The only app tested with
-     * this is moto racer 2 during the loading screen.
-     */
-    TRACE("Is rendertarget: %s, d3d_target %p.\n",
-            target->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE ? "true" : "false", ddraw->d3d_target);
-
-    if (!(target->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE)
-            && ddraw->d3d_target != target)
+    /* Render to the back buffer */
+    hr = IWineD3DDevice_SetRenderTarget(ddraw->wineD3DDevice, 0, target->WineD3DSurface, TRUE);
+    if (FAILED(hr))
     {
-        TRACE("Using %p as front buffer, %p as back buffer.\n", ddraw->d3d_target, target);
-
-        hr = IWineD3DDevice_SetFrontBackBuffers(ddraw->wineD3DDevice,
-                ddraw->d3d_target->WineD3DSurface, target->WineD3DSurface);
-        if (FAILED(hr))
-        {
-            ERR("Failed to set front and back buffer, hr %#x.\n", hr);
-            IParent_Release((IParent *)index_buffer_parent);
-            ddraw_handle_table_destroy(&device->handle_table);
-            return hr;
-        }
-
-        /* Render to the back buffer */
-        IWineD3DDevice_SetRenderTarget(ddraw->wineD3DDevice, 0, target->WineD3DSurface, TRUE);
-        device->OffScreenTarget = TRUE;
-    }
-    else
-    {
-        device->OffScreenTarget = FALSE;
+        ERR("Failed to set render target, hr %#x.\n", hr);
+        IParent_Release((IParent *)index_buffer_parent);
+        ddraw_handle_table_destroy(&device->handle_table);
+        return hr;
     }
 
     /* FIXME: This is broken. The target AddRef() makes some sense, because

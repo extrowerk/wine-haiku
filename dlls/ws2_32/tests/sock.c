@@ -952,7 +952,7 @@ static void do_test( test_setup *test )
 
 /********* some tests for getsockopt(setsockopt(X)) == X ***********/
 /* optname = SO_LINGER */
-LINGER linger_testvals[] = {
+static const LINGER linger_testvals[] = {
     {0,0},
     {0,73}, 
     {1,0},
@@ -1939,6 +1939,43 @@ static void test_select(void)
          broken(thread_params.ReadKilled == 0), /*Win98*/
             "closesocket did not wakeup select\n");
 
+    /* Test selecting invalid handles */
+    FD_ZERO(&readfds);
+    FD_ZERO(&writefds);
+    FD_ZERO(&exceptfds);
+
+    SetLastError(0);
+    ret = select(maxfd+1, 0, 0, 0, &select_timeout);
+    ok ( (ret == SOCKET_ERROR), "expected SOCKET_ERROR, got %i\n", ret);
+    ok ( GetLastError() == WSAEINVAL, "expected WSAEINVAL, got %i\n", ret);
+
+    SetLastError(0);
+    ret = select(maxfd+1, &readfds, &writefds, &exceptfds, &select_timeout);
+    ok ( (ret == SOCKET_ERROR), "expected SOCKET_ERROR, got %i\n", ret);
+    ok ( GetLastError() == WSAEINVAL, "expected WSAEINVAL, got %i\n", ret);
+
+    FD_SET(INVALID_SOCKET, &readfds);
+    SetLastError(0);
+    ret = select(maxfd+1, &readfds, &writefds, &exceptfds, &select_timeout);
+    ok ( (ret == SOCKET_ERROR), "expected SOCKET_ERROR, got %i\n", ret);
+    ok ( GetLastError() == WSAENOTSOCK, "expected WSAENOTSOCK, got %i\n", ret);
+    ok ( !FD_ISSET(fdRead, &readfds), "FD should not be set\n");
+
+    FD_ZERO(&readfds);
+    FD_SET(INVALID_SOCKET, &writefds);
+    SetLastError(0);
+    ret = select(maxfd+1, &readfds, &writefds, &exceptfds, &select_timeout);
+    ok ( (ret == SOCKET_ERROR), "expected SOCKET_ERROR, got %i\n", ret);
+    ok ( GetLastError() == WSAENOTSOCK, "expected WSAENOTSOCK, got %i\n", ret);
+    ok ( !FD_ISSET(fdRead, &writefds), "FD should not be set\n");
+
+    FD_ZERO(&writefds);
+    FD_SET(INVALID_SOCKET, &exceptfds);
+    SetLastError(0);
+    ret = select(maxfd+1, &readfds, &writefds, &exceptfds, &select_timeout);
+    ok ( (ret == SOCKET_ERROR), "expected SOCKET_ERROR, got %i\n", ret);
+    ok ( GetLastError() == WSAENOTSOCK, "expected WSAENOTSOCK, got %i\n", ret);
+    ok ( !FD_ISSET(fdRead, &exceptfds), "FD should not be set\n");
 }
 
 static DWORD WINAPI AcceptKillThread(select_thread_params *par)
@@ -3813,12 +3850,12 @@ static void test_AcceptEx(void)
 
     bret = pAcceptEx(listener, acceptor, buffer, 0, 0, sizeof(struct sockaddr_in) + 16,
         &bytesReturned, &overlapped);
-    ok(bret == FALSE && WSAGetLastError() == WSAEINVAL, "AcceptEx on too small local address size "
+    todo_wine ok(bret == FALSE && WSAGetLastError() == WSAEINVAL, "AcceptEx on too small local address size "
         "returned %d + errno %d\n", bret, WSAGetLastError());
 
     bret = pAcceptEx(listener, acceptor, buffer, 0, sizeof(struct sockaddr_in) + 16, 0,
         &bytesReturned, &overlapped);
-    ok(bret == FALSE && WSAGetLastError() == WSAEINVAL, "AcceptEx on too small remote address size "
+    todo_wine ok(bret == FALSE && WSAGetLastError() == WSAEINVAL, "AcceptEx on too small remote address size "
         "returned %d + errno %d\n", bret, WSAGetLastError());
 
     bret = pAcceptEx(listener, acceptor, buffer, 0,
@@ -3830,7 +3867,7 @@ static void test_AcceptEx(void)
     bret = pAcceptEx(listener, acceptor, buffer, sizeof(buffer) - 2*(sizeof(struct sockaddr_in) + 16),
         sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
         &bytesReturned, &overlapped);
-    ok(bret == FALSE && WSAGetLastError() == WSAEINVAL, "AcceptEx on a non-listening socket "
+    todo_wine ok(bret == FALSE && WSAGetLastError() == WSAEINVAL, "AcceptEx on a non-listening socket "
         "returned %d + errno %d\n", bret, WSAGetLastError());
 
     iret = listen(listener, 5);
@@ -3853,13 +3890,14 @@ static void test_AcceptEx(void)
     bret = pAcceptEx(listener, acceptor, buffer, 0,
         sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
         &bytesReturned, &overlapped);
-    ok((bret == FALSE && WSAGetLastError() == WSAEINVAL) || broken(bret == FALSE && WSAGetLastError() == ERROR_IO_PENDING) /* NT4 */,
+    todo_wine ok((bret == FALSE && WSAGetLastError() == WSAEINVAL) || broken(bret == FALSE && WSAGetLastError() == ERROR_IO_PENDING) /* NT4 */,
        "AcceptEx on already pending socket returned %d + errno %d\n", bret, WSAGetLastError());
     if (bret == FALSE && WSAGetLastError() == ERROR_IO_PENDING) {
         /* We need to cancel this call, otherwise things fail */
         bret = CancelIo((HANDLE) listener);
         ok(bret, "Failed to cancel failed test. Bailing...\n");
         if (!bret) return;
+        WaitForSingleObject(overlapped.hEvent, 0);
 
         bret = pAcceptEx(listener, acceptor, buffer, 0,
             sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
@@ -3868,7 +3906,7 @@ static void test_AcceptEx(void)
     }
 
     iret = connect(acceptor,  (struct sockaddr*)&bindAddress, sizeof(bindAddress));
-    ok((iret == SOCKET_ERROR && WSAGetLastError() == WSAEINVAL) || broken(!iret) /* NT4 */,
+    todo_wine ok((iret == SOCKET_ERROR && WSAGetLastError() == WSAEINVAL) || broken(!iret) /* NT4 */,
        "connecting to acceptex acceptor succeeded? return %d + errno %d\n", iret, WSAGetLastError());
     if (!iret || (iret == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK)) {
         /* We need to cancel this call, otherwise things fail */
@@ -4106,7 +4144,7 @@ static void test_AcceptEx(void)
     acceptor = INVALID_SOCKET;
 
     dwret = WaitForSingleObject(overlapped.hEvent, 1000);
-    ok(dwret == WAIT_OBJECT_0 || broken(dwret == WAIT_TIMEOUT) /* NT4/2000 */,
+    todo_wine ok(dwret == WAIT_OBJECT_0 || broken(dwret == WAIT_TIMEOUT) /* NT4/2000 */,
        "Waiting for accept event failed with %d + errno %d\n", dwret, GetLastError());
 
     if (dwret != WAIT_TIMEOUT) {
@@ -4117,6 +4155,7 @@ static void test_AcceptEx(void)
         bret = CancelIo((HANDLE) listener);
         ok(bret, "Failed to cancel failed test. Bailing...\n");
         if (!bret) return;
+        WaitForSingleObject(overlapped.hEvent, 0);
     }
 
     acceptor = socket(AF_INET, SOCK_STREAM, 0);
@@ -4246,6 +4285,68 @@ static void test_getpeername(void)
     closesocket(sock);
 }
 
+static void test_sioRoutingInterfaceQuery(void)
+{
+    int ret;
+    SOCKET sock;
+    SOCKADDR_IN sin = { 0 }, sout = { 0 };
+    DWORD bytesReturned;
+
+    sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+    ok(sock != INVALID_SOCKET, "Expected socket to return a valid socket\n");
+    if (sock == INVALID_SOCKET)
+    {
+        skip("Socket creation failed with %d\n", WSAGetLastError());
+        return;
+    }
+    ret = WSAIoctl(sock, SIO_ROUTING_INTERFACE_QUERY, NULL, 0, NULL, 0, NULL,
+                   NULL, NULL);
+    ok(ret == SOCKET_ERROR && WSAGetLastError() == WSAEFAULT,
+       "expected WSAEFAULT, got %d\n", WSAGetLastError());
+    ret = WSAIoctl(sock, SIO_ROUTING_INTERFACE_QUERY, &sin, sizeof(sin),
+                   NULL, 0, NULL, NULL, NULL);
+    ok(ret == SOCKET_ERROR && WSAGetLastError() == WSAEFAULT,
+       "expected WSAEFAULT, got %d\n", WSAGetLastError());
+    ret = WSAIoctl(sock, SIO_ROUTING_INTERFACE_QUERY, &sin, sizeof(sin),
+                   NULL, 0, &bytesReturned, NULL, NULL);
+    ok(ret == SOCKET_ERROR &&
+       (WSAGetLastError() == WSAEFAULT /* Win98 */ ||
+        WSAGetLastError() == WSAEINVAL /* NT4 */||
+        WSAGetLastError() == WSAEAFNOSUPPORT),
+       "expected WSAEFAULT or WSAEINVAL or WSAEAFNOSUPPORT, got %d\n",
+       WSAGetLastError());
+    sin.sin_family = AF_INET;
+    ret = WSAIoctl(sock, SIO_ROUTING_INTERFACE_QUERY, &sin, sizeof(sin),
+                   NULL, 0, &bytesReturned, NULL, NULL);
+    ok(ret == SOCKET_ERROR &&
+       (WSAGetLastError() == WSAEFAULT /* Win98 */ ||
+        WSAGetLastError() == WSAEINVAL),
+       "expected WSAEFAULT or WSAEINVAL, got %d\n", WSAGetLastError());
+    sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ret = WSAIoctl(sock, SIO_ROUTING_INTERFACE_QUERY, &sin, sizeof(sin),
+                   NULL, 0, &bytesReturned, NULL, NULL);
+    ok(ret == SOCKET_ERROR &&
+       (WSAGetLastError() == WSAEINVAL /* NT4 */ ||
+        WSAGetLastError() == WSAEFAULT),
+       "expected WSAEINVAL or WSAEFAULT, got %d\n", WSAGetLastError());
+    ret = WSAIoctl(sock, SIO_ROUTING_INTERFACE_QUERY, &sin, sizeof(sin),
+                   &sout, sizeof(sout), &bytesReturned, NULL, NULL);
+    ok(!ret || broken(WSAGetLastError() == WSAEINVAL /* NT4 */),
+       "WSAIoctl failed: %d\n", WSAGetLastError());
+    if (!ret)
+    {
+        ok(sout.sin_family == AF_INET, "expected AF_INET, got %d\n",
+           sout.sin_family);
+        /* We expect the source address to be INADDR_LOOPBACK as well, but
+         * there's no guarantee that a route to the loopback address exists,
+         * so rather than introduce spurious test failures we do not test the
+         * source address.
+         */
+    }
+    closesocket(sock);
+}
+
+
 /**************** Main program  ***************/
 
 START_TEST( sock )
@@ -4302,6 +4403,8 @@ START_TEST( sock )
 
     test_AcceptEx();
     test_ConnectEx();
+
+    test_sioRoutingInterfaceQuery();
 
     /* this is a io heavy test, do it at the end so the kernel doesn't start dropping packets */
     test_send();

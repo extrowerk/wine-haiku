@@ -306,13 +306,6 @@ static HRESULT WINAPI IWineD3DCubeTextureImpl_BindTexture(IWineD3DCubeTexture *i
     return hr;
 }
 
-static UINT WINAPI IWineD3DCubeTextureImpl_GetTextureDimensions(IWineD3DCubeTexture *iface)
-{
-    TRACE("iface %p.\n", iface);
-
-    return GL_TEXTURE_CUBE_MAP_ARB;
-}
-
 static BOOL WINAPI IWineD3DCubeTextureImpl_IsCondNP2(IWineD3DCubeTexture *iface)
 {
     TRACE("iface %p.\n", iface);
@@ -320,36 +313,35 @@ static BOOL WINAPI IWineD3DCubeTextureImpl_IsCondNP2(IWineD3DCubeTexture *iface)
     return FALSE;
 }
 
-/* *******************************************
-   IWineD3DCubeTexture IWineD3DCubeTexture parts follow
-   ******************************************* */
 static HRESULT WINAPI IWineD3DCubeTextureImpl_GetLevelDesc(IWineD3DCubeTexture *iface,
-        UINT level, WINED3DSURFACE_DESC *desc)
+        UINT sub_resource_idx, WINED3DSURFACE_DESC *desc)
 {
     IWineD3DBaseTextureImpl *texture = (IWineD3DBaseTextureImpl *)iface;
     IWineD3DSurface *surface;
 
-    TRACE("iface %p, level %u, desc %p.\n", iface, level, desc);
+    TRACE("iface %p, sub_resource_idx %u, desc %p.\n", iface, sub_resource_idx, desc);
 
-    if (!(surface = (IWineD3DSurface *)basetexture_get_sub_resource(texture, 0, level)))
+    if (!(surface = (IWineD3DSurface *)basetexture_get_sub_resource(texture, sub_resource_idx)))
     {
         WARN("Failed to get sub-resource.\n");
         return WINED3DERR_INVALIDCALL;
     }
 
-    return IWineD3DSurface_GetDesc(surface, desc);
+    IWineD3DSurface_GetDesc(surface, desc);
+
+    return WINED3D_OK;
 }
 
 static HRESULT WINAPI IWineD3DCubeTextureImpl_GetCubeMapSurface(IWineD3DCubeTexture *iface,
-        WINED3DCUBEMAP_FACES face, UINT level, IWineD3DSurface **surface)
+        UINT sub_resource_idx, IWineD3DSurface **surface)
 {
     IWineD3DBaseTextureImpl *texture = (IWineD3DBaseTextureImpl *)iface;
     IWineD3DSurface *s;
 
-    TRACE("iface %p, face %u, level %u, surface %p.\n",
-            iface, face, level, surface);
+    TRACE("iface %p, sub_resource_idx %u, surface %p.\n",
+            iface, sub_resource_idx, surface);
 
-    if (!(s = (IWineD3DSurface *)basetexture_get_sub_resource(texture, face, level)))
+    if (!(s = (IWineD3DSurface *)basetexture_get_sub_resource(texture, sub_resource_idx)))
     {
         WARN("Failed to get sub-resource.\n");
         return WINED3DERR_INVALIDCALL;
@@ -363,52 +355,53 @@ static HRESULT WINAPI IWineD3DCubeTextureImpl_GetCubeMapSurface(IWineD3DCubeText
     return WINED3D_OK;
 }
 
-static HRESULT WINAPI IWineD3DCubeTextureImpl_LockRect(IWineD3DCubeTexture *iface,
-        WINED3DCUBEMAP_FACES face, UINT level, WINED3DLOCKED_RECT *locked_rect, const RECT *rect, DWORD flags)
+static HRESULT WINAPI IWineD3DCubeTextureImpl_Map(IWineD3DCubeTexture *iface,
+        UINT sub_resource_idx, WINED3DLOCKED_RECT *locked_rect, const RECT *rect, DWORD flags)
 {
     IWineD3DBaseTextureImpl *texture = (IWineD3DBaseTextureImpl *)iface;
     IWineD3DSurface *surface;
 
-    TRACE("iface %p, face %u, level %u, locked_rect %p, rect %s, flags %#x.\n",
-            iface, face, level, locked_rect, wine_dbgstr_rect(rect), flags);
+    TRACE("iface %p, sub_resource_idx %u, locked_rect %p, rect %s, flags %#x.\n",
+            iface, sub_resource_idx, locked_rect, wine_dbgstr_rect(rect), flags);
 
-    if (!(surface = (IWineD3DSurface *)basetexture_get_sub_resource(texture, face, level)))
+    if (!(surface = (IWineD3DSurface *)basetexture_get_sub_resource(texture, sub_resource_idx)))
     {
         WARN("Failed to get sub-resource.\n");
         return WINED3DERR_INVALIDCALL;
     }
 
-    return IWineD3DSurface_LockRect(surface, locked_rect, rect, flags);
+    return IWineD3DSurface_Map(surface, locked_rect, rect, flags);
 }
 
-static HRESULT WINAPI IWineD3DCubeTextureImpl_UnlockRect(IWineD3DCubeTexture *iface,
-        WINED3DCUBEMAP_FACES face, UINT level)
+static HRESULT WINAPI IWineD3DCubeTextureImpl_Unmap(IWineD3DCubeTexture *iface,
+        UINT sub_resource_idx)
 {
     IWineD3DBaseTextureImpl *texture = (IWineD3DBaseTextureImpl *)iface;
     IWineD3DSurface *surface;
 
-    TRACE("iface %p, face %u, level %u.\n",
-            iface, face, level);
+    TRACE("iface %p, sub_resource_idx %u.\n",
+            iface, sub_resource_idx);
 
-    if (!(surface = (IWineD3DSurface *)basetexture_get_sub_resource(texture, face, level)))
+    if (!(surface = (IWineD3DSurface *)basetexture_get_sub_resource(texture, sub_resource_idx)))
     {
         WARN("Failed to get sub-resource.\n");
         return WINED3DERR_INVALIDCALL;
     }
 
-    return IWineD3DSurface_UnlockRect(surface);
+    return IWineD3DSurface_Unmap(surface);
 }
 
 static HRESULT WINAPI IWineD3DCubeTextureImpl_AddDirtyRect(IWineD3DCubeTexture *iface,
         WINED3DCUBEMAP_FACES face, const RECT *dirty_rect)
 {
     IWineD3DBaseTextureImpl *texture = (IWineD3DBaseTextureImpl *)iface;
+    UINT sub_resource_idx = face * texture->baseTexture.level_count;
     IWineD3DSurfaceImpl *surface;
 
     TRACE("iface %p, face %u, dirty_rect %s.\n",
             iface, face, wine_dbgstr_rect(dirty_rect));
 
-    if (!(surface = (IWineD3DSurfaceImpl *)basetexture_get_sub_resource(texture, face, 0)))
+    if (!(surface = (IWineD3DSurfaceImpl *)basetexture_get_sub_resource(texture, sub_resource_idx)))
     {
         WARN("Failed to get sub-resource.\n");
         return WINED3DERR_INVALIDCALL;
@@ -447,13 +440,12 @@ static const IWineD3DCubeTextureVtbl IWineD3DCubeTexture_Vtbl =
     IWineD3DCubeTextureImpl_SetDirty,
     IWineD3DCubeTextureImpl_GetDirty,
     IWineD3DCubeTextureImpl_BindTexture,
-    IWineD3DCubeTextureImpl_GetTextureDimensions,
     IWineD3DCubeTextureImpl_IsCondNP2,
     /* IWineD3DCubeTexture */
     IWineD3DCubeTextureImpl_GetLevelDesc,
     IWineD3DCubeTextureImpl_GetCubeMapSurface,
-    IWineD3DCubeTextureImpl_LockRect,
-    IWineD3DCubeTextureImpl_UnlockRect,
+    IWineD3DCubeTextureImpl_Map,
+    IWineD3DCubeTextureImpl_Unmap,
     IWineD3DCubeTextureImpl_AddDirtyRect
 };
 
@@ -536,6 +528,7 @@ HRESULT cubetexture_init(IWineD3DCubeTextureImpl *texture, UINT edge_length, UIN
         texture->baseTexture.pow2Matrix[15] = 1.0f;
         texture->baseTexture.pow2Matrix_identity = FALSE;
     }
+    texture->baseTexture.target = GL_TEXTURE_CUBE_MAP_ARB;
 
     /* Generate all the surfaces. */
     tmp_w = edge_length;

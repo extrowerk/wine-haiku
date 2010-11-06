@@ -1,7 +1,3 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = d3dcompiler_43.dll
 IMPORTLIB = d3dcompiler
 IMPORTS   = dxguid uuid
@@ -9,11 +5,12 @@ EXTRALIBS = $(LIBWPP)
 
 C_SRCS = \
 	asmparser.c \
-	asmutils.c \
 	blob.c \
 	bytecodewriter.c \
 	compiler.c \
-	d3dcompiler_43_main.c
+	d3dcompiler_43_main.c \
+	reflection.c \
+	utils.c
 
 LEX_SRCS = asmshader.l
 BISON_SRCS = asmshader.y

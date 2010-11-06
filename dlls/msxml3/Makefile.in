@@ -1,8 +1,4 @@
 EXTRADEFS = -DCOM_NO_WINDOWS_H
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = msxml3.dll
 IMPORTS   = uuid urlmon shlwapi oleaut32 ole32 user32 advapi32
 EXTRALIBS = @XML2LIBS@
@@ -15,6 +11,7 @@ C_SRCS = \
 	comment.c \
 	dispex.c \
 	docfrag.c \
+	doctype.c \
 	domdoc.c \
 	domimpl.c \
 	element.c \
@@ -35,6 +32,10 @@ C_SRCS = \
 	uuid.c \
 	xmldoc.c \
 	xmlelem.c
+
+LEX_SRCS = xslpattern.l
+
+BISON_SRCS = xslpattern.y
 
 RC_SRCS = version.rc
 

@@ -37,6 +37,7 @@ typedef enum tid_t {
     IXMLDOMDocument_tid,
     IXMLDOMDocument2_tid,
     IXMLDOMDocumentFragment_tid,
+    IXMLDOMDocumentType_tid,
     IXMLDOMElement_tid,
     IXMLDOMEntityReference_tid,
     IXMLDOMImplementation_tid,
@@ -106,6 +107,9 @@ BOOL dispex_query_interface(DispatchEx*,REFIID,void**);
 #include <libxml/parser.h>
 #endif
 
+
+#include <libxml/xmlerror.h>
+
 /* constructors */
 extern IUnknown         *create_domdoc( xmlNodePtr document );
 extern IUnknown         *create_xmldoc( void );
@@ -121,6 +125,7 @@ extern IXMLDOMNamedNodeMap *create_nodemap( IXMLDOMNode *node );
 extern IUnknown         *create_doc_Implementation(void);
 extern IUnknown         *create_doc_fragment( xmlNodePtr fragment );
 extern IUnknown         *create_doc_entity_ref( xmlNodePtr entity );
+extern IUnknown         *create_doc_type( xmlNodePtr doctype );
 
 extern HRESULT queryresult_create( xmlNodePtr, LPCWSTR, IXMLDOMNodeList ** );
 
@@ -130,6 +135,7 @@ xmlNodePtr xmlNodePtr_from_domnode( IXMLDOMNode *iface, xmlElementType type );
 /* helpers */
 extern xmlChar *xmlChar_from_wchar( LPCWSTR str );
 
+extern void xmldoc_init( xmlDocPtr doc, const GUID *clsid );
 extern LONG xmldoc_add_ref( xmlDocPtr doc );
 extern LONG xmldoc_release( xmlDocPtr doc );
 extern HRESULT xmldoc_add_orphan( xmlDocPtr doc, xmlNodePtr node );
@@ -139,6 +145,23 @@ extern xmlNodePtr xmldoc_unlink_xmldecl(xmlDocPtr doc);
 
 extern HRESULT XMLElement_create( IUnknown *pUnkOuter, xmlNodePtr node, LPVOID *ppObj, BOOL own );
 
+extern void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, va_list ap);
+
+#define LIBXML2_LOG_CALLBACK __WINE_PRINTF_ATTR(2,3)
+
+#define LIBXML2_CALLBACK_TRACE(caller, msg, ap) \
+        wineXmlCallbackLog(#caller, XML_ERR_NONE, msg, ap)
+
+#define LIBXML2_CALLBACK_WARN(caller, msg, ap) \
+        wineXmlCallbackLog(#caller, XML_ERR_WARNING, msg, ap)
+
+#define LIBXML2_CALLBACK_ERR(caller, msg, ap) \
+        wineXmlCallbackLog(#caller, XML_ERR_ERROR, msg, ap)
+
+#define LIBXML2_CALLBACK_SERROR(caller, err) \
+        wineXmlCallbackLog(#caller, err->level, err->message, NULL)
+
+extern BOOL is_preserving_whitespace(xmlNodePtr node);
 
 /* IXMLDOMNode Internal Structure */
 typedef struct _xmlnode
@@ -161,10 +184,25 @@ extern xmlnode *get_node_obj(IXMLDOMNode*);
 
 extern HRESULT node_get_nodeName(xmlnode*,BSTR*);
 extern HRESULT node_get_content(xmlnode*,VARIANT*);
+extern HRESULT node_set_content(xmlnode*,LPCWSTR);
 extern HRESULT node_put_value(xmlnode*,VARIANT*);
+extern HRESULT node_put_value_escaped(xmlnode*,VARIANT*);
 extern HRESULT node_get_parent(xmlnode*,IXMLDOMNode**);
+extern HRESULT node_get_child_nodes(xmlnode*,IXMLDOMNodeList**);
+extern HRESULT node_get_first_child(xmlnode*,IXMLDOMNode**);
+extern HRESULT node_get_last_child(xmlnode*,IXMLDOMNode**);
+extern HRESULT node_get_previous_sibling(xmlnode*,IXMLDOMNode**);
+extern HRESULT node_get_next_sibling(xmlnode*,IXMLDOMNode**);
+extern HRESULT node_insert_before(xmlnode*,IXMLDOMNode*,const VARIANT*,IXMLDOMNode**);
+extern HRESULT node_replace_child(xmlnode*,IXMLDOMNode*,IXMLDOMNode*,IXMLDOMNode**);
+extern HRESULT node_put_text(xmlnode*,BSTR);
+extern HRESULT node_get_xml(xmlnode*,BOOL,BOOL,BSTR*);
+extern HRESULT node_clone(xmlnode*,VARIANT_BOOL,IXMLDOMNode**);
+extern HRESULT node_get_prefix(xmlnode*,BSTR*);
+extern HRESULT node_get_base_name(xmlnode*,BSTR*);
 
 extern HRESULT DOMDocument_create_from_xmldoc(xmlDocPtr xmldoc, IXMLDOMDocument3 **document);
+extern HRESULT SchemaCache_validate_tree(IXMLDOMSchemaCollection2* iface, xmlNodePtr tree);
 
 static inline BSTR bstr_from_xmlChar(const xmlChar *str)
 {
@@ -198,9 +236,43 @@ static inline HRESULT return_bstr(const WCHAR *value, BSTR *p)
     return S_OK;
 }
 
+static inline HRESULT return_null_node(IXMLDOMNode **p)
+{
+    if(!p)
+        return E_INVALIDARG;
+    *p = NULL;
+    return S_FALSE;
+}
+
+static inline HRESULT return_null_ptr(void **p)
+{
+    if(!p)
+        return E_INVALIDARG;
+    *p = NULL;
+    return S_FALSE;
+}
+
+static inline HRESULT return_null_var(VARIANT *p)
+{
+    if(!p)
+        return E_INVALIDARG;
+
+    V_VT(p) = VT_NULL;
+    return S_FALSE;
+}
+
+static inline HRESULT return_null_bstr(BSTR *p)
+{
+    if(!p)
+        return E_INVALIDARG;
+
+    *p = NULL;
+    return S_FALSE;
+}
+
 #endif
 
-void* libxslt_handle;
+extern void* libxslt_handle;
 #ifdef SONAME_LIBXSLT
 # ifdef HAVE_LIBXSLT_PATTERN_H
 #  include <libxslt/pattern.h>
@@ -221,11 +293,11 @@ MAKE_FUNCPTR(xsltParseStylesheetDoc);
 
 extern IXMLDOMParseError *create_parseError( LONG code, BSTR url, BSTR reason, BSTR srcText,
                                              LONG line, LONG linepos, LONG filepos );
-extern HRESULT DOMDocument_create( IUnknown *pUnkOuter, LPVOID *ppObj );
-extern HRESULT SchemaCache_create( IUnknown *pUnkOuter, LPVOID *ppObj );
-extern HRESULT XMLDocument_create( IUnknown *pUnkOuter, LPVOID *ppObj );
-extern HRESULT SAXXMLReader_create(IUnknown *pUnkOuter, LPVOID *ppObj );
-extern HRESULT XMLHTTPRequest_create(IUnknown *pUnkOuter, LPVOID *ppObj);
+extern HRESULT DOMDocument_create( const GUID *clsid, IUnknown *pUnkOuter, void **ppObj );
+extern HRESULT SchemaCache_create( IUnknown *pUnkOuter, void **pObj );
+extern HRESULT XMLDocument_create( IUnknown *pUnkOuter, void **pObj );
+extern HRESULT SAXXMLReader_create(IUnknown *pUnkOuter, void **pObj );
+extern HRESULT XMLHTTPRequest_create(IUnknown *pUnkOuter, void **pObj);
 
 typedef struct bsc_t bsc_t;
 
@@ -268,5 +340,20 @@ static inline LPWSTR heap_strdupW(LPCWSTR str)
 
     return ret;
 }
+
+/* Error Codes - not defined anywhere in the public headers */
+#define E_XML_ELEMENT_UNDECLARED            0xC00CE00D
+#define E_XML_ELEMENT_ID_NOT_FOUND          0xC00CE00E
+/* ... */
+#define E_XML_EMPTY_NOT_ALLOWED             0xC00CE011
+#define E_XML_ELEMENT_NOT_COMPLETE          0xC00CE012
+#define E_XML_ROOT_NAME_MISMATCH            0xC00CE013
+#define E_XML_INVALID_CONTENT               0xC00CE014
+#define E_XML_ATTRIBUTE_NOT_DEFINED         0xC00CE015
+#define E_XML_ATTRIBUTE_FIXED               0xC00CE016
+#define E_XML_ATTRIBUTE_VALUE               0xC00CE017
+#define E_XML_ILLEGAL_TEXT                  0xC00CE018
+/* ... */
+#define E_XML_REQUIRED_ATTRIBUTE_MISSING    0xC00CE020
 
 #endif /* __MSXML_PRIVATE__ */

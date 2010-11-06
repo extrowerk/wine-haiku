@@ -1524,6 +1524,21 @@ MM_SYSTEMSIZE WINAPI MmQuerySystemSize(void)
     return MmLargeSystem;
 }
 
+/***********************************************************************
+ *           KeInitializeDpc   (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI KeInitializeDpc(PRKDPC Dpc, PKDEFERRED_ROUTINE DeferredRoutine, PVOID DeferredContext)
+{
+    FIXME("stub\n");
+}
+
+/***********************************************************************
+ *           READ_REGISTER_BUFFER_UCHAR   (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI READ_REGISTER_BUFFER_UCHAR(PUCHAR Register, PUCHAR Buffer, ULONG Count)
+{
+    FIXME("stub\n");
+}
 
 /*****************************************************
  *           DllMain

@@ -76,6 +76,7 @@ typedef enum {
 #define BINDING_LOCKED    0x0001
 #define BINDING_STOPPED   0x0002
 #define BINDING_OBJAVAIL  0x0004
+#define BINDING_ABORTED   0x0008
 
 struct Binding {
     const IBindingVtbl               *lpBindingVtbl;
@@ -631,8 +632,30 @@ static HRESULT WINAPI ProtocolStream_Stat(IStream *iface, STATSTG *pstatstg,
                                          DWORD dwStatFlag)
 {
     ProtocolStream *This = STREAM_THIS(iface);
-    FIXME("(%p)->(%p %08x)\n", This, pstatstg, dwStatFlag);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p %08x)\n", This, pstatstg, dwStatFlag);
+
+    if(!pstatstg)
+        return E_FAIL;
+
+    memset(pstatstg, 0, sizeof(STATSTG));
+
+    if(!(dwStatFlag&STATFLAG_NONAME) && This->buf->cache_file) {
+        pstatstg->pwcsName = CoTaskMemAlloc((lstrlenW(This->buf->cache_file)+1)*sizeof(WCHAR));
+        if(!pstatstg->pwcsName)
+            return STG_E_INSUFFICIENTMEMORY;
+
+        lstrcpyW(pstatstg->pwcsName, This->buf->cache_file);
+    }
+
+    pstatstg->type = STGTY_STREAM;
+    if(This->buf->file != INVALID_HANDLE_VALUE) {
+        GetFileSizeEx(This->buf->file, (PLARGE_INTEGER)&pstatstg->cbSize);
+        GetFileTime(This->buf->file, &pstatstg->ctime, &pstatstg->atime, &pstatstg->mtime);
+        if(pstatstg->cbSize.QuadPart)
+            pstatstg->grfMode = GENERIC_READ;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI ProtocolStream_Clone(IStream *iface, IStream **ppstm)
@@ -681,6 +704,10 @@ static HRESULT stgmed_stream_fill_stgmed(stgmed_obj_t *obj, STGMEDIUM *stgmed)
 static HRESULT stgmed_stream_get_result(stgmed_obj_t *obj, DWORD bindf, void **result)
 {
     ProtocolStream *stream = (ProtocolStream*)obj;
+
+    if(!(bindf & BINDF_ASYNCHRONOUS) && stream->buf->file == INVALID_HANDLE_VALUE
+       && (stream->buf->hres != S_FALSE || stream->buf->size))
+        return INET_E_DATA_NOT_AVAILABLE;
 
     IStream_AddRef(STREAM(stream));
     *result = STREAM(stream);
@@ -877,8 +904,19 @@ static ULONG WINAPI Binding_Release(IBinding *iface)
 static HRESULT WINAPI Binding_Abort(IBinding *iface)
 {
     Binding *This = BINDING_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+    HRESULT hres;
+
+    TRACE("(%p)\n", This);
+
+    if(This->state & BINDING_ABORTED)
+        return E_FAIL;
+
+    hres = IInternetProtocol_Abort(This->protocol, E_ABORT, ERROR_SUCCESS);
+    if(FAILED(hres))
+        return hres;
+
+    This->state |= BINDING_ABORTED;
+    return S_OK;
 }
 
 static HRESULT WINAPI Binding_Suspend(IBinding *iface)
@@ -1048,7 +1086,7 @@ static void report_data(Binding *This, DWORD bscf, ULONG progress, ULONG progres
 
     TRACE("(%p)->(%d %u %u)\n", This, bscf, progress, progress_max);
 
-    if(This->download_state == END_DOWNLOAD || (This->state & BINDING_STOPPED))
+    if(This->download_state == END_DOWNLOAD || (This->state & (BINDING_STOPPED|BINDING_ABORTED)))
         return;
 
     if(This->stgmed_buf->file != INVALID_HANDLE_VALUE)
@@ -1076,9 +1114,15 @@ static void report_data(Binding *This, DWORD bscf, ULONG progress, ULONG progres
                 BINDSTATUS_DOWNLOADINGDATA, This->url);
     }
 
+    if(This->state & (BINDING_STOPPED|BINDING_ABORTED))
+        return;
+
     if(This->to_object) {
-        if(!(This->state & BINDING_OBJAVAIL))
+        if(!(This->state & BINDING_OBJAVAIL)) {
+            IBinding_AddRef(BINDING(This));
             create_object(This);
+            IBinding_Release(BINDING(This));
+        }
     }else {
         STGMEDIUM stgmed;
         HRESULT hres;
@@ -1347,12 +1391,12 @@ static HRESULT get_callback(IBindCtx *pbc, IBindStatusCallback **callback)
     HRESULT hres;
 
     hres = IBindCtx_GetObjectParam(pbc, bscb_holderW, &unk);
-    if(SUCCEEDED(hres)) {
-        hres = IUnknown_QueryInterface(unk, &IID_IBindStatusCallback, (void**)callback);
-        IUnknown_Release(unk);
-    }
+    if(FAILED(hres))
+        return create_default_callback(callback);
 
-    return SUCCEEDED(hres) ? S_OK : INET_E_DATA_NOT_AVAILABLE;
+    hres = IUnknown_QueryInterface(unk, &IID_IBindStatusCallback, (void**)callback);
+    IUnknown_Release(unk);
+    return hres;
 }
 
 static BOOL is_urlmon_protocol(LPCWSTR url)
@@ -1519,10 +1563,11 @@ static HRESULT start_binding(IMoniker *mon, Binding *binding_ctx, LPCWSTR url, I
     }
 
     if(binding_ctx) {
-        set_binding_sink(binding->protocol, PROTSINK(binding));
+        set_binding_sink(binding->protocol, PROTSINK(binding), BINDINF(binding));
         if(binding_ctx->redirect_url)
             IBindStatusCallback_OnProgress(binding->callback, 0, 0, BINDSTATUS_REDIRECTING, binding_ctx->redirect_url);
-        report_data(binding, 0, 0, 0);
+        report_data(binding, BSCF_FIRSTDATANOTIFICATION | (binding_ctx->download_state == END_DOWNLOAD ? BSCF_LASTDATANOTIFICATION : 0),
+                0, 0);
     }else {
         hres = IInternetProtocol_Start(binding->protocol, url, PROTSINK(binding),
                  BINDINF(binding), PI_APARTMENTTHREADED|PI_MIMEVERIFICATION, 0);
@@ -1570,8 +1615,10 @@ HRESULT bind_to_storage(LPCWSTR url, IBindCtx *pbc, REFIID riid, void **ppv)
             IInternetProtocol_UnlockRequest(binding->protocol);
 
         hres = binding->stgmed_obj->vtbl->get_result(binding->stgmed_obj, binding->bindf, ppv);
-    }else {
+    }else if(binding->bindf & BINDF_ASYNCHRONOUS) {
         hres = MK_S_ASYNCHRONOUS;
+    }else {
+        hres = FAILED(binding->hres) ? binding->hres : S_OK;
     }
 
     IBinding_Release(BINDING(binding));

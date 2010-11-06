@@ -6,12 +6,12 @@
 @ stub D3DDecompressShaders
 @ stub D3DDisassemble10Effect
 @ stub D3DDisassemble
-@ stub D3DGetBlobPart
-@ stub D3DGetDebugInfo
-@ stub D3DGetInputAndOutputSignatureBlob
-@ stub D3DGetInputSignatureBlob
-@ stub D3DGetOutputSignatureBlob
-@ stub D3DPreprocess
-@ stub D3DReflect
+@ stdcall D3DGetBlobPart(ptr long long long ptr)
+@ stdcall D3DGetDebugInfo(ptr long ptr)
+@ stdcall D3DGetInputAndOutputSignatureBlob(ptr long ptr)
+@ stdcall D3DGetInputSignatureBlob(ptr long ptr)
+@ stdcall D3DGetOutputSignatureBlob(ptr long ptr)
+@ stdcall D3DPreprocess(ptr long str ptr ptr ptr ptr)
+@ stdcall D3DReflect(ptr long ptr ptr)
 @ stub D3DReturnFailure1
-@ stub D3DStripShader
+@ stdcall D3DStripShader(ptr long long ptr)

@@ -29,8 +29,350 @@
 #include "wingdi.h"
 #include "d3dx9.h"
 #include "wine/debug.h"
+#include "d3dx9_36_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
+
+/*** IUnknown methods ***/
+static HRESULT WINAPI ID3DXMeshImpl_QueryInterface(ID3DXMesh *iface, REFIID riid, LPVOID *object)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), object);
+
+    if (IsEqualGUID(riid, &IID_IUnknown) ||
+        IsEqualGUID(riid, &IID_ID3DXBaseMesh) ||
+        IsEqualGUID(riid, &IID_ID3DXMesh))
+    {
+        iface->lpVtbl->AddRef(iface);
+        *object = This;
+        return S_OK;
+    }
+
+    WARN("Interface %s not found.\n", debugstr_guid(riid));
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI ID3DXMeshImpl_AddRef(ID3DXMesh *iface)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)->(): AddRef from %d\n", This, This->ref);
+
+    return InterlockedIncrement(&This->ref);
+}
+
+static ULONG WINAPI ID3DXMeshImpl_Release(ID3DXMesh *iface)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p)->(): Release from %d\n", This, ref + 1);
+
+    if (!ref)
+    {
+        IDirect3DIndexBuffer9_Release(This->index_buffer);
+        IDirect3DVertexBuffer9_Release(This->vertex_buffer);
+        IDirect3DVertexDeclaration9_Release(This->vertex_declaration);
+        IDirect3DDevice9_Release(This->device);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return ref;
+}
+
+/*** ID3DXBaseMesh ***/
+static HRESULT WINAPI ID3DXMeshImpl_DrawSubset(ID3DXMesh *iface, DWORD attrib_id)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%u): stub\n", This, attrib_id);
+
+    return E_NOTIMPL;
+}
+
+static DWORD WINAPI ID3DXMeshImpl_GetNumFaces(ID3DXMesh *iface)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)\n", This);
+
+    return This->numfaces;
+}
+
+static DWORD WINAPI ID3DXMeshImpl_GetNumVertices(ID3DXMesh *iface)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)\n", This);
+
+    return This->numvertices;
+}
+
+static DWORD WINAPI ID3DXMeshImpl_GetFVF(ID3DXMesh *iface)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)\n", This);
+
+    return This->fvf;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_GetDeclaration(ID3DXMesh *iface, D3DVERTEXELEMENT9 declaration[MAX_FVF_DECL_SIZE])
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+    UINT numelements;
+
+    TRACE("(%p)\n", This);
+
+    if (declaration == NULL) return D3DERR_INVALIDCALL;
+
+    return IDirect3DVertexDeclaration9_GetDeclaration(This->vertex_declaration,
+                                                      declaration,
+                                                      &numelements);
+}
+
+static DWORD WINAPI ID3DXMeshImpl_GetNumBytesPerVertex(ID3DXMesh *iface)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p): stub\n", This);
+
+    return 0; /* arbitrary since we cannot return E_NOTIMPL */
+}
+
+static DWORD WINAPI ID3DXMeshImpl_GetOptions(ID3DXMesh *iface)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)\n", This);
+
+    return This->options;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_GetDevice(ID3DXMesh *iface, LPDIRECT3DDEVICE9 *device)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)->(%p)\n", This, device);
+
+    if (device == NULL) return D3DERR_INVALIDCALL;
+    *device = This->device;
+    IDirect3DDevice9_AddRef(This->device);
+
+    return D3D_OK;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_CloneMeshFVF(ID3DXMesh *iface, DWORD options, DWORD fvf, LPDIRECT3DDEVICE9 device, LPD3DXMESH *clone_mesh)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%u,%u,%p,%p): stub\n", This, options, fvf, device, clone_mesh);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_CloneMesh(ID3DXMesh *iface, DWORD options, CONST D3DVERTEXELEMENT9 *declaration, LPDIRECT3DDEVICE9 device,
+                                              LPD3DXMESH *clone_mesh)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%u,%p,%p,%p): stub\n", This, options, declaration, device, clone_mesh);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_GetVertexBuffer(ID3DXMesh *iface, LPDIRECT3DVERTEXBUFFER9 *vertex_buffer)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)->(%p)\n", This, vertex_buffer);
+
+    if (vertex_buffer == NULL) return D3DERR_INVALIDCALL;
+    *vertex_buffer = This->vertex_buffer;
+    IDirect3DVertexBuffer9_AddRef(This->vertex_buffer);
+
+    return D3D_OK;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_GetIndexBuffer(ID3DXMesh *iface, LPDIRECT3DINDEXBUFFER9 *index_buffer)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)->(%p)\n", This, index_buffer);
+
+    if (index_buffer == NULL) return D3DERR_INVALIDCALL;
+    *index_buffer = This->index_buffer;
+    IDirect3DIndexBuffer9_AddRef(This->index_buffer);
+
+    return D3D_OK;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_LockVertexBuffer(ID3DXMesh *iface, DWORD flags, LPVOID *data)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)->(%u,%p)\n", This, flags, data);
+
+    return IDirect3DVertexBuffer9_Lock(This->vertex_buffer, 0, 0, data, flags);
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_UnlockVertexBuffer(ID3DXMesh *iface)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)\n", This);
+
+    return IDirect3DVertexBuffer9_Unlock(This->vertex_buffer);
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_LockIndexBuffer(ID3DXMesh *iface, DWORD flags, LPVOID *data)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)->(%u,%p)\n", This, flags, data);
+
+    return IDirect3DIndexBuffer9_Lock(This->index_buffer, 0, 0, data, flags);
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_UnlockIndexBuffer(ID3DXMesh *iface)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    TRACE("(%p)\n", This);
+
+    return IDirect3DIndexBuffer9_Unlock(This->index_buffer);
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_GetAttributeTable(ID3DXMesh *iface, D3DXATTRIBUTERANGE *attrib_table, DWORD *attrib_table_size)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%p,%p): stub\n", This, attrib_table, attrib_table_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_ConvertPointRepsToAdjacency(ID3DXMesh *iface, CONST DWORD *point_reps, DWORD *adjacency)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%p,%p): stub\n", This, point_reps, adjacency);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_ConvertAdjacencyToPointReps(ID3DXMesh *iface, CONST DWORD *adjacency, DWORD *point_reps)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%p,%p): stub\n", This, adjacency, point_reps);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_GenerateAdjacency(ID3DXMesh *iface, FLOAT epsilon, DWORD *adjacency)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%f,%p): stub\n", This, epsilon, adjacency);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_UpdateSemantics(ID3DXMesh *iface, D3DVERTEXELEMENT9 declaration[MAX_FVF_DECL_SIZE])
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%p): stub\n", This, declaration);
+
+    return E_NOTIMPL;
+}
+
+/*** ID3DXMesh ***/
+static HRESULT WINAPI ID3DXMeshImpl_LockAttributeBuffer(ID3DXMesh *iface, DWORD flags, DWORD **data)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%u,%p): stub\n", This, flags, data);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_UnlockAttributeBuffer(ID3DXMesh *iface)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p): stub\n", This);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_Optimize(ID3DXMesh *iface, DWORD flags, CONST DWORD *adjacency_in, DWORD *adjacency_out,
+                                             DWORD *face_remap, LPD3DXBUFFER *vertex_remap, LPD3DXMESH *opt_mesh)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%u,%p,%p,%p,%p,%p): stub\n", This, flags, adjacency_in, adjacency_out, face_remap, vertex_remap, opt_mesh);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_OptimizeInplace(ID3DXMesh *iface, DWORD flags, CONST DWORD *adjacency_in, DWORD *adjacency_out,
+                                                    DWORD *face_remap, LPD3DXBUFFER *vertex_remap)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%u,%p,%p,%p,%p): stub\n", This, flags, adjacency_in, adjacency_out, face_remap, vertex_remap);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ID3DXMeshImpl_SetAttributeTable(ID3DXMesh *iface, CONST D3DXATTRIBUTERANGE *attrib_table, DWORD attrib_table_size)
+{
+    ID3DXMeshImpl *This = (ID3DXMeshImpl *)iface;
+
+    FIXME("(%p)->(%p,%u): stub\n", This, attrib_table, attrib_table_size);
+
+    return E_NOTIMPL;
+}
+
+static const struct ID3DXMeshVtbl D3DXMesh_Vtbl =
+{
+    /*** IUnknown methods ***/
+    ID3DXMeshImpl_QueryInterface,
+    ID3DXMeshImpl_AddRef,
+    ID3DXMeshImpl_Release,
+    /*** ID3DXBaseMesh ***/
+    ID3DXMeshImpl_DrawSubset,
+    ID3DXMeshImpl_GetNumFaces,
+    ID3DXMeshImpl_GetNumVertices,
+    ID3DXMeshImpl_GetFVF,
+    ID3DXMeshImpl_GetDeclaration,
+    ID3DXMeshImpl_GetNumBytesPerVertex,
+    ID3DXMeshImpl_GetOptions,
+    ID3DXMeshImpl_GetDevice,
+    ID3DXMeshImpl_CloneMeshFVF,
+    ID3DXMeshImpl_CloneMesh,
+    ID3DXMeshImpl_GetVertexBuffer,
+    ID3DXMeshImpl_GetIndexBuffer,
+    ID3DXMeshImpl_LockVertexBuffer,
+    ID3DXMeshImpl_UnlockVertexBuffer,
+    ID3DXMeshImpl_LockIndexBuffer,
+    ID3DXMeshImpl_UnlockIndexBuffer,
+    ID3DXMeshImpl_GetAttributeTable,
+    ID3DXMeshImpl_ConvertPointRepsToAdjacency,
+    ID3DXMeshImpl_ConvertAdjacencyToPointReps,
+    ID3DXMeshImpl_GenerateAdjacency,
+    ID3DXMeshImpl_UpdateSemantics,
+    /*** ID3DXMesh ***/
+    ID3DXMeshImpl_LockAttributeBuffer,
+    ID3DXMeshImpl_UnlockAttributeBuffer,
+    ID3DXMeshImpl_Optimize,
+    ID3DXMeshImpl_OptimizeInplace,
+    ID3DXMeshImpl_SetAttributeTable
+};
 
 /*************************************************************************
  * D3DXBoxBoundProbe
@@ -216,6 +558,8 @@ HRESULT WINAPI D3DXDeclaratorFromFVF(DWORD fvf, D3DVERTEXELEMENT9 declaration[MA
     unsigned int i;
 
     TRACE("fvf %#x, declaration %p.\n", fvf, declaration);
+
+    if (fvf & (D3DFVF_RESERVED0 | D3DFVF_RESERVED2)) return D3DERR_INVALIDCALL;
 
     if (fvf & D3DFVF_POSITION_MASK)
     {
@@ -521,6 +865,22 @@ UINT WINAPI D3DXGetDeclVertexSize(const D3DVERTEXELEMENT9 *decl, DWORD stream_id
 }
 
 /*************************************************************************
+ * D3DXGetDeclLength
+ */
+UINT WINAPI D3DXGetDeclLength(const D3DVERTEXELEMENT9 *decl)
+{
+    const D3DVERTEXELEMENT9 *element;
+
+    TRACE("decl %p\n", decl);
+
+    /* null decl results in exception on Windows XP */
+
+    for (element = decl; element->Stream != 0xff; ++element);
+
+    return element - decl;
+}
+
+/*************************************************************************
  * D3DXIntersectTri
  */
 BOOL WINAPI D3DXIntersectTri(CONST D3DXVECTOR3 *p0, CONST D3DXVECTOR3 *p1, CONST D3DXVECTOR3 *p2, CONST D3DXVECTOR3 *praypos, CONST D3DXVECTOR3 *praydir, FLOAT *pu, FLOAT *pv, FLOAT *pdist)
@@ -583,12 +943,116 @@ BOOL WINAPI D3DXSphereBoundProbe(CONST D3DXVECTOR3 *pcenter, FLOAT radius, CONST
     return TRUE;
 }
 
-HRESULT WINAPI D3DXCreateMesh(DWORD numfaces, DWORD numvertices, DWORD options, CONST LPD3DVERTEXELEMENT9 *declaration,
+/*************************************************************************
+ * D3DXCreateMesh
+ */
+HRESULT WINAPI D3DXCreateMesh(DWORD numfaces, DWORD numvertices, DWORD options, CONST D3DVERTEXELEMENT9 *declaration,
                               LPDIRECT3DDEVICE9 device, LPD3DXMESH *mesh)
 {
-    FIXME("(%d, %d, %d, %p, %p, %p): stub\n", numfaces, numvertices, options, declaration, device, mesh);
+    HRESULT hr;
+    DWORD fvf;
+    IDirect3DVertexDeclaration9 *vertex_declaration;
+    IDirect3DVertexBuffer9 *vertex_buffer;
+    IDirect3DIndexBuffer9 *index_buffer;
+    ID3DXMeshImpl *object;
 
-    return E_NOTIMPL;
+    TRACE("(%d, %d, %d, %p, %p, %p)\n", numfaces, numvertices, options, declaration, device, mesh);
+
+    if (numfaces == 0 || numvertices == 0 || declaration == NULL || device == NULL || mesh == NULL)
+    {
+        return D3DERR_INVALIDCALL;
+    }
+
+    hr = D3DXFVFFromDeclarator(declaration, &fvf);
+    if (hr != D3D_OK)
+    {
+        fvf = 0;
+    }
+
+    /* Create vertex declaration */
+    hr = IDirect3DDevice9_CreateVertexDeclaration(device,
+                                                  declaration,
+                                                  &vertex_declaration);
+    if (FAILED(hr))
+    {
+        WARN("Unexpected return value %x from IDirect3DDevice9_CreateVertexDeclaration.\n",hr);
+        return hr;
+    }
+
+    /* Create vertex buffer */
+    hr = IDirect3DDevice9_CreateVertexBuffer(device,
+                                             numvertices * D3DXGetDeclVertexSize(declaration, declaration[0].Stream),
+                                             0,
+                                             fvf,
+                                             D3DPOOL_MANAGED,
+                                             &vertex_buffer,
+                                             NULL);
+    if (FAILED(hr))
+    {
+        WARN("Unexpected return value %x from IDirect3DDevice9_CreateVertexBuffer.\n",hr);
+        IDirect3DVertexDeclaration9_Release(vertex_declaration);
+        return hr;
+    }
+
+    /* Create index buffer */
+    hr = IDirect3DDevice9_CreateIndexBuffer(device,
+                                            numfaces * 6, /* 3 vertices per triangle, 2 triangles per face */
+                                            0,
+                                            D3DFMT_INDEX16,
+                                            D3DPOOL_MANAGED,
+                                            &index_buffer,
+                                            NULL);
+    if (FAILED(hr))
+    {
+        WARN("Unexpected return value %x from IDirect3DDevice9_CreateVertexBuffer.\n",hr);
+        IDirect3DVertexBuffer9_Release(vertex_buffer);
+        IDirect3DVertexDeclaration9_Release(vertex_declaration);
+        return hr;
+    }
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ID3DXMeshImpl));
+    if (object == NULL)
+    {
+        IDirect3DIndexBuffer9_Release(index_buffer);
+        IDirect3DVertexBuffer9_Release(vertex_buffer);
+        IDirect3DVertexDeclaration9_Release(vertex_declaration);
+        *mesh = NULL;
+        return E_OUTOFMEMORY;
+    }
+    object->lpVtbl = &D3DXMesh_Vtbl;
+    object->ref = 1;
+
+    object->numfaces = numfaces;
+    object->numvertices = numvertices;
+    object->options = options;
+    object->fvf = fvf;
+    object->device = device;
+    IDirect3DDevice9_AddRef(device);
+
+    object->vertex_declaration = vertex_declaration;
+    object->vertex_buffer = vertex_buffer;
+    object->index_buffer = index_buffer;
+
+    *mesh = (ID3DXMesh*)object;
+
+    return D3D_OK;
+}
+
+/*************************************************************************
+ * D3DXCreateMeshFVF
+ */
+HRESULT WINAPI D3DXCreateMeshFVF(DWORD numfaces, DWORD numvertices, DWORD options, DWORD fvf,
+                                 LPDIRECT3DDEVICE9 device, LPD3DXMESH *mesh)
+{
+    HRESULT hr;
+    D3DVERTEXELEMENT9 declaration[MAX_FVF_DECL_SIZE];
+
+    TRACE("(%u, %u, %u, %u, %p, %p)\n", numfaces, numvertices, options, fvf, device, mesh);
+
+    hr = D3DXDeclaratorFromFVF(fvf, declaration);
+    if (FAILED(hr)) return hr;
+
+    return D3DXCreateMesh(numfaces, numvertices, options, declaration, device, mesh);
 }
 
 HRESULT WINAPI D3DXCreateBox(LPDIRECT3DDEVICE9 device, FLOAT width, FLOAT height,
@@ -599,10 +1063,422 @@ HRESULT WINAPI D3DXCreateBox(LPDIRECT3DDEVICE9 device, FLOAT width, FLOAT height
     return E_NOTIMPL;
 }
 
+struct vertex
+{
+    D3DXVECTOR3 position;
+    D3DXVECTOR3 normal;
+};
+
+typedef WORD face[3];
+
+struct sincos_table
+{
+    float *sin;
+    float *cos;
+};
+
+static void free_sincos_table(struct sincos_table *sincos_table)
+{
+    HeapFree(GetProcessHeap(), 0, sincos_table->cos);
+    HeapFree(GetProcessHeap(), 0, sincos_table->sin);
+}
+
+/* pre compute sine and cosine tables; caller must free */
+static BOOL compute_sincos_table(struct sincos_table *sincos_table, float angle_start, float angle_step, int n)
+{
+    float angle;
+    int i;
+
+    sincos_table->sin = HeapAlloc(GetProcessHeap(), 0, n * sizeof(*sincos_table->sin));
+    if (!sincos_table->sin)
+    {
+        return FALSE;
+    }
+    sincos_table->cos = HeapAlloc(GetProcessHeap(), 0, n * sizeof(*sincos_table->cos));
+    if (!sincos_table->cos)
+    {
+        HeapFree(GetProcessHeap(), 0, sincos_table->sin);
+        return FALSE;
+    }
+
+    angle = angle_start;
+    for (i = 0; i < n; i++)
+    {
+        sincos_table->sin[i] = sin(angle);
+        sincos_table->cos[i] = cos(angle);
+        angle += angle_step;
+    }
+
+    return TRUE;
+}
+
+static WORD vertex_index(UINT slices, int slice, int stack)
+{
+    return stack*slices+slice+1;
+}
+
 HRESULT WINAPI D3DXCreateSphere(LPDIRECT3DDEVICE9 device, FLOAT radius, UINT slices,
                                 UINT stacks, LPD3DXMESH* mesh, LPD3DXBUFFER* adjacency)
 {
-    FIXME("(%p, %f, %d, %d, %p, %p): stub\n", device, radius, slices, stacks, mesh, adjacency);
+    DWORD number_of_vertices, number_of_faces;
+    HRESULT hr;
+    ID3DXMesh *sphere;
+    struct vertex *vertices;
+    face *faces;
+    float phi_step, phi_start;
+    struct sincos_table phi;
+    float theta_step, theta, sin_theta, cos_theta;
+    DWORD vertex, face;
+    int slice, stack;
+
+    TRACE("(%p, %f, %u, %u, %p, %p)\n", device, radius, slices, stacks, mesh, adjacency);
+
+    if (!device || radius < 0.0f || slices < 2 || stacks < 2 || !mesh)
+    {
+        return D3DERR_INVALIDCALL;
+    }
+
+    if (adjacency)
+    {
+        FIXME("Case of adjacency != NULL not implemented.\n");
+        return E_NOTIMPL;
+    }
+
+    number_of_vertices = 2 + slices * (stacks-1);
+    number_of_faces = 2 * slices + (stacks - 2) * (2 * slices);
+
+    hr = D3DXCreateMeshFVF(number_of_faces, number_of_vertices, D3DXMESH_MANAGED,
+                           D3DFVF_XYZ | D3DFVF_NORMAL, device, &sphere);
+    if (FAILED(hr))
+    {
+        return hr;
+    }
+
+    hr = sphere->lpVtbl->LockVertexBuffer(sphere, D3DLOCK_DISCARD, (LPVOID *)&vertices);
+    if (FAILED(hr))
+    {
+        sphere->lpVtbl->Release(sphere);
+        return hr;
+    }
+
+    hr = sphere->lpVtbl->LockIndexBuffer(sphere, D3DLOCK_DISCARD, (LPVOID *)&faces);
+    if (FAILED(hr))
+    {
+        sphere->lpVtbl->UnlockVertexBuffer(sphere);
+        sphere->lpVtbl->Release(sphere);
+        return hr;
+    }
+
+    /* phi = angle on xz plane wrt z axis */
+    phi_step = -2 * M_PI / slices;
+    phi_start = M_PI / 2;
+
+    if (!compute_sincos_table(&phi, phi_start, phi_step, slices))
+    {
+        sphere->lpVtbl->UnlockIndexBuffer(sphere);
+        sphere->lpVtbl->UnlockVertexBuffer(sphere);
+        sphere->lpVtbl->Release(sphere);
+        return E_OUTOFMEMORY;
+    }
+
+    /* theta = angle on xy plane wrt x axis */
+    theta_step = M_PI / stacks;
+    theta = theta_step;
+
+    vertex = 0;
+    face = 0;
+    stack = 0;
+
+    vertices[vertex].normal.x = 0.0f;
+    vertices[vertex].normal.y = 0.0f;
+    vertices[vertex].normal.z = 1.0f;
+    vertices[vertex].position.x = 0.0f;
+    vertices[vertex].position.y = 0.0f;
+    vertices[vertex].position.z = radius;
+    vertex++;
+
+    for (stack = 0; stack < stacks - 1; stack++)
+    {
+        sin_theta = sin(theta);
+        cos_theta = cos(theta);
+
+        for (slice = 0; slice < slices; slice++)
+        {
+            vertices[vertex].normal.x = sin_theta * phi.cos[slice];
+            vertices[vertex].normal.y = sin_theta * phi.sin[slice];
+            vertices[vertex].normal.z = cos_theta;
+            vertices[vertex].position.x = radius * sin_theta * phi.cos[slice];
+            vertices[vertex].position.y = radius * sin_theta * phi.sin[slice];
+            vertices[vertex].position.z = radius * cos_theta;
+            vertex++;
+
+            if (slice > 0)
+            {
+                if (stack == 0)
+                {
+                    /* top stack is triangle fan */
+                    faces[face][0] = 0;
+                    faces[face][1] = slice + 1;
+                    faces[face][2] = slice;
+                    face++;
+                }
+                else
+                {
+                    /* stacks in between top and bottom are quad strips */
+                    faces[face][0] = vertex_index(slices, slice-1, stack-1);
+                    faces[face][1] = vertex_index(slices, slice, stack-1);
+                    faces[face][2] = vertex_index(slices, slice-1, stack);
+                    face++;
+
+                    faces[face][0] = vertex_index(slices, slice, stack-1);
+                    faces[face][1] = vertex_index(slices, slice, stack);
+                    faces[face][2] = vertex_index(slices, slice-1, stack);
+                    face++;
+                }
+            }
+        }
+
+        theta += theta_step;
+
+        if (stack == 0)
+        {
+            faces[face][0] = 0;
+            faces[face][1] = 1;
+            faces[face][2] = slice;
+            face++;
+        }
+        else
+        {
+            faces[face][0] = vertex_index(slices, slice-1, stack-1);
+            faces[face][1] = vertex_index(slices, 0, stack-1);
+            faces[face][2] = vertex_index(slices, slice-1, stack);
+            face++;
+
+            faces[face][0] = vertex_index(slices, 0, stack-1);
+            faces[face][1] = vertex_index(slices, 0, stack);
+            faces[face][2] = vertex_index(slices, slice-1, stack);
+            face++;
+        }
+    }
+
+    vertices[vertex].position.x = 0.0f;
+    vertices[vertex].position.y = 0.0f;
+    vertices[vertex].position.z = -radius;
+    vertices[vertex].normal.x = 0.0f;
+    vertices[vertex].normal.y = 0.0f;
+    vertices[vertex].normal.z = -1.0f;
+
+    /* bottom stack is triangle fan */
+    for (slice = 1; slice < slices; slice++)
+    {
+        faces[face][0] = vertex_index(slices, slice-1, stack-1);
+        faces[face][1] = vertex_index(slices, slice, stack-1);
+        faces[face][2] = vertex;
+        face++;
+    }
+
+    faces[face][0] = vertex_index(slices, slice-1, stack-1);
+    faces[face][1] = vertex_index(slices, 0, stack-1);
+    faces[face][2] = vertex;
+
+    free_sincos_table(&phi);
+    sphere->lpVtbl->UnlockIndexBuffer(sphere);
+    sphere->lpVtbl->UnlockVertexBuffer(sphere);
+    *mesh = sphere;
+
+    return D3D_OK;
+}
+
+HRESULT WINAPI D3DXCreateCylinder(LPDIRECT3DDEVICE9 device, FLOAT radius1, FLOAT radius2, FLOAT length, UINT slices,
+                                  UINT stacks, LPD3DXMESH* mesh, LPD3DXBUFFER* adjacency)
+{
+    DWORD number_of_vertices, number_of_faces;
+    HRESULT hr;
+    ID3DXMesh *cylinder;
+    struct vertex *vertices;
+    face *faces;
+    float theta_step, theta_start;
+    struct sincos_table theta;
+    float delta_radius, radius, radius_step;
+    float z, z_step, z_normal;
+    DWORD vertex, face;
+    int slice, stack;
+
+    TRACE("(%p, %f, %f, %f, %u, %u, %p, %p)\n", device, radius1, radius2, length, slices, stacks, mesh, adjacency);
+
+    if (device == NULL || radius1 < 0.0f || radius2 < 0.0f || length < 0.0f || slices < 2 || stacks < 1 || mesh == NULL)
+    {
+        return D3DERR_INVALIDCALL;
+    }
+
+    if (adjacency)
+    {
+        FIXME("Case of adjacency != NULL not implemented.\n");
+        return E_NOTIMPL;
+    }
+
+    number_of_vertices = 2 + (slices * (3 + stacks));
+    number_of_faces = 2 * slices + stacks * (2 * slices);
+
+    hr = D3DXCreateMeshFVF(number_of_faces, number_of_vertices, D3DXMESH_MANAGED,
+                           D3DFVF_XYZ | D3DFVF_NORMAL, device, &cylinder);
+    if (FAILED(hr))
+    {
+        return hr;
+    }
+
+    hr = cylinder->lpVtbl->LockVertexBuffer(cylinder, D3DLOCK_DISCARD, (LPVOID *)&vertices);
+    if (FAILED(hr))
+    {
+        cylinder->lpVtbl->Release(cylinder);
+        return hr;
+    }
+
+    hr = cylinder->lpVtbl->LockIndexBuffer(cylinder, D3DLOCK_DISCARD, (LPVOID *)&faces);
+    if (FAILED(hr))
+    {
+        cylinder->lpVtbl->UnlockVertexBuffer(cylinder);
+        cylinder->lpVtbl->Release(cylinder);
+        return hr;
+    }
+
+    /* theta = angle on xy plane wrt x axis */
+    theta_step = -2 * M_PI / slices;
+    theta_start = M_PI / 2;
+
+    if (!compute_sincos_table(&theta, theta_start, theta_step, slices))
+    {
+        cylinder->lpVtbl->UnlockIndexBuffer(cylinder);
+        cylinder->lpVtbl->UnlockVertexBuffer(cylinder);
+        cylinder->lpVtbl->Release(cylinder);
+        return E_OUTOFMEMORY;
+    }
+
+    vertex = 0;
+    face = 0;
+    stack = 0;
+
+    delta_radius = radius1 - radius2;
+    radius = radius1;
+    radius_step = delta_radius / stacks;
+
+    z = -length / 2;
+    z_step = length / stacks;
+    z_normal = delta_radius / length;
+    if (isnan(z_normal))
+    {
+        z_normal = 0.0f;
+    }
+
+    vertices[vertex].normal.x = 0.0f;
+    vertices[vertex].normal.y = 0.0f;
+    vertices[vertex].normal.z = -1.0f;
+    vertices[vertex].position.x = 0.0f;
+    vertices[vertex].position.y = 0.0f;
+    vertices[vertex++].position.z = z;
+
+    for (slice = 0; slice < slices; slice++, vertex++)
+    {
+        vertices[vertex].normal.x = 0.0f;
+        vertices[vertex].normal.y = 0.0f;
+        vertices[vertex].normal.z = -1.0f;
+        vertices[vertex].position.x = radius * theta.cos[slice];
+        vertices[vertex].position.y = radius * theta.sin[slice];
+        vertices[vertex].position.z = z;
+
+        if (slice > 0)
+        {
+            faces[face][0] = 0;
+            faces[face][1] = slice;
+            faces[face++][2] = slice + 1;
+        }
+    }
+
+    faces[face][0] = 0;
+    faces[face][1] = slice;
+    faces[face++][2] = 1;
+
+    for (stack = 1; stack <= stacks+1; stack++)
+    {
+        for (slice = 0; slice < slices; slice++, vertex++)
+        {
+            vertices[vertex].normal.x = theta.cos[slice];
+            vertices[vertex].normal.y = theta.sin[slice];
+            vertices[vertex].normal.z = z_normal;
+            D3DXVec3Normalize(&vertices[vertex].normal, &vertices[vertex].normal);
+            vertices[vertex].position.x = radius * theta.cos[slice];
+            vertices[vertex].position.y = radius * theta.sin[slice];
+            vertices[vertex].position.z = z;
+
+            if (stack > 1 && slice > 0)
+            {
+                faces[face][0] = vertex_index(slices, slice-1, stack-1);
+                faces[face][1] = vertex_index(slices, slice-1, stack);
+                faces[face++][2] = vertex_index(slices, slice, stack-1);
+
+                faces[face][0] = vertex_index(slices, slice, stack-1);
+                faces[face][1] = vertex_index(slices, slice-1, stack);
+                faces[face++][2] = vertex_index(slices, slice, stack);
+            }
+        }
+
+        if (stack > 1)
+        {
+            faces[face][0] = vertex_index(slices, slice-1, stack-1);
+            faces[face][1] = vertex_index(slices, slice-1, stack);
+            faces[face++][2] = vertex_index(slices, 0, stack-1);
+
+            faces[face][0] = vertex_index(slices, 0, stack-1);
+            faces[face][1] = vertex_index(slices, slice-1, stack);
+            faces[face++][2] = vertex_index(slices, 0, stack);
+        }
+
+        if (stack < stacks + 1)
+        {
+            z += z_step;
+            radius -= radius_step;
+        }
+    }
+
+    for (slice = 0; slice < slices; slice++, vertex++)
+    {
+        vertices[vertex].normal.x = 0.0f;
+        vertices[vertex].normal.y = 0.0f;
+        vertices[vertex].normal.z = 1.0f;
+        vertices[vertex].position.x = radius * theta.cos[slice];
+        vertices[vertex].position.y = radius * theta.sin[slice];
+        vertices[vertex].position.z = z;
+
+        if (slice > 0)
+        {
+            faces[face][0] = vertex_index(slices, slice-1, stack);
+            faces[face][1] = number_of_vertices - 1;
+            faces[face++][2] = vertex_index(slices, slice, stack);
+        }
+    }
+
+    vertices[vertex].position.x = 0.0f;
+    vertices[vertex].position.y = 0.0f;
+    vertices[vertex].position.z = z;
+    vertices[vertex].normal.x = 0.0f;
+    vertices[vertex].normal.y = 0.0f;
+    vertices[vertex].normal.z = 1.0f;
+
+    faces[face][0] = vertex_index(slices, slice-1, stack);
+    faces[face][1] = number_of_vertices - 1;
+    faces[face][2] = vertex_index(slices, 0, stack);
+
+    free_sincos_table(&theta);
+    cylinder->lpVtbl->UnlockIndexBuffer(cylinder);
+    cylinder->lpVtbl->UnlockVertexBuffer(cylinder);
+    *mesh = cylinder;
+
+    return D3D_OK;
+}
+
+HRESULT WINAPI D3DXCreateTeapot(LPDIRECT3DDEVICE9 device, LPD3DXMESH *mesh, LPD3DXBUFFER* adjacency)
+{
+    FIXME("(%p, %p, %p): stub\n", device, mesh, adjacency);
 
     return E_NOTIMPL;
 }

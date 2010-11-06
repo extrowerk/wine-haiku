@@ -24,19 +24,19 @@
 #include "ddraw.h"
 #include "d3d.h"
 
-HWND window;
-IDirectDraw7        *DirectDraw = NULL;
-IDirectDrawSurface7 *Surface;
-IDirectDrawSurface7 *depth_buffer;
-IDirect3D7          *Direct3D = NULL;
-IDirect3DDevice7    *Direct3DDevice = NULL;
+static HWND window;
+static IDirectDraw7        *DirectDraw;
+static IDirectDrawSurface7 *Surface;
+static IDirectDrawSurface7 *depth_buffer;
+static IDirect3D7          *Direct3D;
+static IDirect3DDevice7    *Direct3DDevice;
 
-IDirectDraw *DirectDraw1 = NULL;
-IDirectDrawSurface *Surface1 = NULL;
-IDirect3D *Direct3D1 = NULL;
-IDirect3DDevice *Direct3DDevice1 = NULL;
-IDirect3DExecuteBuffer *ExecuteBuffer = NULL;
-IDirect3DViewport *Viewport = NULL;
+static IDirectDraw *DirectDraw1;
+static IDirectDrawSurface *Surface1;
+static IDirect3D *Direct3D1;
+static IDirect3DDevice *Direct3DDevice1;
+static IDirect3DExecuteBuffer *ExecuteBuffer;
+static IDirect3DViewport *Viewport;
 
 static BOOL refdevice = FALSE;
 
@@ -672,7 +672,7 @@ static void offscreen_test(IDirect3DDevice7 *device)
     DWORD color;
     DDSURFACEDESC2 ddsd;
 
-    static const float quad[][5] = {
+    static float quad[][5] = {
         {-0.5f, -0.5f, 0.1f, 0.0f, 0.0f},
         {-0.5f,  0.5f, 0.1f, 0.0f, 1.0f},
         { 0.5f, -0.5f, 0.1f, 1.0f, 0.0f},
@@ -795,7 +795,7 @@ static void alpha_test(IDirect3DDevice7 *device)
         { 1.0f,  0.0f,   0.1f,                          0xc00000ff},
         { 1.0f,  1.0f,   0.1f,                          0xc00000ff},
     };
-    static const float composite_quad[][5] = {
+    static float composite_quad[][5] = {
         { 0.0f, -1.0f, 0.1f, 0.0f, 1.0f},
         { 0.0f,  1.0f, 0.1f, 0.0f, 0.0f},
         { 1.0f, -1.0f, 0.1f, 1.0f, 1.0f},
@@ -2980,7 +2980,7 @@ static void DX1_BackBufferFlipTest(void)
     U4(ddsd.ddpfPixelFormat).dwBBitMask         = 0x000000ff;
 
     hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &Backbuffer, NULL);
-    todo_wine ok(hr==DD_OK, "IDirectDraw_CreateSurface returned: %08x\n", hr);
+    ok(hr==DD_OK, "IDirectDraw_CreateSurface returned: %08x\n", hr);
     if(FAILED(hr)) goto out;
 
     hr = IDirectDrawSurface_AddAttachedSurface(Primary, Backbuffer);

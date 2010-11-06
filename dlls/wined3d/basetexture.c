@@ -81,21 +81,17 @@ void basetexture_cleanup(IWineD3DBaseTexture *iface)
     resource_cleanup((IWineD3DResource *)iface);
 }
 
-IWineD3DResourceImpl *basetexture_get_sub_resource(IWineD3DBaseTextureImpl *texture, UINT layer, UINT level)
+IWineD3DResourceImpl *basetexture_get_sub_resource(IWineD3DBaseTextureImpl *texture, UINT sub_resource_idx)
 {
-    if (layer >= texture->baseTexture.layer_count)
+    UINT sub_count = texture->baseTexture.level_count * texture->baseTexture.layer_count;
+
+    if (sub_resource_idx >= sub_count)
     {
-        WARN("layer %u >= layer_count %u.\n", layer, texture->baseTexture.layer_count);
+        WARN("sub_resource_idx %u >= sub_count %u.\n", sub_resource_idx, sub_count);
         return NULL;
     }
 
-    if (level >= texture->baseTexture.level_count)
-    {
-        WARN("level %u >= level_count %u.\n", level, texture->baseTexture.level_count);
-        return NULL;
-    }
-
-    return texture->baseTexture.sub_resources[layer * texture->baseTexture.level_count + level];
+    return texture->baseTexture.sub_resources[sub_resource_idx];
 }
 
 /* A GL context is provided by the caller */
@@ -184,7 +180,7 @@ HRESULT basetexture_set_autogen_filter_type(IWineD3DBaseTexture *iface, WINED3DT
 {
   IWineD3DBaseTextureImpl *This = (IWineD3DBaseTextureImpl *)iface;
   IWineD3DDeviceImpl *device = This->resource.device;
-  UINT textureDimensions = IWineD3DBaseTexture_GetTextureDimensions(iface);
+  GLenum textureDimensions = This->baseTexture.target;
 
   if (!(This->resource.usage & WINED3DUSAGE_AUTOGENMIPMAP)) {
       TRACE("(%p) : returning invalid call\n", This);
@@ -262,7 +258,7 @@ HRESULT basetexture_bind(IWineD3DBaseTexture *iface, BOOL srgb, BOOL *set_surfac
 {
     IWineD3DBaseTextureImpl *This = (IWineD3DBaseTextureImpl *)iface;
     HRESULT hr = WINED3D_OK;
-    UINT textureDimensions;
+    GLenum textureDimensions;
     BOOL isNewTexture = FALSE;
     struct gl_texture *gl_tex;
     TRACE("(%p) : About to bind texture\n", This);
@@ -274,10 +270,11 @@ HRESULT basetexture_bind(IWineD3DBaseTexture *iface, BOOL srgb, BOOL *set_surfac
         gl_tex = &This->baseTexture.texture_rgb;
     }
 
-    textureDimensions = IWineD3DBaseTexture_GetTextureDimensions(iface);
+    textureDimensions = This->baseTexture.target;
     ENTER_GL();
     /* Generate a texture name if we don't already have one */
-    if (gl_tex->name == 0) {
+    if (!gl_tex->name)
+    {
         *set_surface_desc = TRUE;
         glGenTextures(1, &gl_tex->name);
         checkGLcall("glGenTextures");
@@ -319,7 +316,8 @@ HRESULT basetexture_bind(IWineD3DBaseTexture *iface, BOOL srgb, BOOL *set_surfac
     }
 
     /* Bind the texture */
-    if (gl_tex->name != 0) {
+    if (gl_tex->name)
+    {
         glBindTexture(textureDimensions, gl_tex->name);
         checkGLcall("glBindTexture");
         if (isNewTexture) {
@@ -382,18 +380,17 @@ static void apply_wrap(const struct wined3d_gl_info *gl_info, GLenum target,
 
 /* GL locking is done by the caller (state handler) */
 void basetexture_apply_state_changes(IWineD3DBaseTexture *iface,
-        const DWORD textureStates[WINED3D_HIGHEST_TEXTURE_STATE + 1],
         const DWORD samplerStates[WINED3D_HIGHEST_SAMPLER_STATE + 1],
         const struct wined3d_gl_info *gl_info)
 {
     IWineD3DBaseTextureImpl *This = (IWineD3DBaseTextureImpl *)iface;
+    GLenum textureDimensions = This->baseTexture.target;
     DWORD state;
-    GLint textureDimensions = IWineD3DBaseTexture_GetTextureDimensions(iface);
     BOOL cond_np2 = IWineD3DBaseTexture_IsCondNP2(iface);
     DWORD aniso;
     struct gl_texture *gl_tex;
 
-    TRACE("iface %p, textureStates %p, samplerStates %p\n", iface, textureStates, samplerStates);
+    TRACE("iface %p, samplerStates %p\n", iface, samplerStates);
 
     if(This->baseTexture.is_srgb) {
         gl_tex = &This->baseTexture.texture_srgb;
@@ -428,7 +425,7 @@ void basetexture_apply_state_changes(IWineD3DBaseTexture *iface,
         D3DCOLORTOGLFLOAT4(state, col);
         TRACE("Setting border color for %u to %x\n", textureDimensions, state);
         glTexParameterfv(textureDimensions, GL_TEXTURE_BORDER_COLOR, &col[0]);
-        checkGLcall("glTexParameteri(..., GL_TEXTURE_BORDER_COLOR, ...)");
+        checkGLcall("glTexParameterfv(..., GL_TEXTURE_BORDER_COLOR, ...)");
         gl_tex->states[WINED3DTEXSTA_BORDERCOLOR] = state;
     }
 

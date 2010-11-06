@@ -81,7 +81,8 @@ static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface)
      * this will be the original desktop resolution. In case of d3d7 this will be a NOP because ddraw sets the resolution
      * before starting up Direct3D, thus orig_width and orig_height will be equal to the modes in the presentation params
      */
-    if(This->presentParms.Windowed == FALSE && This->presentParms.AutoRestoreDisplayMode) {
+    if (!This->presentParms.Windowed && This->presentParms.AutoRestoreDisplayMode)
+    {
         mode.Width = This->orig_width;
         mode.Height = This->orig_height;
         mode.RefreshRate = 0;
@@ -165,7 +166,7 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
             gl_filter = GL_NEAREST;
 
         ENTER_GL();
-        context_bind_fbo(context2, GL_DRAW_FRAMEBUFFER, NULL);
+        context_bind_fbo(context2, GL_FRAMEBUFFER, NULL);
 
         /* Set up the texture. The surface is not in a IWineD3D*Texture container,
          * so there are no d3d texture settings to dirtify
@@ -453,10 +454,8 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
     if (This->presentParms.PresentationInterval != WINED3DPRESENT_INTERVAL_IMMEDIATE
             && gl_info->supported[SGI_VIDEO_SYNC])
     {
-        retval = GL_EXTCALL(glXGetVideoSyncSGI(&sync));
-        if(retval != 0) {
+        if ((retval = GL_EXTCALL(glXGetVideoSyncSGI(&sync))))
             ERR("glXGetVideoSyncSGI failed(retval = %d\n", retval);
-        }
 
         switch(This->presentParms.PresentationInterval) {
             case WINED3DPRESENT_INTERVAL_DEFAULT:

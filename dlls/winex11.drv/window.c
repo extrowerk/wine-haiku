@@ -430,6 +430,10 @@ static void sync_window_cursor( struct x11drv_win_data *data )
     SERVER_END_REQ;
 
     set_window_cursor( data->hwnd, cursor );
+
+    /* setting the cursor can fail if the window isn't created yet */
+    /* so make sure that we try again once we receive a mouse event */
+    data->cursor = (HANDLE)~0u;
 }
 
 
@@ -474,8 +478,10 @@ static void sync_window_region( Display *display, struct x11drv_win_data *data, 
     }
     else
     {
-        RGNDATA *pRegionData = X11DRV_GetRegionData( hrgn, 0 );
-        if (pRegionData)
+        RGNDATA *pRegionData;
+
+        if (GetWindowLongW( data->hwnd, GWL_EXSTYLE ) & WS_EX_LAYOUTRTL) MirrorRgn( data->hwnd, hrgn );
+        if ((pRegionData = X11DRV_GetRegionData( hrgn, 0 )))
         {
             wine_tsx11_lock();
             XShapeCombineRectangles( display, data->whole_window, ShapeBounding,
@@ -1350,6 +1356,8 @@ static void set_xembed_flags( Display *display, struct x11drv_win_data *data, un
 {
     unsigned long info[2];
 
+    if (!data->whole_window) return;
+
     info[0] = 0; /* protocol version */
     info[1] = flags;
     wine_tsx11_lock();
@@ -1412,18 +1420,19 @@ static void unmap_window( Display *display, struct x11drv_win_data *data )
  */
 void make_window_embedded( Display *display, struct x11drv_win_data *data )
 {
-    if (data->mapped)
-    {
-        /* the window cannot be mapped before being embedded */
-        unmap_window( display, data );
-        data->embedded = TRUE;
+    BOOL was_mapped = data->mapped;
+    /* the window cannot be mapped before being embedded */
+    if (data->mapped) unmap_window( display, data );
+
+    data->embedded = TRUE;
+    data->managed = TRUE;
+    SetPropA( data->hwnd, managed_prop, (HANDLE)1 );
+    sync_window_style( display, data );
+
+    if (was_mapped)
         map_window( display, data, 0 );
-    }
     else
-    {
-        data->embedded = TRUE;
         set_xembed_flags( display, data, 0 );
-    }
 }
 
 
@@ -1614,6 +1623,8 @@ static void move_window_bits( struct x11drv_win_data *data, const RECT *old_rect
         if (dst_rect.left == src_rect.left && dst_rect.top == src_rect.top) return;
         hdc_src = hdc_dst = GetDCEx( data->hwnd, 0, DCX_CACHE );
     }
+
+    ExcludeUpdateRgn( hdc_dst, data->hwnd );
 
     code = X11DRV_START_EXPOSURES;
     ExtEscape( hdc_dst, X11DRV_ESCAPE, sizeof(code), (LPSTR)&code, 0, NULL );
@@ -1882,8 +1893,9 @@ void X11DRV_DestroyNotify( HWND hwnd, XEvent *event )
 
     if (!(data = X11DRV_get_win_data( hwnd ))) return;
 
-    FIXME( "window %p/%lx destroyed from the outside\n", hwnd, data->whole_window );
+    if (!data->embedded) FIXME( "window %p/%lx destroyed from the outside\n", hwnd, data->whole_window );
     destroy_whole_window( display, data, TRUE );
+    if (data->embedded) SendMessageW( hwnd, WM_CLOSE, 0, 0 );
 }
 
 
@@ -2339,7 +2351,7 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
             !memcmp( &valid_rects[0], &data->client_rect, sizeof(RECT) ))
         {
             /* if we have an X window the bits will be moved by the X server */
-            if (!data->whole_window)
+            if (!data->whole_window && (x_offset != 0 || y_offset != 0))
                 move_window_bits( data, &old_whole_rect, &data->whole_rect, &old_client_rect );
         }
         else

@@ -1622,7 +1622,7 @@ static inline void set_blit_dimension(UINT width, UINT height) {
     checkGLcall("glMatrixMode(GL_PROJECTION)");
     glLoadIdentity();
     checkGLcall("glLoadIdentity()");
-    glOrtho(0, width, height, 0, 0.0, -1.0);
+    glOrtho(0, width, 0, height, 0.0, -1.0);
     checkGLcall("glOrtho");
     glViewport(0, 0, width, height);
     checkGLcall("glViewport");
@@ -1758,7 +1758,7 @@ static void SetupForBlit(IWineD3DDeviceImpl *This, struct wined3d_context *conte
         glTexEnvf(GL_TEXTURE_FILTER_CONTROL_EXT,
                   GL_TEXTURE_LOD_BIAS_EXT,
                   0.0f);
-        checkGLcall("glTexEnvi GL_TEXTURE_LOD_BIAS_EXT ...");
+        checkGLcall("glTexEnvf GL_TEXTURE_LOD_BIAS_EXT ...");
     }
 
     if (sampler != WINED3D_UNMAPPED_STAGE)
@@ -2065,7 +2065,6 @@ void context_apply_blit_state(struct wined3d_context *context, IWineD3DDeviceImp
 
         if (context->render_offscreen)
         {
-            FIXME("Applying blit state for an offscreen target with ORM_FBO. This should be avoided.\n");
             surface_internal_preload(context->current_rt, SRGB_RGB);
 
             ENTER_GL();

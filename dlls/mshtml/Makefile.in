@@ -1,11 +1,7 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = mshtml.dll
 IMPORTLIB = mshtml
 IMPORTS   = strmiids uuid urlmon shlwapi shell32 ole32 oleaut32 user32 gdi32 advapi32
-EXTRADEFS = -DCOM_NO_WINDOWS_H
+EXTRADEFS = -DCOM_NO_WINDOWS_H -DGECKO_DATADIR="\"$(datadir)\""
 DELAYIMPORTS = wininet
 
 C_SRCS = \
@@ -24,6 +20,7 @@ C_SRCS = \
 	htmlelem2.c \
 	htmlelem3.c \
 	htmlelemcol.c \
+	htmlembed.c \
 	htmlevent.c \
 	htmlform.c \
 	htmlframe.c \
@@ -34,6 +31,7 @@ C_SRCS = \
 	htmlinput.c \
 	htmllocation.c \
 	htmlnode.c \
+	htmlobject.c \
 	htmloption.c \
 	htmlscreen.c \
 	htmlscript.c \
@@ -79,6 +77,7 @@ RC_SRCS = \
 	Es.rc \
 	Fi.rc \
 	Fr.rc \
+	He.rc \
 	Hu.rc \
 	It.rc \
 	Ja.rc \
@@ -91,6 +90,7 @@ RC_SRCS = \
 	Ro.rc \
 	Ru.rc \
 	Si.rc \
+	Sr.rc \
 	Sv.rc \
 	Tr.rc \
 	Uk.rc \

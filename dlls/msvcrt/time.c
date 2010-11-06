@@ -78,6 +78,19 @@ static inline void unix_tm_to_msvcrt( struct MSVCRT_tm *dest, const struct tm *s
     dest->tm_isdst = src->tm_isdst;
 }
 
+static inline void write_invalid_msvcrt_tm( struct MSVCRT_tm *tm )
+{
+    tm->tm_sec = -1;
+    tm->tm_min = -1;
+    tm->tm_hour = -1;
+    tm->tm_mday = -1;
+    tm->tm_mon = -1;
+    tm->tm_year = -1;
+    tm->tm_wday = -1;
+    tm->tm_yday = -1;
+    tm->tm_isdst = -1;
+}
+
 #define SECSPERDAY        86400
 /* 1601 to 1970 is 369 years plus 89 leap days */
 #define SECS_1601_TO_1970  ((369 * 365 + 89) * (ULONGLONG)SECSPERDAY)
@@ -206,12 +219,64 @@ struct MSVCRT_tm* CDECL MSVCRT__localtime64(const MSVCRT___time64_t* secs)
 }
 
 /*********************************************************************
+ *      _localtime64_s (MSVCRT.@)
+ */
+int CDECL _localtime64_s(struct MSVCRT_tm *time, const MSVCRT___time64_t *secs)
+{
+    struct tm *tm;
+    time_t seconds;
+
+    if (!time || !secs || *secs < 0 || *secs > _MAX__TIME64_T)
+    {
+        if (time)
+            write_invalid_msvcrt_tm(time);
+
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    seconds = *secs;
+
+    _mlock(_TIME_LOCK);
+    if (!(tm = localtime(&seconds)))
+    {
+        _munlock(_TIME_LOCK);
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    unix_tm_to_msvcrt(time, tm);
+    _munlock(_TIME_LOCK);
+    return 0;
+}
+
+/*********************************************************************
  *      _localtime32 (MSVCRT.@)
  */
 struct MSVCRT_tm* CDECL MSVCRT__localtime32(const MSVCRT___time32_t* secs)
 {
     MSVCRT___time64_t secs64 = *secs;
     return MSVCRT__localtime64( &secs64 );
+}
+
+/*********************************************************************
+ *      _localtime32_s (MSVCRT.@)
+ */
+int CDECL _localtime32_s(struct MSVCRT_tm *time, const MSVCRT___time32_t *secs)
+{
+    MSVCRT___time64_t secs64;
+
+    if (!time || !secs || *secs < 0)
+    {
+        if (time)
+            write_invalid_msvcrt_tm(time);
+
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    secs64 = *secs;
+    return _localtime64_s(time, &secs64);
 }
 
 /*********************************************************************
@@ -239,17 +304,9 @@ int CDECL MSVCRT__gmtime64_s(struct MSVCRT_tm *res, const MSVCRT___time64_t *sec
     SYSTEMTIME st;
     ULONGLONG time;
 
-    if(!res || !secs || *secs<0) {
-        if(res) {
-            res->tm_sec = -1;
-            res->tm_min = -1;
-            res->tm_hour = -1;
-            res->tm_mday = -1;
-            res->tm_year = -1;
-            res->tm_mon = -1;
-            res->tm_wday = -1;
-            res->tm_yday = -1;
-            res->tm_isdst = -1;
+    if (!res || !secs || *secs < 0) {
+        if (res) {
+            write_invalid_msvcrt_tm(res);
         }
 
         *MSVCRT__errno() = MSVCRT_EINVAL;
@@ -662,9 +719,43 @@ MSVCRT_long * CDECL MSVCRT___p__timezone(void)
  *  must be large enough.  The size is picked based on observation of
  *  Windows XP.
  */
-static char tzname_std[64] = "";
-static char tzname_dst[64] = "";
+static char tzname_std[64] = "PST";
+static char tzname_dst[64] = "PDT";
 char *MSVCRT__tzname[2] = { tzname_std, tzname_dst };
+
+/*********************************************************************
+ *		_get_tzname (MSVCRT.@)
+ */
+int CDECL MSVCRT__get_tzname(MSVCRT_size_t *ret, char *buf, MSVCRT_size_t bufsize, int index)
+{
+    char *timezone;
+
+    switch(index)
+    {
+    case 0:
+        timezone = tzname_std;
+        break;
+    case 1:
+        timezone = tzname_dst;
+        break;
+    default:
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    if(!ret || (!buf && bufsize > 0) || (buf && !bufsize))
+    {
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    *ret = strlen(timezone)+1;
+    if(!buf && !bufsize)
+        return 0;
+
+    strcpy(buf, timezone);
+    return 0;
+}
 
 /*********************************************************************
  *		__p_tzname (MSVCRT.@)
@@ -756,6 +847,9 @@ MSVCRT_size_t CDECL MSVCRT_wcsftime( MSVCRT_wchar_t *str, MSVCRT_size_t max,
  */
 char * CDECL MSVCRT_asctime(const struct MSVCRT_tm *mstm)
 {
+    char bufferA[30];
+    WCHAR bufferW[30];
+
     thread_data_t *data = msvcrt_get_thread_data();
     struct tm tm;
 
@@ -764,12 +858,13 @@ char * CDECL MSVCRT_asctime(const struct MSVCRT_tm *mstm)
     if (!data->asctime_buffer)
         data->asctime_buffer = MSVCRT_malloc( 30 ); /* ought to be enough */
 
-    /* FIXME: may want to map from Unix codepage to CP_ACP */
 #ifdef HAVE_ASCTIME_R
-    asctime_r( &tm, data->asctime_buffer );
+    asctime_r( &tm, bufferA );
 #else
-    strcpy( data->asctime_buffer, asctime(&tm) );
+    strcpy( bufferA, asctime(&tm) );
 #endif
+    MultiByteToWideChar( CP_UNIXCP, 0, bufferA, -1, bufferW, 30 );
+    WideCharToMultiByte( CP_ACP, 0, bufferW, -1, data->asctime_buffer, 30, NULL, NULL );
     return data->asctime_buffer;
 }
 

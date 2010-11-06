@@ -472,7 +472,7 @@ static void update_panestate(ExplorerBrowserImpl *This)
     else
         show_navpane = FALSE;
 
-    if(This->navpane.show ^ show_navpane)
+    if(This->navpane.show != show_navpane)
     {
         update_layout(This);
         size_panes(This);
@@ -1809,8 +1809,19 @@ static HRESULT WINAPI NSTCEvents_fnOnSelectionChanged(INameSpaceTreeControlEvent
                                                       IShellItemArray *psiaSelection)
 {
     ExplorerBrowserImpl *This = impl_from_INameSpaceTreeControlEvents(iface);
+    IShellItem *psi;
+    HRESULT hr;
     TRACE("%p (%p)\n", This, psiaSelection);
-    return E_NOTIMPL;
+
+    hr = IShellItemArray_GetItemAt(psiaSelection, 0, &psi);
+    if(SUCCEEDED(hr))
+    {
+        hr = IExplorerBrowser_BrowseToObject((IExplorerBrowser*)This,
+                                             (IUnknown*)psi, SBSP_DEFBROWSER);
+        IShellItem_Release(psi);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI NSTCEvents_fnOnKeyboardInput(INameSpaceTreeControlEvents *iface,

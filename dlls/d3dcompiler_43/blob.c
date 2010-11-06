@@ -23,7 +23,6 @@
 #include "wine/port.h"
 
 #include "d3dcompiler_private.h"
-#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dcompiler);
 
@@ -93,7 +92,7 @@ static SIZE_T STDMETHODCALLTYPE d3dcompiler_blob_GetBufferSize(ID3DBlob *iface)
     return blob->size;
 }
 
-const struct ID3D10BlobVtbl d3dcompiler_blob_vtbl =
+static const struct ID3D10BlobVtbl d3dcompiler_blob_vtbl =
 {
     /* IUnknown methods */
     d3dcompiler_blob_QueryInterface,
@@ -118,4 +117,260 @@ HRESULT d3dcompiler_blob_init(struct d3dcompiler_blob *blob, SIZE_T data_size)
     }
 
     return S_OK;
+}
+
+static BOOL check_blob_part(DWORD tag, D3D_BLOB_PART part)
+{
+    BOOL add = FALSE;
+
+    switch(part)
+    {
+        case D3D_BLOB_INPUT_SIGNATURE_BLOB:
+            if (tag == TAG_ISGN) add = TRUE;
+            break;
+
+        case D3D_BLOB_OUTPUT_SIGNATURE_BLOB:
+            if (tag == TAG_OSGN) add = TRUE;
+            break;
+
+        case D3D_BLOB_INPUT_AND_OUTPUT_SIGNATURE_BLOB:
+            if (tag == TAG_ISGN || tag == TAG_OSGN) add = TRUE;
+            break;
+
+        case D3D_BLOB_PATCH_CONSTANT_SIGNATURE_BLOB:
+            if (tag == TAG_PCSG) add = TRUE;
+            break;
+
+        case D3D_BLOB_ALL_SIGNATURE_BLOB:
+            if (tag == TAG_ISGN || tag == TAG_OSGN || tag == TAG_PCSG) add = TRUE;
+            break;
+
+        case D3D_BLOB_DEBUG_INFO:
+            if (tag == TAG_SDBG) add = TRUE;
+            break;
+
+        case D3D_BLOB_LEGACY_SHADER:
+            if (tag == TAG_Aon9) add = TRUE;
+            break;
+
+        case D3D_BLOB_XNA_PREPASS_SHADER:
+            if (tag == TAG_XNAP) add = TRUE;
+            break;
+
+        case D3D_BLOB_XNA_SHADER:
+            if (tag == TAG_XNAS) add = TRUE;
+            break;
+
+        default:
+            FIXME("Unhandled D3D_BLOB_PART %s.\n", debug_d3dcompiler_d3d_blob_part(part));
+            break;
+    }
+
+    TRACE("%s tag %s\n", add ? "Add" : "Skip", debugstr_an((const char *)&tag, 4));
+
+    return add;
+}
+
+HRESULT d3dcompiler_get_blob_part(const void *data, SIZE_T data_size, D3D_BLOB_PART part, UINT flags, ID3DBlob **blob)
+{
+    struct dxbc src_dxbc, dst_dxbc;
+    HRESULT hr;
+    unsigned int i, count;
+
+    if (!data || !data_size || flags || !blob)
+    {
+        WARN("Invalid arguments: data %p, data_size %lu, flags %#x, blob %p\n", data, data_size, flags, blob);
+        return D3DERR_INVALIDCALL;
+    }
+
+    if (part > D3D_BLOB_TEST_COMPILE_PERF
+            || (part < D3D_BLOB_TEST_ALTERNATE_SHADER && part > D3D_BLOB_XNA_SHADER))
+    {
+        WARN("Invalid D3D_BLOB_PART: part %s\n", debug_d3dcompiler_d3d_blob_part(part));
+        return D3DERR_INVALIDCALL;
+    }
+
+    hr = dxbc_parse(data, data_size, &src_dxbc);
+    if (FAILED(hr))
+    {
+        WARN("Failed to parse blob part\n");
+        return hr;
+    }
+
+    hr = dxbc_init(&dst_dxbc, 0);
+    if (FAILED(hr))
+    {
+        dxbc_destroy(&src_dxbc);
+        WARN("Failed to init dxbc\n");
+        return hr;
+    }
+
+    for (i = 0; i < src_dxbc.count; ++i)
+    {
+        struct dxbc_section *section = &src_dxbc.sections[i];
+
+        if (check_blob_part(section->tag, part))
+        {
+            hr = dxbc_add_section(&dst_dxbc, section->tag, section->data, section->data_size);
+            if (FAILED(hr))
+            {
+                dxbc_destroy(&src_dxbc);
+                dxbc_destroy(&dst_dxbc);
+                WARN("Failed to add section to dxbc\n");
+                return hr;
+            }
+        }
+    }
+
+    count = dst_dxbc.count;
+
+    switch(part)
+    {
+        case D3D_BLOB_INPUT_SIGNATURE_BLOB:
+        case D3D_BLOB_OUTPUT_SIGNATURE_BLOB:
+        case D3D_BLOB_PATCH_CONSTANT_SIGNATURE_BLOB:
+        case D3D_BLOB_DEBUG_INFO:
+        case D3D_BLOB_LEGACY_SHADER:
+        case D3D_BLOB_XNA_PREPASS_SHADER:
+        case D3D_BLOB_XNA_SHADER:
+            if (count != 1) count = 0;
+            break;
+
+        case D3D_BLOB_INPUT_AND_OUTPUT_SIGNATURE_BLOB:
+            if (count != 2) count = 0;
+            break;
+
+        case D3D_BLOB_ALL_SIGNATURE_BLOB:
+            if (count != 3) count = 0;
+            break;
+
+        default:
+            FIXME("Unhandled D3D_BLOB_PART %s.\n", debug_d3dcompiler_d3d_blob_part(part));
+            break;
+    }
+
+    if (count == 0)
+    {
+        dxbc_destroy(&src_dxbc);
+        dxbc_destroy(&dst_dxbc);
+        WARN("Nothing to write into the blob (count = 0)\n");
+        return E_FAIL;
+    }
+
+    /* some parts aren't full DXBCs, they contain only the data */
+    if (count == 1 && (part == D3D_BLOB_DEBUG_INFO || part == D3D_BLOB_LEGACY_SHADER || part == D3D_BLOB_XNA_PREPASS_SHADER
+            || part == D3D_BLOB_XNA_SHADER))
+    {
+        hr = D3DCreateBlob(dst_dxbc.sections[0].data_size, blob);
+        if (SUCCEEDED(hr))
+        {
+            memcpy(ID3D10Blob_GetBufferPointer(*blob), dst_dxbc.sections[0].data, dst_dxbc.sections[0].data_size);
+        }
+        else
+        {
+            WARN("Could not create blob\n");
+        }
+    }
+    else
+    {
+        hr = dxbc_write_blob(&dst_dxbc, blob);
+        if (FAILED(hr))
+        {
+            WARN("Failed to write blob part\n");
+        }
+    }
+
+    dxbc_destroy(&src_dxbc);
+    dxbc_destroy(&dst_dxbc);
+
+    return hr;
+}
+
+static BOOL check_blob_strip(DWORD tag, UINT flags)
+{
+    BOOL add = TRUE;
+
+    if (flags & D3DCOMPILER_STRIP_TEST_BLOBS) FIXME("Unhandled flag D3DCOMPILER_STRIP_TEST_BLOBS.\n");
+
+    switch(tag)
+    {
+        case TAG_RDEF:
+        case TAG_STAT:
+            if (flags & D3DCOMPILER_STRIP_REFLECTION_DATA) add = FALSE;
+            break;
+
+        case TAG_SDBG:
+            if (flags & D3DCOMPILER_STRIP_DEBUG_INFO) add = FALSE;
+            break;
+
+        default:
+            break;
+    }
+
+    TRACE("%s tag %s\n", add ? "Add" : "Skip", debugstr_an((const char *)&tag, 4));
+
+    return add;
+}
+
+HRESULT d3dcompiler_strip_shader(const void *data, SIZE_T data_size, UINT flags, ID3DBlob **blob)
+{
+    struct dxbc src_dxbc, dst_dxbc;
+    HRESULT hr;
+    unsigned int i;
+
+    if (!blob)
+    {
+        WARN("NULL for blob specified\n");
+        return E_FAIL;
+    }
+
+    if (!data || !data_size)
+    {
+        WARN("Invalid arguments: data %p, data_size %lu\n", data, data_size);
+        return D3DERR_INVALIDCALL;
+    }
+
+    hr = dxbc_parse(data, data_size, &src_dxbc);
+    if (FAILED(hr))
+    {
+        WARN("Failed to parse blob part\n");
+        return hr;
+    }
+
+    /* src_dxbc.count >= dst_dxbc.count */
+    hr = dxbc_init(&dst_dxbc, src_dxbc.count);
+    if (FAILED(hr))
+    {
+        dxbc_destroy(&src_dxbc);
+        WARN("Failed to init dxbc\n");
+        return hr;
+    }
+
+    for (i = 0; i < src_dxbc.count; ++i)
+    {
+        struct dxbc_section *section = &src_dxbc.sections[i];
+
+        if (check_blob_strip(section->tag, flags))
+        {
+            hr = dxbc_add_section(&dst_dxbc, section->tag, section->data, section->data_size);
+            if (FAILED(hr))
+            {
+                dxbc_destroy(&src_dxbc);
+                dxbc_destroy(&dst_dxbc);
+                WARN("Failed to add section to dxbc\n");
+                return hr;
+            }
+        }
+    }
+
+    hr = dxbc_write_blob(&dst_dxbc, blob);
+    if (FAILED(hr))
+    {
+        WARN("Failed to write blob part\n");
+    }
+
+    dxbc_destroy(&src_dxbc);
+    dxbc_destroy(&dst_dxbc);
+
+    return hr;
 }

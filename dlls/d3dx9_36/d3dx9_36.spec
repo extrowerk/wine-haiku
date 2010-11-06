@@ -4,7 +4,7 @@
 @ stdcall D3DXAssembleShaderFromResourceA(long str ptr ptr long ptr ptr)
 @ stdcall D3DXAssembleShaderFromResourceW(long wstr ptr ptr long ptr ptr)
 @ stdcall D3DXBoxBoundProbe(ptr ptr ptr ptr)
-@ stub D3DXCheckCubeTextureRequirements
+@ stdcall D3DXCheckCubeTextureRequirements(ptr ptr ptr long ptr ptr)
 @ stdcall D3DXCheckTextureRequirements(ptr ptr ptr ptr long ptr ptr)
 @ stdcall D3DXCheckVersion(long long)
 @ stub D3DXCheckVolumeTextureRequirements
@@ -34,7 +34,7 @@
 @ stdcall D3DXCreateBox(ptr float float float ptr ptr)
 @ stdcall D3DXCreateBuffer(long ptr)
 @ stub D3DXCreateCompressedAnimationSet
-@ stub D3DXCreateCubeTexture
+@ stdcall D3DXCreateCubeTexture(ptr long long long long long ptr)
 @ stub D3DXCreateCubeTextureFromFileA
 @ stub D3DXCreateCubeTextureFromFileExA
 @ stub D3DXCreateCubeTextureFromFileExW
@@ -45,7 +45,7 @@
 @ stub D3DXCreateCubeTextureFromResourceExA
 @ stub D3DXCreateCubeTextureFromResourceExW
 @ stub D3DXCreateCubeTextureFromResourceW
-@ stub D3DXCreateCylinder
+@ stdcall D3DXCreateCylinder(ptr long long long long long ptr ptr)
 @ stdcall D3DXCreateEffect(ptr ptr long ptr ptr long ptr ptr ptr)
 @ stdcall D3DXCreateEffectCompiler(ptr long ptr ptr long ptr ptr)
 @ stdcall D3DXCreateEffectCompilerFromFileA(str ptr ptr long ptr ptr)
@@ -72,7 +72,7 @@
 @ stdcall D3DXCreateLine(ptr ptr)
 @ stdcall D3DXCreateMatrixStack(long ptr)
 @ stdcall D3DXCreateMesh(long long long ptr ptr ptr)
-@ stub D3DXCreateMeshFVF
+@ stdcall D3DXCreateMeshFVF(long long long long ptr ptr)
 @ stub D3DXCreateNPatchMesh
 @ stub D3DXCreatePMeshFromStream
 @ stub D3DXCreatePatchMesh
@@ -89,7 +89,7 @@
 @ stub D3DXCreateSkinInfoFVF
 @ stdcall D3DXCreateSphere(ptr float long long ptr ptr)
 @ stdcall D3DXCreateSprite(ptr ptr)
-@ stub D3DXCreateTeapot
+@ stdcall D3DXCreateTeapot(ptr ptr ptr)
 @ stub D3DXCreateTextA
 @ stub D3DXCreateTextW
 @ stdcall D3DXCreateTexture(ptr long long long long long long ptr)
@@ -99,10 +99,10 @@
 @ stdcall D3DXCreateTextureFromFileInMemory(ptr ptr long ptr)
 @ stdcall D3DXCreateTextureFromFileInMemoryEx(ptr ptr long long long long long long long long long long ptr ptr ptr)
 @ stdcall D3DXCreateTextureFromFileW(ptr wstr ptr)
-@ stub D3DXCreateTextureFromResourceA
-@ stub D3DXCreateTextureFromResourceExA
-@ stub D3DXCreateTextureFromResourceExW
-@ stub D3DXCreateTextureFromResourceW
+@ stdcall D3DXCreateTextureFromResourceA(ptr ptr str ptr)
+@ stdcall D3DXCreateTextureFromResourceExA(ptr ptr str long long long long long long long long long ptr ptr ptr)
+@ stdcall D3DXCreateTextureFromResourceExW(ptr ptr wstr long long long long long long long long long ptr ptr ptr)
+@ stdcall D3DXCreateTextureFromResourceW(ptr ptr wstr ptr)
 @ stub D3DXCreateTextureGutterHelper
 @ stub D3DXCreateTextureShader
 @ stub D3DXCreateTorus
@@ -147,7 +147,7 @@
 @ stub D3DXGatherFragmentsFromResourceW
 @ stub D3DXGenerateOutputDecl
 @ stub D3DXGeneratePMesh
-@ stub D3DXGetDeclLength
+@ stdcall D3DXGetDeclLength(ptr)
 @ stdcall D3DXGetDeclVertexSize(ptr long)
 @ stdcall D3DXGetDriverLevel(ptr)
 @ stdcall D3DXGetFVFVertexSize(long)
@@ -236,11 +236,11 @@
 @ stdcall D3DXPlaneNormalize(ptr ptr)
 @ stdcall D3DXPlaneTransform(ptr ptr ptr)
 @ stdcall D3DXPlaneTransformArray(ptr long ptr long ptr long)
-@ stub D3DXPreprocessShader
-@ stub D3DXPreprocessShaderFromFileA
-@ stub D3DXPreprocessShaderFromFileW
-@ stub D3DXPreprocessShaderFromResourceA
-@ stub D3DXPreprocessShaderFromResourceW
+@ stdcall D3DXPreprocessShader(ptr long ptr ptr ptr ptr)
+@ stdcall D3DXPreprocessShaderFromFileA(str ptr ptr ptr ptr)
+@ stdcall D3DXPreprocessShaderFromFileW(wstr ptr ptr ptr ptr)
+@ stdcall D3DXPreprocessShaderFromResourceA(long str ptr ptr ptr ptr)
+@ stdcall D3DXPreprocessShaderFromResourceW(long wstr ptr ptr ptr ptr)
 @ stdcall D3DXQuaternionBaryCentric(ptr ptr ptr ptr float float)
 @ stdcall D3DXQuaternionExp(ptr ptr)
 @ stdcall D3DXQuaternionInverse(ptr ptr)

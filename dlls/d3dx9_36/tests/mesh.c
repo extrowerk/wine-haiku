@@ -58,6 +58,9 @@ struct mesh
 
     DWORD number_of_faces;
     face *faces;
+
+    DWORD fvf;
+    UINT vertex_size;
 };
 
 static void free_mesh(struct mesh *mesh)
@@ -132,11 +135,18 @@ static void compare_mesh(const char *name, ID3DXMesh *d3dxmesh, struct mesh *mes
             ok(vertex_buffer_description.Usage == 0, "Test %s, result %x, expected %x\n", name, vertex_buffer_description.Usage, 0);
             ok(vertex_buffer_description.Pool == D3DPOOL_MANAGED, "Test %s, result %x, expected %x (D3DPOOL_DEFAULT)\n",
                name, vertex_buffer_description.Pool, D3DPOOL_DEFAULT);
-            expected = number_of_vertices * sizeof(D3DXVECTOR3) * 2;
+            ok(vertex_buffer_description.FVF == mesh->fvf, "Test %s, result %x, expected %x\n",
+               name, vertex_buffer_description.FVF, mesh->fvf);
+            if (mesh->fvf == 0)
+            {
+                expected = number_of_vertices * mesh->vertex_size;
+            }
+            else
+            {
+                expected = number_of_vertices * D3DXGetFVFVertexSize(mesh->fvf);
+            }
             ok(vertex_buffer_description.Size == expected, "Test %s, result %x, expected %x\n",
                name, vertex_buffer_description.Size, expected);
-            ok(vertex_buffer_description.FVF == (D3DFVF_XYZ | D3DFVF_NORMAL), "Test %s, result %x, expected %x (D3DFVF_XYZ | D3DFVF_NORMAL)\n",
-               name, vertex_buffer_description.FVF, D3DFVF_XYZ | D3DFVF_NORMAL);
         }
 
         /* specify offset and size to avoid potential overruns */
@@ -191,7 +201,7 @@ static void compare_mesh(const char *name, ID3DXMesh *d3dxmesh, struct mesh *mes
                name, index_buffer_description.Format, D3DFMT_INDEX16);
             ok(index_buffer_description.Type == D3DRTYPE_INDEXBUFFER, "Test %s, result %x, expected %x (D3DRTYPE_INDEXBUFFER)\n",
                name, index_buffer_description.Type, D3DRTYPE_INDEXBUFFER);
-            ok(index_buffer_description.Usage == 0, "Test %s, result %x, expected %x\n", name, index_buffer_description.Usage, 0);
+            todo_wine ok(index_buffer_description.Usage == 0, "Test %s, result %x, expected %x\n", name, index_buffer_description.Usage, 0);
             ok(index_buffer_description.Pool == D3DPOOL_MANAGED, "Test %s, result %x, expected %x (D3DPOOL_DEFAULT)\n",
                name, index_buffer_description.Pool, D3DPOOL_DEFAULT);
             expected = number_of_faces * sizeof(WORD) * 3;
@@ -826,6 +836,8 @@ static void test_fvf_decl_conversion(void)
         };
         test_decl_to_fvf(decl, 0, D3DERR_INVALIDCALL, __LINE__, 0);
     }
+    /* Invalid FVFs cannot be converted to a declarator. */
+    test_fvf_to_decl(0xdeadbeef, NULL, D3DERR_INVALIDCALL, __LINE__, 0);
 }
 
 static void D3DXGetFVFVertexSizeTest(void)
@@ -995,19 +1007,30 @@ static void D3DXCreateMeshTest(void)
     ID3DXMesh *d3dxmesh;
     int i, size;
     D3DVERTEXELEMENT9 test_decl[MAX_FVF_DECL_SIZE];
-    DWORD fvf, options;
+    DWORD options;
     struct mesh mesh;
 
-    static const D3DVERTEXELEMENT9 decl[3] = {
+    static const D3DVERTEXELEMENT9 decl1[3] = {
         {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-        {0, 0xC, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL, 0},
+        {0, 12, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL, 0},
         D3DDECL_END(), };
 
-    hr = D3DXCreateMesh(0, 0, 0, NULL, NULL, NULL);
-    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+    static const D3DVERTEXELEMENT9 decl2[] = {
+        {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, 12, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL, 0},
+        {0, 24, D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_PSIZE, 0},
+        {0, 28, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 1},
+        {0, 32, D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+        /* 8 bytes padding */
+        {0, 44, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},
+        D3DDECL_END(),
+    };
 
-    hr = D3DXCreateMesh(1, 3, D3DXMESH_MANAGED, (LPD3DVERTEXELEMENT9 *)&decl, NULL, &d3dxmesh);
-    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+    hr = D3DXCreateMesh(0, 0, 0, NULL, NULL, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateMesh(1, 3, D3DXMESH_MANAGED, decl1, NULL, &d3dxmesh);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
     wnd = CreateWindow("static", "d3dx9_test", 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
     if (!wnd)
@@ -1035,14 +1058,14 @@ static void D3DXCreateMeshTest(void)
         return;
     }
 
-    hr = D3DXCreateMesh(0, 3, D3DXMESH_MANAGED, (LPD3DVERTEXELEMENT9 *)&decl, device, &d3dxmesh);
-    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+    hr = D3DXCreateMesh(0, 3, D3DXMESH_MANAGED, decl1, device, &d3dxmesh);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
-    hr = D3DXCreateMesh(1, 0, D3DXMESH_MANAGED, (LPD3DVERTEXELEMENT9 *)&decl, device, &d3dxmesh);
-    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+    hr = D3DXCreateMesh(1, 0, D3DXMESH_MANAGED, decl1, device, &d3dxmesh);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
-    hr = D3DXCreateMesh(1, 3, 0, (LPD3DVERTEXELEMENT9 *)&decl, device, &d3dxmesh);
-    todo_wine ok(hr == D3D_OK, "Got result %x, expected %x (D3D_OK)\n", hr, D3D_OK);
+    hr = D3DXCreateMesh(1, 3, 0, decl1, device, &d3dxmesh);
+    ok(hr == D3D_OK, "Got result %x, expected %x (D3D_OK)\n", hr, D3D_OK);
 
     if (hr == D3D_OK)
     {
@@ -1050,13 +1073,77 @@ static void D3DXCreateMeshTest(void)
     }
 
     hr = D3DXCreateMesh(1, 3, D3DXMESH_MANAGED, 0, device, &d3dxmesh);
-    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
-    hr = D3DXCreateMesh(1, 3, D3DXMESH_MANAGED, (LPD3DVERTEXELEMENT9 *)&decl, device, NULL);
-    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+    hr = D3DXCreateMesh(1, 3, D3DXMESH_MANAGED, decl1, device, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
-    hr = D3DXCreateMesh(1, 3, D3DXMESH_MANAGED, (LPD3DVERTEXELEMENT9 *)&decl, device, &d3dxmesh);
-    todo_wine ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
+    hr = D3DXCreateMesh(1, 3, D3DXMESH_MANAGED, decl1, device, &d3dxmesh);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
+
+    if (hr == D3D_OK)
+    {
+        /* device */
+        hr = d3dxmesh->lpVtbl->GetDevice(d3dxmesh, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+        hr = d3dxmesh->lpVtbl->GetDevice(d3dxmesh, &test_device);
+        ok(hr == D3D_OK, "Got result %x, expected %x (D3D_OK)\n", hr, D3D_OK);
+        ok(test_device == device, "Got result %p, expected %p\n", test_device, device);
+
+        if (hr == D3D_OK)
+        {
+            IDirect3DDevice9_Release(device);
+        }
+
+        /* declaration */
+        hr = d3dxmesh->lpVtbl->GetDeclaration(d3dxmesh, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+        hr = d3dxmesh->lpVtbl->GetDeclaration(d3dxmesh, test_decl);
+        ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
+
+        if (hr == D3D_OK)
+        {
+            size = sizeof(decl1) / sizeof(decl1[0]);
+            for (i = 0; i < size - 1; i++)
+            {
+                ok(test_decl[i].Stream == decl1[i].Stream, "Returned stream %d, expected %d\n", test_decl[i].Stream, decl1[i].Stream);
+                ok(test_decl[i].Type == decl1[i].Type, "Returned type %d, expected %d\n", test_decl[i].Type, decl1[i].Type);
+                ok(test_decl[i].Method == decl1[i].Method, "Returned method %d, expected %d\n", test_decl[i].Method, decl1[i].Method);
+                ok(test_decl[i].Usage == decl1[i].Usage, "Returned usage %d, expected %d\n", test_decl[i].Usage, decl1[i].Usage);
+                ok(test_decl[i].UsageIndex == decl1[i].UsageIndex, "Returned usage index %d, expected %d\n", test_decl[i].UsageIndex, decl1[i].UsageIndex);
+                ok(test_decl[i].Offset == decl1[i].Offset, "Returned offset %d, expected %d\n", test_decl[i].Offset, decl1[i].Offset);
+            }
+            ok(decl1[size-1].Stream == 0xFF, "Returned too long vertex declaration\n"); /* end element */
+        }
+
+        /* options */
+        options = d3dxmesh->lpVtbl->GetOptions(d3dxmesh);
+        ok(options == D3DXMESH_MANAGED, "Got result %x, expected %x (D3DXMESH_MANAGED)\n", options, D3DXMESH_MANAGED);
+
+        /* rest */
+        if (!new_mesh(&mesh, 3, 1))
+        {
+            skip("Couldn't create mesh\n");
+        }
+        else
+        {
+            memset(mesh.vertices, 0, mesh.number_of_vertices * sizeof(*mesh.vertices));
+            memset(mesh.faces, 0, mesh.number_of_faces * sizeof(*mesh.faces));
+            mesh.fvf = D3DFVF_XYZ | D3DFVF_NORMAL;
+
+            compare_mesh("createmesh1", d3dxmesh, &mesh);
+
+            free_mesh(&mesh);
+        }
+
+        d3dxmesh->lpVtbl->Release(d3dxmesh);
+    }
+
+    /* Test a declaration that can't be converted to an FVF. */
+    hr = D3DXCreateMesh(1, 3, D3DXMESH_MANAGED, decl2, device, &d3dxmesh);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
 
     if (hr == D3D_OK)
     {
@@ -1079,22 +1166,18 @@ static void D3DXCreateMeshTest(void)
 
         if (hr == D3D_OK)
         {
-            size = sizeof(decl) / sizeof(decl[0]);
+            size = sizeof(decl2) / sizeof(decl2[0]);
             for (i = 0; i < size - 1; i++)
             {
-                ok(test_decl[i].Stream == decl[i].Stream, "Returned stream %d, expected %d\n", test_decl[i].Stream, decl[i].Stream);
-                ok(test_decl[i].Type == decl[i].Type, "Returned type %d, expected %d\n", test_decl[i].Type, decl[i].Type);
-                ok(test_decl[i].Method == decl[i].Method, "Returned method %d, expected %d\n", test_decl[i].Method, decl[i].Method);
-                ok(test_decl[i].Usage == decl[i].Usage, "Returned usage %d, expected %d\n", test_decl[i].Usage, decl[i].Usage);
-                ok(test_decl[i].UsageIndex == decl[i].UsageIndex, "Returned usage index %d, expected %d\n", test_decl[i].UsageIndex, decl[i].UsageIndex);
-                ok(test_decl[i].Offset == decl[i].Offset, "Returned offset %d, expected %d\n", decl[1].Offset, decl[i].Offset);
+                ok(test_decl[i].Stream == decl2[i].Stream, "Returned stream %d, expected %d\n", test_decl[i].Stream, decl2[i].Stream);
+                ok(test_decl[i].Type == decl2[i].Type, "Returned type %d, expected %d\n", test_decl[i].Type, decl2[i].Type);
+                ok(test_decl[i].Method == decl2[i].Method, "Returned method %d, expected %d\n", test_decl[i].Method, decl2[i].Method);
+                ok(test_decl[i].Usage == decl2[i].Usage, "Returned usage %d, expected %d\n", test_decl[i].Usage, decl2[i].Usage);
+                ok(test_decl[i].UsageIndex == decl2[i].UsageIndex, "Returned usage index %d, expected %d\n", test_decl[i].UsageIndex, decl2[i].UsageIndex);
+                ok(test_decl[i].Offset == decl2[i].Offset, "Returned offset %d, expected %d\n", test_decl[i].Offset, decl2[i].Offset);
             }
-            ok(decl[size-1].Stream == 0xFF, "Returned too long vertex declaration\n"); /* end element */
+            ok(decl2[size-1].Stream == 0xFF, "Returned too long vertex declaration\n"); /* end element */
         }
-
-        /* FVF */
-        fvf = d3dxmesh->lpVtbl->GetFVF(d3dxmesh);
-        ok(fvf == (D3DFVF_XYZ | D3DFVF_NORMAL), "Got result %x, expected %x (D3DFVF_XYZ | D3DFVF_NORMAL)\n", fvf, D3DFVF_XYZ | D3DFVF_NORMAL);
 
         /* options */
         options = d3dxmesh->lpVtbl->GetOptions(d3dxmesh);
@@ -1109,6 +1192,147 @@ static void D3DXCreateMeshTest(void)
         {
             memset(mesh.vertices, 0, mesh.number_of_vertices * sizeof(*mesh.vertices));
             memset(mesh.faces, 0, mesh.number_of_faces * sizeof(*mesh.faces));
+            mesh.fvf = 0;
+            mesh.vertex_size = 60;
+
+            compare_mesh("createmesh2", d3dxmesh, &mesh);
+
+            free_mesh(&mesh);
+        }
+
+        d3dxmesh->lpVtbl->Release(d3dxmesh);
+    }
+
+    IDirect3DDevice9_Release(device);
+    IDirect3D9_Release(d3d);
+    DestroyWindow(wnd);
+}
+
+static void D3DXCreateMeshFVFTest(void)
+{
+    HRESULT hr;
+    HWND wnd;
+    IDirect3D9 *d3d;
+    IDirect3DDevice9 *device, *test_device;
+    D3DPRESENT_PARAMETERS d3dpp;
+    ID3DXMesh *d3dxmesh;
+    int i, size;
+    D3DVERTEXELEMENT9 test_decl[MAX_FVF_DECL_SIZE];
+    DWORD options;
+    struct mesh mesh;
+
+    static const D3DVERTEXELEMENT9 decl[3] = {
+        {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, 12, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL, 0},
+        D3DDECL_END(), };
+
+    hr = D3DXCreateMeshFVF(0, 0, 0, 0, NULL, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateMeshFVF(1, 3, D3DXMESH_MANAGED, D3DFVF_XYZ | D3DFVF_NORMAL, NULL, &d3dxmesh);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+    wnd = CreateWindow("static", "d3dx9_test", 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
+    if (!wnd)
+    {
+        skip("Couldn't create application window\n");
+        return;
+    }
+    d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    if (!d3d)
+    {
+        skip("Couldn't create IDirect3D9 object\n");
+        DestroyWindow(wnd);
+        return;
+    }
+
+    ZeroMemory(&d3dpp, sizeof(d3dpp));
+    d3dpp.Windowed = TRUE;
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_MIXED_VERTEXPROCESSING, &d3dpp, &device);
+    if (FAILED(hr))
+    {
+        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
+        IDirect3D9_Release(d3d);
+        DestroyWindow(wnd);
+        return;
+    }
+
+    hr = D3DXCreateMeshFVF(0, 3, D3DXMESH_MANAGED, D3DFVF_XYZ | D3DFVF_NORMAL, device, &d3dxmesh);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateMeshFVF(1, 0, D3DXMESH_MANAGED, D3DFVF_XYZ | D3DFVF_NORMAL, device, &d3dxmesh);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateMeshFVF(1, 3, 0, D3DFVF_XYZ | D3DFVF_NORMAL, device, &d3dxmesh);
+    ok(hr == D3D_OK, "Got result %x, expected %x (D3D_OK)\n", hr, D3D_OK);
+
+    if (hr == D3D_OK)
+    {
+        d3dxmesh->lpVtbl->Release(d3dxmesh);
+    }
+
+    hr = D3DXCreateMeshFVF(1, 3, D3DXMESH_MANAGED, 0xdeadbeef, device, &d3dxmesh);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateMeshFVF(1, 3, D3DXMESH_MANAGED, D3DFVF_XYZ | D3DFVF_NORMAL, device, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateMeshFVF(1, 3, D3DXMESH_MANAGED, D3DFVF_XYZ | D3DFVF_NORMAL, device, &d3dxmesh);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
+
+    if (hr == D3D_OK)
+    {
+        /* device */
+        hr = d3dxmesh->lpVtbl->GetDevice(d3dxmesh, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+        hr = d3dxmesh->lpVtbl->GetDevice(d3dxmesh, &test_device);
+        ok(hr == D3D_OK, "Got result %x, expected %x (D3D_OK)\n", hr, D3D_OK);
+        ok(test_device == device, "Got result %p, expected %p\n", test_device, device);
+
+        if (hr == D3D_OK)
+        {
+            IDirect3DDevice9_Release(device);
+        }
+
+        /* declaration */
+        hr = d3dxmesh->lpVtbl->GetDeclaration(d3dxmesh, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+
+        hr = d3dxmesh->lpVtbl->GetDeclaration(d3dxmesh, test_decl);
+        ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
+
+        if (hr == D3D_OK)
+        {
+            size = sizeof(decl) / sizeof(decl[0]);
+            for (i = 0; i < size - 1; i++)
+            {
+                ok(test_decl[i].Stream == decl[i].Stream, "Returned stream %d, expected %d\n", test_decl[i].Stream, decl[i].Stream);
+                ok(test_decl[i].Type == decl[i].Type, "Returned type %d, expected %d\n", test_decl[i].Type, decl[i].Type);
+                ok(test_decl[i].Method == decl[i].Method, "Returned method %d, expected %d\n", test_decl[i].Method, decl[i].Method);
+                ok(test_decl[i].Usage == decl[i].Usage, "Returned usage %d, expected %d\n", test_decl[i].Usage, decl[i].Usage);
+                ok(test_decl[i].UsageIndex == decl[i].UsageIndex, "Returned usage index %d, expected %d\n",
+                   test_decl[i].UsageIndex, decl[i].UsageIndex);
+                ok(test_decl[i].Offset == decl[i].Offset, "Returned offset %d, expected %d\n", test_decl[i].Offset, decl[i].Offset);
+            }
+            ok(decl[size-1].Stream == 0xFF, "Returned too long vertex declaration\n"); /* end element */
+        }
+
+        /* options */
+        options = d3dxmesh->lpVtbl->GetOptions(d3dxmesh);
+        ok(options == D3DXMESH_MANAGED, "Got result %x, expected %x (D3DXMESH_MANAGED)\n", options, D3DXMESH_MANAGED);
+
+        /* rest */
+        if (!new_mesh(&mesh, 3, 1))
+        {
+            skip("Couldn't create mesh\n");
+        }
+        else
+        {
+            memset(mesh.vertices, 0, mesh.number_of_vertices * sizeof(*mesh.vertices));
+            memset(mesh.faces, 0, mesh.number_of_faces * sizeof(*mesh.faces));
+            mesh.fvf = D3DFVF_XYZ | D3DFVF_NORMAL;
 
             compare_mesh("createmeshfvf", d3dxmesh, &mesh);
 
@@ -1164,7 +1388,7 @@ static BOOL compute_sincos_table(struct sincos_table *sincos_table, float angle_
     return TRUE;
 }
 
-static WORD sphere_vertex(UINT slices, int slice, int stack)
+static WORD vertex_index(UINT slices, int slice, int stack)
 {
     return stack*slices+slice+1;
 }
@@ -1245,14 +1469,14 @@ static BOOL compute_sphere(struct mesh *mesh, FLOAT radius, UINT slices, UINT st
                 else
                 {
                     /* stacks in between top and bottom are quad strips */
-                    mesh->faces[face][0] = sphere_vertex(slices, slice-1, stack-1);
-                    mesh->faces[face][1] = sphere_vertex(slices, slice, stack-1);
-                    mesh->faces[face][2] = sphere_vertex(slices, slice-1, stack);
+                    mesh->faces[face][0] = vertex_index(slices, slice-1, stack-1);
+                    mesh->faces[face][1] = vertex_index(slices, slice, stack-1);
+                    mesh->faces[face][2] = vertex_index(slices, slice-1, stack);
                     face++;
 
-                    mesh->faces[face][0] = sphere_vertex(slices, slice, stack-1);
-                    mesh->faces[face][1] = sphere_vertex(slices, slice, stack);
-                    mesh->faces[face][2] = sphere_vertex(slices, slice-1, stack);
+                    mesh->faces[face][0] = vertex_index(slices, slice, stack-1);
+                    mesh->faces[face][1] = vertex_index(slices, slice, stack);
+                    mesh->faces[face][2] = vertex_index(slices, slice-1, stack);
                     face++;
                 }
             }
@@ -1267,14 +1491,14 @@ static BOOL compute_sphere(struct mesh *mesh, FLOAT radius, UINT slices, UINT st
         }
         else
         {
-            mesh->faces[face][0] = sphere_vertex(slices, slice-1, stack-1);
-            mesh->faces[face][1] = sphere_vertex(slices, 0, stack-1);
-            mesh->faces[face][2] = sphere_vertex(slices, slice-1, stack);
+            mesh->faces[face][0] = vertex_index(slices, slice-1, stack-1);
+            mesh->faces[face][1] = vertex_index(slices, 0, stack-1);
+            mesh->faces[face][2] = vertex_index(slices, slice-1, stack);
             face++;
 
-            mesh->faces[face][0] = sphere_vertex(slices, 0, stack-1);
-            mesh->faces[face][1] = sphere_vertex(slices, 0, stack);
-            mesh->faces[face][2] = sphere_vertex(slices, slice-1, stack);
+            mesh->faces[face][0] = vertex_index(slices, 0, stack-1);
+            mesh->faces[face][1] = vertex_index(slices, 0, stack);
+            mesh->faces[face][2] = vertex_index(slices, slice-1, stack);
             face++;
         }
     }
@@ -1289,14 +1513,14 @@ static BOOL compute_sphere(struct mesh *mesh, FLOAT radius, UINT slices, UINT st
     /* bottom stack is triangle fan */
     for (slice = 1; slice < slices; slice++)
     {
-        mesh->faces[face][0] = sphere_vertex(slices, slice-1, stack-1);
-        mesh->faces[face][1] = sphere_vertex(slices, slice, stack-1);
+        mesh->faces[face][0] = vertex_index(slices, slice-1, stack-1);
+        mesh->faces[face][1] = vertex_index(slices, slice, stack-1);
         mesh->faces[face][2] = vertex;
         face++;
     }
 
-    mesh->faces[face][0] = sphere_vertex(slices, slice-1, stack-1);
-    mesh->faces[face][1] = sphere_vertex(slices, 0, stack-1);
+    mesh->faces[face][0] = vertex_index(slices, slice-1, stack-1);
+    mesh->faces[face][1] = vertex_index(slices, 0, stack-1);
     mesh->faces[face][2] = vertex;
 
     free_sincos_table(&phi);
@@ -1313,7 +1537,7 @@ static void test_sphere(IDirect3DDevice9 *device, FLOAT radius, UINT slices, UIN
     char name[256];
 
     hr = D3DXCreateSphere(device, radius, slices, stacks, &sphere, NULL);
-    todo_wine ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
     if (hr != D3D_OK)
     {
         skip("Couldn't create sphere\n");
@@ -1326,6 +1550,8 @@ static void test_sphere(IDirect3DDevice9 *device, FLOAT radius, UINT slices, UIN
         sphere->lpVtbl->Release(sphere);
         return;
     }
+
+    mesh.fvf = D3DFVF_XYZ | D3DFVF_NORMAL;
 
     sprintf(name, "sphere (%g, %u, %u)", radius, slices, stacks);
     compare_mesh(name, sphere, &mesh);
@@ -1345,16 +1571,16 @@ static void D3DXCreateSphereTest(void)
     ID3DXMesh* sphere = NULL;
 
     hr = D3DXCreateSphere(NULL, 0.0f, 0, 0, NULL, NULL);
-    todo_wine ok( hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
 
     hr = D3DXCreateSphere(NULL, 0.1f, 0, 0, NULL, NULL);
-    todo_wine ok( hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
 
     hr = D3DXCreateSphere(NULL, 0.0f, 1, 0, NULL, NULL);
-    todo_wine ok( hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
 
     hr = D3DXCreateSphere(NULL, 0.0f, 0, 1, NULL, NULL);
-    todo_wine ok( hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
 
     wnd = CreateWindow("static", "d3dx9_test", 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
     d3d = Direct3DCreate9(D3D_SDK_VERSION);
@@ -1383,16 +1609,16 @@ static void D3DXCreateSphereTest(void)
     }
 
     hr = D3DXCreateSphere(device, 1.0f, 1, 1, &sphere, NULL);
-    todo_wine ok( hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
 
     hr = D3DXCreateSphere(device, 1.0f, 2, 1, &sphere, NULL);
-    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
     hr = D3DXCreateSphere(device, 1.0f, 1, 2, &sphere, NULL);
-    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
     hr = D3DXCreateSphere(device, -0.1f, 1, 2, &sphere, NULL);
-    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
     test_sphere(device, 0.0f, 2, 2);
     test_sphere(device, 1.0f, 2, 2);
@@ -1405,6 +1631,331 @@ static void D3DXCreateSphereTest(void)
     IDirect3DDevice9_Release(device);
     IDirect3D9_Release(d3d);
     DestroyWindow(wnd);
+}
+
+static BOOL compute_cylinder(struct mesh *mesh, FLOAT radius1, FLOAT radius2, FLOAT length, UINT slices, UINT stacks)
+{
+    float theta_step, theta_start;
+    struct sincos_table theta;
+    FLOAT delta_radius, radius, radius_step;
+    FLOAT z, z_step, z_normal;
+    DWORD number_of_vertices, number_of_faces;
+    DWORD vertex, face;
+    int slice, stack;
+
+    /* theta = angle on xy plane wrt x axis */
+    theta_step = -2 * M_PI / slices;
+    theta_start = M_PI / 2;
+
+    if (!compute_sincos_table(&theta, theta_start, theta_step, slices))
+    {
+        return FALSE;
+    }
+
+    number_of_vertices = 2 + (slices * (3 + stacks));
+    number_of_faces = 2 * slices + stacks * (2 * slices);
+
+    if (!new_mesh(mesh, number_of_vertices, number_of_faces))
+    {
+        free_sincos_table(&theta);
+        return FALSE;
+    }
+
+    vertex = 0;
+    face = 0;
+    stack = 0;
+
+    delta_radius = radius1 - radius2;
+    radius = radius1;
+    radius_step = delta_radius / stacks;
+
+    z = -length / 2;
+    z_step = length / stacks;
+    z_normal = delta_radius / length;
+    if (isnan(z_normal))
+    {
+        z_normal = 0.0f;
+    }
+
+    mesh->vertices[vertex].normal.x = 0.0f;
+    mesh->vertices[vertex].normal.y = 0.0f;
+    mesh->vertices[vertex].normal.z = -1.0f;
+    mesh->vertices[vertex].position.x = 0.0f;
+    mesh->vertices[vertex].position.y = 0.0f;
+    mesh->vertices[vertex++].position.z = z;
+
+    for (slice = 0; slice < slices; slice++, vertex++)
+    {
+        mesh->vertices[vertex].normal.x = 0.0f;
+        mesh->vertices[vertex].normal.y = 0.0f;
+        mesh->vertices[vertex].normal.z = -1.0f;
+        mesh->vertices[vertex].position.x = radius * theta.cos[slice];
+        mesh->vertices[vertex].position.y = radius * theta.sin[slice];
+        mesh->vertices[vertex].position.z = z;
+
+        if (slice > 0)
+        {
+            mesh->faces[face][0] = 0;
+            mesh->faces[face][1] = slice;
+            mesh->faces[face++][2] = slice + 1;
+        }
+    }
+
+    mesh->faces[face][0] = 0;
+    mesh->faces[face][1] = slice;
+    mesh->faces[face++][2] = 1;
+
+    for (stack = 1; stack <= stacks+1; stack++)
+    {
+        for (slice = 0; slice < slices; slice++, vertex++)
+        {
+            mesh->vertices[vertex].normal.x = theta.cos[slice];
+            mesh->vertices[vertex].normal.y = theta.sin[slice];
+            mesh->vertices[vertex].normal.z = z_normal;
+            D3DXVec3Normalize(&mesh->vertices[vertex].normal, &mesh->vertices[vertex].normal);
+            mesh->vertices[vertex].position.x = radius * theta.cos[slice];
+            mesh->vertices[vertex].position.y = radius * theta.sin[slice];
+            mesh->vertices[vertex].position.z = z;
+
+            if (stack > 1 && slice > 0)
+            {
+                mesh->faces[face][0] = vertex_index(slices, slice-1, stack-1);
+                mesh->faces[face][1] = vertex_index(slices, slice-1, stack);
+                mesh->faces[face++][2] = vertex_index(slices, slice, stack-1);
+
+                mesh->faces[face][0] = vertex_index(slices, slice, stack-1);
+                mesh->faces[face][1] = vertex_index(slices, slice-1, stack);
+                mesh->faces[face++][2] = vertex_index(slices, slice, stack);
+            }
+        }
+
+        if (stack > 1)
+        {
+            mesh->faces[face][0] = vertex_index(slices, slice-1, stack-1);
+            mesh->faces[face][1] = vertex_index(slices, slice-1, stack);
+            mesh->faces[face++][2] = vertex_index(slices, 0, stack-1);
+
+            mesh->faces[face][0] = vertex_index(slices, 0, stack-1);
+            mesh->faces[face][1] = vertex_index(slices, slice-1, stack);
+            mesh->faces[face++][2] = vertex_index(slices, 0, stack);
+        }
+
+        if (stack < stacks + 1)
+        {
+            z += z_step;
+            radius -= radius_step;
+        }
+    }
+
+    for (slice = 0; slice < slices; slice++, vertex++)
+    {
+        mesh->vertices[vertex].normal.x = 0.0f;
+        mesh->vertices[vertex].normal.y = 0.0f;
+        mesh->vertices[vertex].normal.z = 1.0f;
+        mesh->vertices[vertex].position.x = radius * theta.cos[slice];
+        mesh->vertices[vertex].position.y = radius * theta.sin[slice];
+        mesh->vertices[vertex].position.z = z;
+
+        if (slice > 0)
+        {
+            mesh->faces[face][0] = vertex_index(slices, slice-1, stack);
+            mesh->faces[face][1] = number_of_vertices - 1;
+            mesh->faces[face++][2] = vertex_index(slices, slice, stack);
+        }
+    }
+
+    mesh->vertices[vertex].position.x = 0.0f;
+    mesh->vertices[vertex].position.y = 0.0f;
+    mesh->vertices[vertex].position.z = z;
+    mesh->vertices[vertex].normal.x = 0.0f;
+    mesh->vertices[vertex].normal.y = 0.0f;
+    mesh->vertices[vertex].normal.z = 1.0f;
+
+    mesh->faces[face][0] = vertex_index(slices, slice-1, stack);
+    mesh->faces[face][1] = number_of_vertices - 1;
+    mesh->faces[face][2] = vertex_index(slices, 0, stack);
+
+    free_sincos_table(&theta);
+
+    return TRUE;
+}
+
+static void test_cylinder(IDirect3DDevice9 *device, FLOAT radius1, FLOAT radius2, FLOAT length, UINT slices, UINT stacks)
+{
+    HRESULT hr;
+    ID3DXMesh *cylinder;
+    struct mesh mesh;
+    char name[256];
+
+    hr = D3DXCreateCylinder(device, radius1, radius2, length, slices, stacks, &cylinder, NULL);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
+    if (hr != D3D_OK)
+    {
+        skip("Couldn't create cylinder\n");
+        return;
+    }
+
+    if (!compute_cylinder(&mesh, radius1, radius2, length, slices, stacks))
+    {
+        skip("Couldn't create mesh\n");
+        cylinder->lpVtbl->Release(cylinder);
+        return;
+    }
+
+    mesh.fvf = D3DFVF_XYZ | D3DFVF_NORMAL;
+
+    sprintf(name, "cylinder (%g, %g, %g, %u, %u)", radius1, radius2, length, slices, stacks);
+    compare_mesh(name, cylinder, &mesh);
+
+    free_mesh(&mesh);
+
+    cylinder->lpVtbl->Release(cylinder);
+}
+
+static void D3DXCreateCylinderTest(void)
+{
+    HRESULT hr;
+    HWND wnd;
+    IDirect3D9* d3d;
+    IDirect3DDevice9* device;
+    D3DPRESENT_PARAMETERS d3dpp;
+    ID3DXMesh* cylinder = NULL;
+
+    hr = D3DXCreateCylinder(NULL, 0.0f, 0.0f, 0.0f, 0, 0, NULL, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateCylinder(NULL, 1.0f, 1.0f, 1.0f, 2, 1, &cylinder, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+
+    wnd = CreateWindow("static", "d3dx9_test", 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
+    d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    if (!wnd)
+    {
+        skip("Couldn't create application window\n");
+        return;
+    }
+    if (!d3d)
+    {
+        skip("Couldn't create IDirect3D9 object\n");
+        DestroyWindow(wnd);
+        return;
+    }
+
+    ZeroMemory(&d3dpp, sizeof(d3dpp));
+    d3dpp.Windowed = TRUE;
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_MIXED_VERTEXPROCESSING, &d3dpp, &device);
+    if (FAILED(hr))
+    {
+        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
+        IDirect3D9_Release(d3d);
+        DestroyWindow(wnd);
+        return;
+    }
+
+    hr = D3DXCreateCylinder(device, -0.1f, 1.0f, 1.0f, 2, 1, &cylinder, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateCylinder(device, 0.0f, 1.0f, 1.0f, 2, 1, &cylinder, NULL);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n",hr);
+
+    if (SUCCEEDED(hr) && cylinder)
+    {
+        cylinder->lpVtbl->Release(cylinder);
+    }
+
+    hr = D3DXCreateCylinder(device, 1.0f, -0.1f, 1.0f, 2, 1, &cylinder, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateCylinder(device, 1.0f, 0.0f, 1.0f, 2, 1, &cylinder, NULL);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n",hr);
+
+    if (SUCCEEDED(hr) && cylinder)
+    {
+        cylinder->lpVtbl->Release(cylinder);
+    }
+
+    hr = D3DXCreateCylinder(device, 1.0f, 1.0f, -0.1f, 2, 1, &cylinder, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+
+    /* Test with length == 0.0f succeeds */
+    hr = D3DXCreateCylinder(device, 1.0f, 1.0f, 0.0f, 2, 1, &cylinder, NULL);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n",hr);
+
+    if (SUCCEEDED(hr) && cylinder)
+    {
+        cylinder->lpVtbl->Release(cylinder);
+    }
+
+    hr = D3DXCreateCylinder(device, 1.0f, 1.0f, 1.0f, 1, 1, &cylinder, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateCylinder(device, 1.0f, 1.0f, 1.0f, 2, 0, &cylinder, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+
+    hr = D3DXCreateCylinder(device, 1.0f, 1.0f, 1.0f, 2, 1, NULL, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
+
+    test_cylinder(device, 0.0f, 0.0f, 0.0f, 2, 1);
+    test_cylinder(device, 1.0f, 1.0f, 1.0f, 2, 1);
+    test_cylinder(device, 1.0f, 1.0f, 2.0f, 3, 4);
+    test_cylinder(device, 3.0f, 2.0f, 4.0f, 3, 4);
+    test_cylinder(device, 2.0f, 3.0f, 4.0f, 3, 4);
+    test_cylinder(device, 3.0f, 4.0f, 5.0f, 11, 20);
+
+    IDirect3DDevice9_Release(device);
+    IDirect3D9_Release(d3d);
+    DestroyWindow(wnd);
+}
+
+static void test_get_decl_length(void)
+{
+    static const D3DVERTEXELEMENT9 declaration1[] =
+    {
+        {0, 0, D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {1, 0, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {2, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {3, 0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {4, 0, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {5, 0, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {6, 0, D3DDECLTYPE_SHORT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {7, 0, D3DDECLTYPE_SHORT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {8, 0, D3DDECLTYPE_UBYTE4N, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {9, 0, D3DDECLTYPE_SHORT2N, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {10, 0, D3DDECLTYPE_SHORT4N, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {11, 0, D3DDECLTYPE_UDEC3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {12, 0, D3DDECLTYPE_DEC3N, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {13, 0, D3DDECLTYPE_FLOAT16_2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {14, 0, D3DDECLTYPE_FLOAT16_4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        D3DDECL_END(),
+    };
+    static const D3DVERTEXELEMENT9 declaration2[] =
+    {
+        {0, 8, D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {1, 8, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {2, 8, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {3, 8, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {4, 8, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {5, 8, D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {6, 8, D3DDECLTYPE_SHORT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {7, 8, D3DDECLTYPE_SHORT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, 8, D3DDECLTYPE_UBYTE4N, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {1, 8, D3DDECLTYPE_SHORT2N, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {2, 8, D3DDECLTYPE_SHORT4N, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {3, 8, D3DDECLTYPE_UDEC3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {4, 8, D3DDECLTYPE_DEC3N, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {5, 8, D3DDECLTYPE_FLOAT16_2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {6, 8, D3DDECLTYPE_FLOAT16_4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {7, 8, D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        D3DDECL_END(),
+    };
+    UINT size;
+
+    size = D3DXGetDeclLength(declaration1);
+    ok(size == 15, "Got size %u, expected 15.\n", size);
+
+    size = D3DXGetDeclLength(declaration2);
+    ok(size == 16, "Got size %u, expected 16.\n", size);
 }
 
 static void test_get_decl_vertex_size(void)
@@ -1487,7 +2038,10 @@ START_TEST(mesh)
     D3DXGetFVFVertexSizeTest();
     D3DXIntersectTriTest();
     D3DXCreateMeshTest();
+    D3DXCreateMeshFVFTest();
     D3DXCreateSphereTest();
+    D3DXCreateCylinderTest();
+    test_get_decl_length();
     test_get_decl_vertex_size();
     test_fvf_decl_conversion();
 }

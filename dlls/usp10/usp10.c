@@ -599,9 +599,10 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
 
 #define Numeric_space 0x0020
 
-    int   cnt = 0, index = 0;
+    int   cnt = 0, index = 0, str = 0;
     int   New_Script = SCRIPT_UNDEFINED;
     WORD  *levels = NULL;
+    WORD  *strength = NULL;
     WORD  baselevel = 0;
 
     TRACE("%s,%d,%d,%p,%p,%p,%p\n", debugstr_wn(pwcInChars, cInChars), cInChars, cMaxItems, 
@@ -622,16 +623,37 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
         for (i = 0; i < cInChars; i++)
             if (levels[i]!=levels[0])
                 break;
-        if (i >= cInChars)
+        if (i >= cInChars && !odd(baselevel))
         {
             heap_free(levels);
             levels = NULL;
         }
+        else
+        {
+            if (!psControl->fMergeNeutralItems)
+            {
+                strength = heap_alloc_zero(cInChars * sizeof(WORD));
+                BIDI_GetStrengths(pwcInChars, cInChars, psControl, strength);
+            }
+        }
+    }
+
+    while (pwcInChars[cnt] == Numeric_space && cnt < cInChars)
+        cnt++;
+
+    if (cnt == cInChars) /* All Spaces */
+    {
+        cnt = 0;
+        New_Script = get_char_script(pwcInChars[cnt]);
     }
 
     pItems[index].iCharPos = 0;
     pItems[index].a = scriptInformation[get_char_script(pwcInChars[cnt])].a;
 
+    if (strength)
+        str = strength[cnt];
+
+    cnt = 0;
     if (levels)
     {
         pItems[index].a.fRTL = odd(levels[cnt]);
@@ -645,21 +667,32 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
         pItems[index].a.fRTL = odd(baselevel);
     }
 
-    TRACE("New_Level=%i New_Script=%d, eScript=%d index=%d cnt=%d iCharPos=%d\n",
-          levels?levels[cnt]:-1, New_Script, pItems[index].a.eScript, index, cnt,
+    TRACE("New_Level=%i New_Strength=%i New_Script=%d, eScript=%d index=%d cnt=%d iCharPos=%d\n",
+          levels?levels[cnt]:-1, str, New_Script, pItems[index].a.eScript, index, cnt,
           pItems[index].iCharPos);
 
     for (cnt=1; cnt < cInChars; cnt++)
     {
-        if (levels && (levels[cnt] == pItems[index].a.s.uBidiLevel))
+        if (levels && (levels[cnt] == pItems[index].a.s.uBidiLevel && (!strength || (strength[cnt] == 0 || strength[cnt] == str))))
             continue;
 
         if(pwcInChars[cnt] != Numeric_space)
             New_Script = get_char_script(pwcInChars[cnt]);
-
-        if ((levels && (levels[cnt] != pItems[index].a.s.uBidiLevel)) || New_Script != pItems[index].a.eScript || New_Script == Script_Control)
+        else if (levels)
         {
-            TRACE("New_Level = %i, New_Script=%d, eScript=%d ", levels?levels[cnt]:-1, New_Script, pItems[index].a.eScript);
+            int j = 1;
+            while (cnt + j < cInChars - 1 && pwcInChars[cnt+j] == Numeric_space)
+                j++;
+            New_Script = get_char_script(pwcInChars[cnt+j]);
+        }
+
+        if ((levels && (levels[cnt] != pItems[index].a.s.uBidiLevel || (strength && (strength[cnt] != str)))) || New_Script != pItems[index].a.eScript || New_Script == Script_Control)
+        {
+            TRACE("New_Level = %i, New_Strength = %i, New_Script=%d, eScript=%d\n", levels?levels[cnt]:-1, strength?strength[cnt]:str, New_Script, pItems[index].a.eScript);
+
+            if (strength && strength[cnt] != 0)
+                str = strength[cnt];
+
             index++;
             if  (index+1 > cMaxItems)
                 return E_OUTOFMEMORY;
@@ -700,6 +733,7 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
     /*  Set SCRIPT_ITEM                                     */
     pItems[index].iCharPos = cnt;         /* the last item contains the ptr to the lastchar */
     heap_free(levels);
+    heap_free(strength);
     return S_OK;
 }
 
@@ -902,6 +936,7 @@ HRESULT WINAPI ScriptStringCPtoX(SCRIPT_STRING_ANALYSIS ssa, int icp, BOOL fTrai
     int runningX = 0;
     int runningCp = 0;
     StringAnalysis* analysis = ssa;
+    BOOL itemTrailing;
 
     TRACE("(%p), %d, %d, (%p)\n", ssa, icp, fTrailing, pX);
 
@@ -916,15 +951,19 @@ HRESULT WINAPI ScriptStringCPtoX(SCRIPT_STRING_ANALYSIS ssa, int icp, BOOL fTrai
 
     for(i=0; i<analysis->numItems; i++)
     {
+        if (analysis->pItem[i].a.fRTL)
+            itemTrailing = !fTrailing;
+        else
+            itemTrailing = fTrailing;
         for(j=0; j<analysis->glyphs[i].numGlyphs; j++)
         {
-            if(runningCp == icp && fTrailing == FALSE)
+            if(runningCp == icp && itemTrailing == FALSE)
             {
                 *pX = runningX;
                 return S_OK;
             }
             runningX += analysis->glyphs[i].piAdvance[j];
-            if(runningCp == icp && fTrailing == TRUE)
+            if(runningCp == icp && itemTrailing == TRUE)
             {
                 *pX = runningX;
                 return S_OK;
@@ -958,8 +997,16 @@ HRESULT WINAPI ScriptStringXtoCP(SCRIPT_STRING_ANALYSIS ssa, int iX, int* piCh, 
     /* out of range */
     if(iX < 0)
     {
-        *piCh = -1;
-        *piTrailing = TRUE;
+        if (analysis->pItem[0].a.fRTL)
+        {
+            *piCh = 1;
+            *piTrailing = FALSE;
+        }
+        else
+        {
+            *piCh = -1;
+            *piTrailing = TRUE;
+        }
         return S_OK;
     }
 
@@ -975,6 +1022,9 @@ HRESULT WINAPI ScriptStringXtoCP(SCRIPT_STRING_ANALYSIS ssa, int iX, int* piCh, 
                     *piTrailing = TRUE;
                 else
                     *piTrailing = FALSE;
+
+                if (analysis->pItem[i].a.fRTL)
+                    *piTrailing = !*piTrailing;
                 return S_OK;
             }
             runningX += width;
@@ -1254,9 +1304,12 @@ HRESULT WINAPI ScriptShape(HDC hdc, SCRIPT_CACHE *psc, const WCHAR *pwcChars,
         pwLogClust[i] = idx;
     }
 
-    if ((get_cache_pitch_family(psc) & TMPF_TRUETYPE) && !psa->fNoGlyphIndex)
+    if (!psa->fNoGlyphIndex)
     {
-        WCHAR *rChars = heap_alloc(sizeof(WCHAR) * cChars);
+        WCHAR *rChars;
+        if ((hr = SHAPE_CheckFontForRequiredFeatures(hdc, (ScriptCache *)*psc, psa)) != S_OK) return hr;
+
+        rChars = heap_alloc(sizeof(WCHAR) * cChars);
         if (!rChars) return E_OUTOFMEMORY;
         for (i = 0; i < cChars; i++)
         {
@@ -1276,8 +1329,12 @@ HRESULT WINAPI ScriptShape(HDC hdc, SCRIPT_CACHE *psc, const WCHAR *pwcChars,
             }
             rChars[i] = chInput;
         }
-        SHAPE_ContextualShaping(hdc, (ScriptCache *)*psc, psa, rChars, cChars, pwOutGlyphs, pcGlyphs, cMaxGlyphs, pwLogClust);
-        SHAPE_ApplyDefaultOpentypeFeatures(hdc, (ScriptCache *)*psc, psa, pwOutGlyphs, pcGlyphs, cMaxGlyphs, cChars, pwLogClust);
+
+        if (get_cache_pitch_family(psc) & TMPF_TRUETYPE)
+        {
+            SHAPE_ContextualShaping(hdc, (ScriptCache *)*psc, psa, rChars, cChars, pwOutGlyphs, pcGlyphs, cMaxGlyphs, pwLogClust);
+            SHAPE_ApplyDefaultOpentypeFeatures(hdc, (ScriptCache *)*psc, psa, pwOutGlyphs, pcGlyphs, cMaxGlyphs, cChars, pwLogClust);
+        }
         heap_free(rChars);
     }
     else

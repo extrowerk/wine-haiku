@@ -80,3 +80,69 @@ HRESULT WINAPI D3DCreateBlob(SIZE_T data_size, ID3DBlob **blob)
 
     return S_OK;
 }
+
+HRESULT WINAPI D3DGetBlobPart(const void *data, SIZE_T data_size, D3D_BLOB_PART part, UINT flags, ID3DBlob **blob)
+{
+    TRACE("data %p, data_size %lu, part %s, flags %#x, blob %p\n", data,
+           data_size, debug_d3dcompiler_d3d_blob_part(part), flags, blob);
+
+    return d3dcompiler_get_blob_part(data, data_size, part, flags, blob);
+}
+
+HRESULT WINAPI D3DGetInputSignatureBlob(const void *data, SIZE_T data_size, ID3DBlob **blob)
+{
+    TRACE("data %p, data_size %lu, blob %p\n", data, data_size, blob);
+
+    return d3dcompiler_get_blob_part(data, data_size, D3D_BLOB_INPUT_SIGNATURE_BLOB, 0, blob);
+}
+
+HRESULT WINAPI D3DGetOutputSignatureBlob(const void *data, SIZE_T data_size, ID3DBlob **blob)
+{
+    TRACE("data %p, data_size %lu, blob %p\n", data, data_size, blob);
+
+    return d3dcompiler_get_blob_part(data, data_size, D3D_BLOB_OUTPUT_SIGNATURE_BLOB, 0, blob);
+}
+
+HRESULT WINAPI D3DGetInputAndOutputSignatureBlob(const void *data, SIZE_T data_size, ID3DBlob **blob)
+{
+    TRACE("data %p, data_size %lu, blob %p\n", data, data_size, blob);
+
+    return d3dcompiler_get_blob_part(data, data_size, D3D_BLOB_INPUT_AND_OUTPUT_SIGNATURE_BLOB, 0, blob);
+}
+
+HRESULT WINAPI D3DGetDebugInfo(const void *data, SIZE_T data_size, ID3DBlob **blob)
+{
+    TRACE("data %p, data_size %lu, blob %p\n", data, data_size, blob);
+
+    return d3dcompiler_get_blob_part(data, data_size, D3D_BLOB_DEBUG_INFO, 0, blob);
+}
+
+HRESULT WINAPI D3DStripShader(const void *data, SIZE_T data_size, UINT flags, ID3D10Blob **blob)
+{
+    TRACE("data %p, data_size %lu, flags %#x, blob %p\n", data, data_size, flags, blob);
+
+    return d3dcompiler_strip_shader(data, data_size, flags, blob);
+}
+
+HRESULT WINAPI D3DReflect(const void *data, SIZE_T data_size, REFIID riid, void **reflector)
+{
+    struct d3dcompiler_shader_reflection *object;
+
+    FIXME("data %p, data_size %lu, riid %s, blob %p stub!\n", data, data_size, debugstr_guid(riid), reflector);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D compiler shader reflection object memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &d3dcompiler_shader_reflection_vtbl;
+    object->refcount = 1;
+
+    *reflector = (ID3D11ShaderReflection *)object;
+
+    TRACE("Created ID3D11ShaderReflection %p\n", object);
+
+    return S_OK;
+}

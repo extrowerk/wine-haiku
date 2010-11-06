@@ -20,6 +20,7 @@
 
 #define IDS_TO_PRIMITIVE                    0x0001
 #define IDS_INVALID_CALL_ARG                0x0005
+#define IDS_SUBSCRIPT_OUT_OF_RANGE          0x0009
 #define IDS_CREATE_OBJ_ERROR                0x01AD
 #define IDS_NO_PROPERTY                     0x01B6
 #define IDS_UNSUPPORTED_ACTION              0x01BD
@@ -36,6 +37,7 @@
 #define IDS_ILLEGAL_ASSIGN                  0x1390
 #define IDS_UNDEFINED                       0x1391
 #define IDS_NOT_BOOL                        0x1392
+#define IDS_NOT_VBARRAY                     0x1395
 #define IDS_JSCRIPT_EXPECTED                0x1396
 #define IDS_REGEXP_SYNTAX_ERROR             0x1399
 #define IDS_URI_INVALID_CHAR                0x13A0

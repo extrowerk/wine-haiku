@@ -199,40 +199,34 @@ static HRESULT WINAPI d3d9_vertexbuffer_Lock(IDirect3DVertexBuffer9 *iface,
 
 static HRESULT WINAPI d3d9_vertexbuffer_Unlock(IDirect3DVertexBuffer9 *iface)
 {
-    HRESULT hr;
-
     TRACE("iface %p.\n", iface);
 
     wined3d_mutex_lock();
-    hr = IWineD3DBuffer_Unmap(((IDirect3DVertexBuffer9Impl *)iface)->wineD3DVertexBuffer);
+    IWineD3DBuffer_Unmap(((IDirect3DVertexBuffer9Impl *)iface)->wineD3DVertexBuffer);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d9_vertexbuffer_GetDesc(IDirect3DVertexBuffer9 *iface, D3DVERTEXBUFFER_DESC *desc)
 {
     IDirect3DVertexBuffer9Impl *buffer = (IDirect3DVertexBuffer9Impl *)iface;
     WINED3DBUFFER_DESC wined3d_desc;
-    HRESULT hr;
 
     TRACE("iface %p, desc %p.\n", iface, desc);
 
     wined3d_mutex_lock();
-    hr = IWineD3DBuffer_GetDesc(buffer->wineD3DVertexBuffer, &wined3d_desc);
+    IWineD3DBuffer_GetDesc(buffer->wineD3DVertexBuffer, &wined3d_desc);
     wined3d_mutex_unlock();
 
-    if (SUCCEEDED(hr))
-    {
-        desc->Format = D3DFMT_VERTEXDATA;
-        desc->Usage = wined3d_desc.Usage;
-        desc->Pool = wined3d_desc.Pool;
-        desc->Size = wined3d_desc.Size;
-        desc->Type = D3DRTYPE_VERTEXBUFFER;
-        desc->FVF = buffer->fvf;
-    }
+    desc->Format = D3DFMT_VERTEXDATA;
+    desc->Usage = wined3d_desc.Usage;
+    desc->Pool = wined3d_desc.Pool;
+    desc->Size = wined3d_desc.Size;
+    desc->Type = D3DRTYPE_VERTEXBUFFER;
+    desc->FVF = buffer->fvf;
 
-    return hr;
+    return D3D_OK;
 }
 
 static const IDirect3DVertexBuffer9Vtbl d3d9_vertexbuffer_vtbl =
@@ -467,39 +461,33 @@ static HRESULT WINAPI d3d9_indexbuffer_Lock(IDirect3DIndexBuffer9 *iface,
 
 static HRESULT WINAPI d3d9_indexbuffer_Unlock(IDirect3DIndexBuffer9 *iface)
 {
-    HRESULT hr;
-
     TRACE("iface %p.\n", iface);
 
     wined3d_mutex_lock();
-    hr = IWineD3DBuffer_Unmap(((IDirect3DIndexBuffer9Impl *)iface)->wineD3DIndexBuffer);
+    IWineD3DBuffer_Unmap(((IDirect3DIndexBuffer9Impl *)iface)->wineD3DIndexBuffer);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d9_indexbuffer_GetDesc(IDirect3DIndexBuffer9 *iface, D3DINDEXBUFFER_DESC *desc)
 {
     IDirect3DIndexBuffer9Impl *buffer = (IDirect3DIndexBuffer9Impl *)iface;
     WINED3DBUFFER_DESC wined3d_desc;
-    HRESULT hr;
 
     TRACE("iface %p, desc %p.\n", iface, desc);
 
     wined3d_mutex_lock();
-    hr = IWineD3DBuffer_GetDesc(buffer->wineD3DIndexBuffer, &wined3d_desc);
+    IWineD3DBuffer_GetDesc(buffer->wineD3DIndexBuffer, &wined3d_desc);
     wined3d_mutex_unlock();
 
-    if (SUCCEEDED(hr))
-    {
-        desc->Format = d3dformat_from_wined3dformat(buffer->format);
-        desc->Usage = wined3d_desc.Usage;
-        desc->Pool = wined3d_desc.Pool;
-        desc->Size = wined3d_desc.Size;
-        desc->Type = D3DRTYPE_INDEXBUFFER;
-    }
+    desc->Format = d3dformat_from_wined3dformat(buffer->format);
+    desc->Usage = wined3d_desc.Usage;
+    desc->Pool = wined3d_desc.Pool;
+    desc->Size = wined3d_desc.Size;
+    desc->Type = D3DRTYPE_INDEXBUFFER;
 
-    return hr;
+    return D3D_OK;
 }
 
 static const IDirect3DIndexBuffer9Vtbl d3d9_indexbuffer_vtbl =

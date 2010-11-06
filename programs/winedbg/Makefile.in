@@ -1,7 +1,3 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = winedbg.exe
 APPMODE   = -mconsole
 IMPORTS   = psapi dbghelp advapi32
@@ -11,6 +7,7 @@ EXTRADEFS = -DWINE_NO_UNICODE_MACROS
 
 C_SRCS = \
 	be_alpha.c \
+	be_arm.c \
 	be_i386.c \
 	be_ppc.c \
 	be_sparc.c \
@@ -39,6 +36,7 @@ RC_SRCS = \
 	rsrc_En.rc \
 	rsrc_Es.rc \
 	rsrc_Fr.rc \
+	rsrc_He.rc \
 	rsrc_It.rc \
 	rsrc_Ko.rc \
 	rsrc_Lt.rc \

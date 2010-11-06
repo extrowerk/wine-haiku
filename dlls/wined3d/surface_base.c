@@ -146,7 +146,7 @@ void * WINAPI IWineD3DBaseSurfaceImpl_GetParent(IWineD3DSurface *iface)
     return ((IWineD3DSurfaceImpl *)iface)->resource.parent;
 }
 
-HRESULT WINAPI IWineD3DBaseSurfaceImpl_GetDesc(IWineD3DSurface *iface, WINED3DSURFACE_DESC *desc)
+void WINAPI IWineD3DBaseSurfaceImpl_GetDesc(IWineD3DSurface *iface, WINED3DSURFACE_DESC *desc)
 {
     IWineD3DSurfaceImpl *surface = (IWineD3DSurfaceImpl *)iface;
 
@@ -161,8 +161,6 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_GetDesc(IWineD3DSurface *iface, WINED3DSU
     desc->multisample_quality = surface->currentDesc.MultiSampleQuality;
     desc->width = surface->currentDesc.Width;
     desc->height = surface->currentDesc.Height;
-
-    return WINED3D_OK;
 }
 
 HRESULT WINAPI IWineD3DBaseSurfaceImpl_GetBltStatus(IWineD3DSurface *iface, DWORD Flags)
@@ -221,16 +219,16 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_SetPalette(IWineD3DSurface *iface, IWineD
         return WINED3D_OK;
     }
 
-    if(This->palette != NULL)
-        if(This->resource.usage & WINED3DUSAGE_RENDERTARGET)
+    if (This->palette)
+        if (This->resource.usage & WINED3DUSAGE_RENDERTARGET)
             This->palette->Flags &= ~WINEDDPCAPS_PRIMARYSURFACE;
 
     This->palette = PalImpl;
 
-    if(PalImpl != NULL) {
-        if(This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
-            (PalImpl)->Flags |= WINEDDPCAPS_PRIMARYSURFACE;
-        }
+    if (PalImpl)
+    {
+        if (This->resource.usage & WINED3DUSAGE_RENDERTARGET)
+            PalImpl->Flags |= WINEDDPCAPS_PRIMARYSURFACE;
 
         return IWineD3DSurface_RealizePalette(iface);
     }
@@ -242,7 +240,8 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_SetColorKey(IWineD3DSurface *iface, DWORD
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *) iface;
     TRACE("(%p)->(%08x,%p)\n", This, Flags, CKey);
 
-    if ((Flags & WINEDDCKEY_COLORSPACE) != 0) {
+    if (Flags & WINEDDCKEY_COLORSPACE)
+    {
         FIXME(" colorkey value not supported (%08x) !\n", Flags);
         return WINED3DERR_INVALIDCALL;
     }
@@ -361,7 +360,9 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_GetOverlayPosition(IWineD3DSurface *iface
         TRACE("(%p): Not an overlay surface\n", This);
         return WINEDDERR_NOTAOVERLAYSURFACE;
     }
-    if(This->overlay_dest == NULL) {
+
+    if (!This->overlay_dest)
+    {
         *X = 0; *Y = 0;
         hr = WINEDDERR_OVERLAYNOTVISIBLE;
     } else {
@@ -589,8 +590,8 @@ HRESULT IWineD3DBaseSurfaceImpl_CreateDIBSection(IWineD3DSurface *iface)
             break;
     }
 
-    ddc = GetDC(0);
-    if (ddc == 0) {
+    if (!(ddc = GetDC(0)))
+    {
         HeapFree(GetProcessHeap(), 0, b_info);
         return HRESULT_FROM_WIN32(GetLastError());
     }
@@ -822,16 +823,18 @@ static IWineD3DSurfaceImpl *surface_convert_format(IWineD3DSurfaceImpl *source, 
     memset(&lock_src, 0, sizeof(lock_src));
     memset(&lock_dst, 0, sizeof(lock_dst));
 
-    hr = IWineD3DSurface_LockRect((IWineD3DSurface *) source, &lock_src, NULL, WINED3DLOCK_READONLY);
-    if(FAILED(hr)) {
-        ERR("Failed to lock the source surface\n");
+    hr = IWineD3DSurface_Map((IWineD3DSurface *)source, &lock_src, NULL, WINED3DLOCK_READONLY);
+    if (FAILED(hr))
+    {
+        ERR("Failed to lock the source surface.\n");
         IWineD3DSurface_Release(ret);
         return NULL;
     }
-    hr = IWineD3DSurface_LockRect(ret, &lock_dst, NULL, WINED3DLOCK_READONLY);
-    if(FAILED(hr)) {
+    hr = IWineD3DSurface_Map(ret, &lock_dst, NULL, WINED3DLOCK_READONLY);
+    if (FAILED(hr))
+    {
         ERR("Failed to lock the dest surface\n");
-        IWineD3DSurface_UnlockRect((IWineD3DSurface *) source);
+        IWineD3DSurface_Unmap((IWineD3DSurface *)source);
         IWineD3DSurface_Release(ret);
         return NULL;
     }
@@ -839,8 +842,8 @@ static IWineD3DSurfaceImpl *surface_convert_format(IWineD3DSurfaceImpl *source, 
     conv->convert(lock_src.pBits, lock_dst.pBits, lock_src.Pitch, lock_dst.Pitch,
                   source->currentDesc.Width, source->currentDesc.Height);
 
-    IWineD3DSurface_UnlockRect(ret);
-    IWineD3DSurface_UnlockRect((IWineD3DSurface *) source);
+    IWineD3DSurface_Unmap(ret);
+    IWineD3DSurface_Unmap((IWineD3DSurface *)source);
 
     return (IWineD3DSurfaceImpl *) ret;
 }
@@ -942,11 +945,6 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface, const RECT *D
     {
         WARN(" Surface is busy, returning DDERR_SURFACEBUSY\n");
         return WINEDDERR_SURFACEBUSY;
-    }
-
-    if(Filter != WINED3DTEXF_NONE && Filter != WINED3DTEXF_POINT) {
-        /* Can happen when d3d9 apps do a StretchRect call which isn't handled in gl */
-        FIXME("Filters not supported in software blit\n");
     }
 
     /* First check for the validity of source / destination rectangles.
@@ -1092,7 +1090,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface, const RECT *D
 
     if (src == This)
     {
-        IWineD3DSurface_LockRect(iface, &dlock, NULL, 0);
+        IWineD3DSurface_Map(iface, &dlock, NULL, 0);
         slock = dlock;
         sEntry = This->resource.format;
         dEntry = sEntry;
@@ -1112,7 +1110,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface, const RECT *D
                     goto release;
                 }
             }
-            IWineD3DSurface_LockRect((IWineD3DSurface *)src, &slock, NULL, WINED3DLOCK_READONLY);
+            IWineD3DSurface_Map((IWineD3DSurface *)src, &slock, NULL, WINED3DLOCK_READONLY);
             sEntry = src->resource.format;
         }
         else
@@ -1120,9 +1118,9 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface, const RECT *D
             sEntry = dEntry;
         }
         if (DestRect)
-            IWineD3DSurface_LockRect(iface, &dlock, &xdst, 0);
+            IWineD3DSurface_Map(iface, &dlock, &xdst, 0);
         else
-            IWineD3DSurface_LockRect(iface, &dlock, NULL, 0);
+            IWineD3DSurface_Map(iface, &dlock, NULL, 0);
     }
 
     if (!DDBltFx || !(DDBltFx->dwDDFX)) Flags &= ~WINEDDBLT_DDFX;
@@ -1215,6 +1213,14 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface, const RECT *D
 
         if (!dstwidth || !dstheight) /* hmm... stupid program ? */
             goto release;
+
+        if (Filter != WINED3DTEXF_NONE && Filter != WINED3DTEXF_POINT
+                && (srcwidth != dstwidth || srcheight != dstheight))
+        {
+            /* Can happen when d3d9 apps do a StretchRect call which isn't handled in gl */
+            FIXME("Filter %s not supported in software blit.\n", debug_d3dtexturefiltertype(Filter));
+        }
+
         sbase = (BYTE*)slock.pBits+(xsrc.top*slock.Pitch)+xsrc.left*bpp;
         xinc = (srcwidth << 16) / dstwidth;
         yinc = (srcheight << 16) / dstheight;
@@ -1522,8 +1528,8 @@ error:
     }
 
 release:
-    IWineD3DSurface_UnlockRect(iface);
-    if (src && src != This) IWineD3DSurface_UnlockRect((IWineD3DSurface *)src);
+    IWineD3DSurface_Unmap(iface);
+    if (src && src != This) IWineD3DSurface_Unmap((IWineD3DSurface *)src);
     /* Release the converted surface if any */
     if (src && src_surface != (IWineD3DSurface *)src) IWineD3DSurface_Release((IWineD3DSurface *)src);
     return ret;
@@ -1623,8 +1629,8 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_BltFast(IWineD3DSurface *iface, DWORD dst
         UnionRect(&lock_union, &lock_src, &lock_dst);
 
         /* Lock the union of the two rectangles */
-        ret = IWineD3DSurface_LockRect(iface, &dlock, &lock_union, 0);
-        if(ret != WINED3D_OK) goto error;
+        ret = IWineD3DSurface_Map(iface, &dlock, &lock_union, 0);
+        if (FAILED(ret)) goto error;
 
         pitch = dlock.Pitch;
         slock.Pitch = dlock.Pitch;
@@ -1637,10 +1643,10 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_BltFast(IWineD3DSurface *iface, DWORD dst
     }
     else
     {
-        ret = IWineD3DSurface_LockRect(src_surface, &slock, &lock_src, WINED3DLOCK_READONLY);
-        if(ret != WINED3D_OK) goto error;
-        ret = IWineD3DSurface_LockRect(iface, &dlock, &lock_dst, 0);
-        if(ret != WINED3D_OK) goto error;
+        ret = IWineD3DSurface_Map(src_surface, &slock, &lock_src, WINED3DLOCK_READONLY);
+        if (FAILED(ret)) goto error;
+        ret = IWineD3DSurface_Map(iface, &dlock, &lock_dst, 0);
+        if (FAILED(ret)) goto error;
 
         sbuf = slock.pBits;
         dbuf = dlock.pBits;
@@ -1794,18 +1800,19 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_BltFast(IWineD3DSurface *iface, DWORD dst
 error:
     if (src == This)
     {
-        IWineD3DSurface_UnlockRect(iface);
+        IWineD3DSurface_Unmap(iface);
     }
     else
     {
-        IWineD3DSurface_UnlockRect(iface);
-        IWineD3DSurface_UnlockRect(src_surface);
+        IWineD3DSurface_Unmap(iface);
+        IWineD3DSurface_Unmap(src_surface);
     }
 
     return ret;
 }
 
-HRESULT WINAPI IWineD3DBaseSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED3DLOCKED_RECT* pLockedRect, CONST RECT* pRect, DWORD Flags)
+HRESULT WINAPI IWineD3DBaseSurfaceImpl_Map(IWineD3DSurface *iface,
+        WINED3DLOCKED_RECT *pLockedRect, const RECT *pRect, DWORD Flags)
 {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
 
@@ -1814,7 +1821,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED3DL
 
     pLockedRect->Pitch = IWineD3DSurface_GetPitch(iface);
 
-    if (NULL == pRect)
+    if (!pRect)
     {
         pLockedRect->pBits = This->resource.allocatedMemory;
         This->lockedRect.left   = 0;

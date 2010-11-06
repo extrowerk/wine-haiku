@@ -25,6 +25,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <setjmp.h>
 
 #ifdef SONAME_LIBJPEG
 /* This is a hack, so jpeglib.h does not redefine INT32 and the like*/
@@ -54,6 +55,7 @@
 #include "wine/library.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wincodecs);
+WINE_DECLARE_DEBUG_CHANNEL(jpeg);
 
 #ifdef SONAME_LIBJPEG
 
@@ -89,6 +91,38 @@ static void *load_libjpeg(void)
 #undef LOAD_FUNCPTR
     }
     return libjpeg_handle;
+}
+
+static void error_exit_fn(j_common_ptr cinfo)
+{
+    char message[JMSG_LENGTH_MAX];
+    if (ERR_ON(jpeg))
+    {
+        cinfo->err->format_message(cinfo, message);
+        ERR_(jpeg)("%s\n", message);
+    }
+    longjmp(*(jmp_buf*)cinfo->client_data, 1);
+}
+
+static void emit_message_fn(j_common_ptr cinfo, int msg_level)
+{
+    char message[JMSG_LENGTH_MAX];
+
+    if (msg_level < 0 && ERR_ON(jpeg))
+    {
+        cinfo->err->format_message(cinfo, message);
+        ERR_(jpeg)("%s\n", message);
+    }
+    else if (msg_level == 0 && WARN_ON(jpeg))
+    {
+        cinfo->err->format_message(cinfo, message);
+        WARN_(jpeg)("%s\n", message);
+    }
+    else if (msg_level > 0 && TRACE_ON(jpeg))
+    {
+        cinfo->err->format_message(cinfo, message);
+        TRACE_(jpeg)("%s\n", message);
+    }
 }
 
 typedef struct {
@@ -227,6 +261,7 @@ static HRESULT WINAPI JpegDecoder_Initialize(IWICBitmapDecoder *iface, IStream *
     JpegDecoder *This = (JpegDecoder*)iface;
     int ret;
     LARGE_INTEGER seek;
+    jmp_buf jmpbuf;
     TRACE("(%p,%p,%u)\n", iface, pIStream, cacheOptions);
 
     EnterCriticalSection(&This->lock);
@@ -237,7 +272,20 @@ static HRESULT WINAPI JpegDecoder_Initialize(IWICBitmapDecoder *iface, IStream *
         return WINCODEC_ERR_WRONGSTATE;
     }
 
-    This->cinfo.err = pjpeg_std_error(&This->jerr);
+    pjpeg_std_error(&This->jerr);
+
+    This->jerr.error_exit = error_exit_fn;
+    This->jerr.emit_message = emit_message_fn;
+
+    This->cinfo.err = &This->jerr;
+
+    This->cinfo.client_data = &jmpbuf;
+
+    if (setjmp(jmpbuf))
+    {
+        LeaveCriticalSection(&This->lock);
+        return E_FAIL;
+    }
 
     pjpeg_CreateDecompress(&This->cinfo, JPEG_LIB_VERSION, sizeof(struct jpeg_decompress_struct));
 
@@ -266,10 +314,24 @@ static HRESULT WINAPI JpegDecoder_Initialize(IWICBitmapDecoder *iface, IStream *
         return E_FAIL;
     }
 
-    if (This->cinfo.jpeg_color_space == JCS_GRAYSCALE)
+    switch (This->cinfo.jpeg_color_space)
+    {
+    case JCS_GRAYSCALE:
         This->cinfo.out_color_space = JCS_GRAYSCALE;
-    else
+        break;
+    case JCS_RGB:
+    case JCS_YCbCr:
         This->cinfo.out_color_space = JCS_RGB;
+        break;
+    case JCS_CMYK:
+    case JCS_YCCK:
+        This->cinfo.out_color_space = JCS_CMYK;
+        break;
+    default:
+        ERR("Unknown JPEG color space %i\n", This->cinfo.jpeg_color_space);
+        LeaveCriticalSection(&This->lock);
+        return E_FAIL;
+    }
 
     if (!pjpeg_start_decompress(&This->cinfo))
     {
@@ -427,6 +489,8 @@ static HRESULT WINAPI JpegDecoder_Frame_GetPixelFormat(IWICBitmapFrameDecode *if
     TRACE("(%p,%p)\n", iface, pPixelFormat);
     if (This->cinfo.out_color_space == JCS_RGB)
         memcpy(pPixelFormat, &GUID_WICPixelFormat24bppBGR, sizeof(GUID));
+    else if (This->cinfo.out_color_space == JCS_CMYK)
+        memcpy(pPixelFormat, &GUID_WICPixelFormat32bppCMYK, sizeof(GUID));
     else /* This->cinfo.out_color_space == JCS_GRAYSCALE */
         memcpy(pPixelFormat, &GUID_WICPixelFormat8bppGray, sizeof(GUID));
     return S_OK;
@@ -454,9 +518,27 @@ static HRESULT WINAPI JpegDecoder_Frame_CopyPixels(IWICBitmapFrameDecode *iface,
     UINT stride;
     UINT data_size;
     UINT max_row_needed;
+    jmp_buf jmpbuf;
+    WICRect rect;
     TRACE("(%p,%p,%u,%u,%p)\n", iface, prc, cbStride, cbBufferSize, pbBuffer);
 
+    if (!prc)
+    {
+        rect.X = 0;
+        rect.Y = 0;
+        rect.Width = This->cinfo.output_width;
+        rect.Height = This->cinfo.output_height;
+        prc = &rect;
+    }
+    else
+    {
+        if (prc->X < 0 || prc->Y < 0 || prc->X+prc->Width > This->cinfo.output_width ||
+            prc->Y+prc->Height > This->cinfo.output_height)
+            return E_INVALIDARG;
+    }
+
     if (This->cinfo.out_color_space == JCS_GRAYSCALE) bpp = 8;
+    else if (This->cinfo.out_color_space == JCS_CMYK) bpp = 32;
     else bpp = 24;
 
     stride = bpp * This->cinfo.output_width;
@@ -475,6 +557,14 @@ static HRESULT WINAPI JpegDecoder_Frame_CopyPixels(IWICBitmapFrameDecode *iface,
             LeaveCriticalSection(&This->lock);
             return E_OUTOFMEMORY;
         }
+    }
+
+    This->cinfo.client_data = &jmpbuf;
+
+    if (setjmp(jmpbuf))
+    {
+        LeaveCriticalSection(&This->lock);
+        return E_FAIL;
     }
 
     while (max_row_needed > This->cinfo.output_scanline)
@@ -514,6 +604,11 @@ static HRESULT WINAPI JpegDecoder_Frame_CopyPixels(IWICBitmapFrameDecode *iface,
                 }
             }
         }
+
+        if (This->cinfo.out_color_space == JCS_CMYK && This->cinfo.saw_Adobe_marker)
+            /* Adobe JPEG's have inverted CMYK data. */
+            for (i=0; i<data_size; i++)
+                This->image_data[i] ^= 0xff;
     }
 
     LeaveCriticalSection(&This->lock);

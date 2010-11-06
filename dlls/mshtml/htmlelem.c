@@ -1654,11 +1654,13 @@ HTMLElement *HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL 
 
     static const WCHAR wszA[]        = {'A',0};
     static const WCHAR wszBODY[]     = {'B','O','D','Y',0};
+    static const WCHAR wszEMBED[]    = {'E','M','B','E','D',0};
     static const WCHAR wszFORM[]     = {'F','O','R','M',0};
     static const WCHAR wszFRAME[]    = {'F','R','A','M','E',0};
     static const WCHAR wszIFRAME[]   = {'I','F','R','A','M','E',0};
     static const WCHAR wszIMG[]      = {'I','M','G',0};
     static const WCHAR wszINPUT[]    = {'I','N','P','U','T',0};
+    static const WCHAR wszOBJECT[]   = {'O','B','J','E','C','T',0};
     static const WCHAR wszOPTION[]   = {'O','P','T','I','O','N',0};
     static const WCHAR wszSCRIPT[]   = {'S','C','R','I','P','T',0};
     static const WCHAR wszSELECT[]   = {'S','E','L','E','C','T',0};
@@ -1679,6 +1681,8 @@ HTMLElement *HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL 
         ret = HTMLAnchorElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszBODY))
         ret = HTMLBodyElement_Create(doc, nselem);
+    else if(!strcmpW(class_name, wszEMBED))
+        ret = HTMLEmbedElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszFORM))
         ret = HTMLFormElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszFRAME))
@@ -1689,6 +1693,8 @@ HTMLElement *HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL 
         ret = HTMLImgElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszINPUT))
         ret = HTMLInputElement_Create(doc, nselem);
+    else if(!strcmpW(class_name, wszOBJECT))
+        ret = HTMLObjectElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszOPTION))
         ret = HTMLOptionElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszSCRIPT))

@@ -164,6 +164,8 @@ struct xdg_mime_type
     struct list entry;
 };
 
+DEFINE_GUID(CLSID_WICIcnsEncoder, 0x312fb6f1,0xb767,0x409d,0x8a,0x6d,0x0f,0xc1,0x54,0xd4,0xf0,0x5c);
+
 static char *xdg_config_dir;
 static char *xdg_data_dir;
 static char *xdg_desktop_dir;
@@ -770,85 +772,188 @@ static HRESULT open_icon(LPCWSTR filename, int index, BOOL bWait, IStream **ppSt
     return hr;
 }
 
-/* extract an icon from an exe or icon file; helper for IPersistFile_fnSave */
-static char *extract_icon( LPCWSTR path, int index, const char *destFilename, BOOL bWait )
+#ifdef __APPLE__
+static HRESULT platform_write_icon(IStream *icoStream, int exeIndex,
+                                   int bestIndex, LPCWSTR icoPathW,
+                                   const char *destFilename, char **nativeIdentifier)
 {
-    unsigned short crc;
-    char *iconsdir = NULL, *ico_path = NULL, *ico_name, *png_path = NULL;
-    char* s;
-    int n;
-    IStream *stream = NULL;
+    GUID guid;
+    WCHAR *guidStrW = NULL;
+    char *guidStrA = NULL;
+    char *icnsPath = NULL;
+    LARGE_INTEGER zero;
     HRESULT hr;
 
-    /* Where should we save the icon? */
-    WINE_TRACE("path=[%s] index=%d\n", wine_dbgstr_w(path), index);
-    iconsdir = heap_printf("%s/icons", xdg_data_dir);
-    if (iconsdir)
+    hr = CoCreateGuid(&guid);
+    if (FAILED(hr))
     {
-        if (mkdir(iconsdir, 0777) && errno != EEXIST)
-        {
-            WINE_WARN("couldn't make icons directory %s\n", wine_dbgstr_a(iconsdir));
-            goto end;
-        }
+        WINE_WARN("CoCreateGuid failed, error 0x%08X\n", hr);
+        goto end;
     }
-    else
+    hr = StringFromCLSID(&guid, &guidStrW);
+    if (FAILED(hr))
     {
-        WINE_TRACE("no icon created\n");
-        return NULL;
+        WINE_WARN("StringFromCLSID failed, error 0x%08X\n", hr);
+        goto end;
     }
-    
-    /* Determine the icon base name */
-    n = WideCharToMultiByte(CP_UNIXCP, 0, path, -1, NULL, 0, NULL, NULL);
-    ico_path = HeapAlloc(GetProcessHeap(), 0, n);
-    WideCharToMultiByte(CP_UNIXCP, 0, path, -1, ico_path, n, NULL, NULL);
-    s=ico_name=ico_path;
-    while (*s!='\0') {
-        if (*s=='/' || *s=='\\') {
-            *s='\\';
-            ico_name=s;
-        } else {
-            *s=tolower(*s);
-        }
-        s++;
-    }
-    if (*ico_name=='\\') *ico_name++='\0';
-    s=strrchr(ico_name,'.');
-    if (s) *s='\0';
-
-    /* Compute the source-path hash */
-    crc=crc16(ico_path);
-
-    if (destFilename)
-        png_path=heap_printf("%s/%s.png",iconsdir,destFilename);
-    else
-        png_path=heap_printf("%s/%04x_%s.%d.png",iconsdir,crc,ico_name,index);
-    if (png_path == NULL)
+    guidStrA = wchars_to_utf8_chars(guidStrW);
+    if (guidStrA == NULL)
     {
-        WINE_ERR("could not extract icon %s, out of memory\n", wine_dbgstr_a(ico_name));
-        return NULL;
+        hr = E_OUTOFMEMORY;
+        WINE_WARN("out of memory converting GUID string\n");
+        goto end;
+    }
+    icnsPath = heap_printf("/tmp/%s.icns", guidStrA);
+    if (icnsPath == NULL)
+    {
+        hr = E_OUTOFMEMORY;
+        WINE_WARN("out of memory creating ICNS path\n");
+        goto end;
+    }
+    zero.QuadPart = 0;
+    hr = IStream_Seek(icoStream, zero, STREAM_SEEK_SET, NULL);
+    if (FAILED(hr))
+    {
+        WINE_WARN("seeking icon stream failed, error 0x%08X\n", hr);
+        goto end;
+    }
+    hr = convert_to_native_icon(icoStream, &bestIndex, 1, &CLSID_WICIcnsEncoder,
+                                icnsPath, icoPathW);
+    if (FAILED(hr))
+    {
+        WINE_WARN("converting %s to %s failed, error 0x%08X\n",
+            wine_dbgstr_w(icoPathW), wine_dbgstr_a(icnsPath), hr);
+        goto end;
     }
 
-    hr = open_icon( path, index, bWait, &stream );
+end:
+    CoTaskMemFree(guidStrW);
+    HeapFree(GetProcessHeap(), 0, guidStrA);
     if (SUCCEEDED(hr))
-    {
-        hr = write_native_icon( stream, png_path, path );
-        if (SUCCEEDED(hr))
-            goto end;
-        else
-            WINE_ERR("writing native icon for %s index %d failed, hr=0x%08X\n", wine_dbgstr_w(path), index, hr);
-    }
+        *nativeIdentifier = icnsPath;
     else
-        WINE_WARN("extracting icon %s index %d failed, hr=0x%08X\n", wine_dbgstr_w(path), index, hr);
+        HeapFree(GetProcessHeap(), 0, icnsPath);
+    return hr;
+}
+#else
+static HRESULT platform_write_icon(IStream *icoStream, int exeIndex,
+                                   int bestIndex, LPCWSTR icoPathW,
+                                   const char *destFilename, char **nativeIdentifier)
+{
+    char *icoPathA = NULL;
+    char *iconsDir = NULL;
+    char *pngPath = NULL;
+    unsigned short crc;
+    char *p, *q;
+    HRESULT hr = S_OK;
+    LARGE_INTEGER zero;
 
-    HeapFree( GetProcessHeap(), 0, png_path );
-    png_path=NULL;
+    icoPathA = wchars_to_utf8_chars(icoPathW);
+    if (icoPathA == NULL)
+    {
+        hr = E_OUTOFMEMORY;
+        goto end;
+    }
+    crc = crc16(icoPathA);
+    p = strrchr(icoPathA, '\\');
+    if (p == NULL)
+        p = icoPathA;
+    else
+    {
+        *p = 0;
+        p++;
+    }
+    q = strrchr(p, '.');
+    if (q)
+        *q = 0;
+    if (destFilename)
+        *nativeIdentifier = heap_printf("%s", destFilename);
+    else
+        *nativeIdentifier = heap_printf("%04X_%s.%d", crc, p, exeIndex);
+    if (*nativeIdentifier == NULL)
+    {
+        hr = E_OUTOFMEMORY;
+        goto end;
+    }
+    iconsDir = heap_printf("%s/icons", xdg_data_dir);
+    if (iconsDir == NULL)
+    {
+        hr = E_OUTOFMEMORY;
+        goto end;
+    }
+    create_directories(iconsDir);
+    pngPath = heap_printf("%s/%s.png", iconsDir, *nativeIdentifier);
+    if (pngPath == NULL)
+    {
+        hr = E_OUTOFMEMORY;
+        goto end;
+    }
+    zero.QuadPart = 0;
+    hr = IStream_Seek(icoStream, zero, STREAM_SEEK_SET, NULL);
+    if (FAILED(hr))
+        goto end;
+    hr = convert_to_native_icon(icoStream, &bestIndex, 1, &CLSID_WICPngEncoder,
+                                pngPath, icoPathW);
 
- end:
-    HeapFree(GetProcessHeap(), 0, iconsdir);
-    HeapFree(GetProcessHeap(), 0, ico_path);
+end:
+    HeapFree(GetProcessHeap(), 0, icoPathA);
+    HeapFree(GetProcessHeap(), 0, iconsDir);
+    HeapFree(GetProcessHeap(), 0, pngPath);
+    return hr;
+}
+#endif /* defined(__APPLE__) */
+
+/* extract an icon from an exe or icon file; helper for IPersistFile_fnSave */
+static char *extract_icon(LPCWSTR icoPathW, int index, const char *destFilename, BOOL bWait)
+{
+    IStream *stream = NULL;
+    HRESULT hr;
+    char *nativeIdentifier = NULL;
+    ICONDIRENTRY *iconDirEntries = NULL;
+    int numEntries;
+    int bestIndex = -1;
+    int maxPixels = 0;
+    int maxBits = 0;
+    int i;
+
+    WINE_TRACE("path=[%s] index=%d destFilename=[%s]\n", wine_dbgstr_w(icoPathW), index, wine_dbgstr_a(destFilename));
+
+    hr = open_icon(icoPathW, index, bWait, &stream);
+    if (FAILED(hr))
+    {
+        WINE_WARN("opening icon %s index %d failed, hr=0x%08X\n", wine_dbgstr_w(icoPathW), index, hr);
+        goto end;
+    }
+    hr = read_ico_direntries(stream, &iconDirEntries, &numEntries);
+    if (FAILED(hr))
+        goto end;
+    for (i = 0; i < numEntries; i++)
+    {
+        WINE_TRACE("[%d]: %d x %d @ %d\n", i, iconDirEntries[i].bWidth,
+            iconDirEntries[i].bHeight, iconDirEntries[i].wBitCount);
+        if (iconDirEntries[i].wBitCount >= maxBits &&
+            (iconDirEntries[i].bHeight * iconDirEntries[i].bWidth) >= maxPixels)
+        {
+            bestIndex = i;
+            maxPixels = iconDirEntries[i].bHeight * iconDirEntries[i].bWidth;
+            maxBits = iconDirEntries[i].wBitCount;
+        }
+    }
+    WINE_TRACE("Selected: %d\n", bestIndex);
+    hr = platform_write_icon(stream, index, bestIndex, icoPathW, destFilename, &nativeIdentifier);
+    if (FAILED(hr))
+        WINE_WARN("writing icon failed, error 0x%08X\n", hr);
+
+end:
     if (stream)
         IStream_Release(stream);
-    return png_path;
+    HeapFree(GetProcessHeap(), 0, iconDirEntries);
+    if (FAILED(hr))
+    {
+        HeapFree(GetProcessHeap(), 0, nativeIdentifier);
+        nativeIdentifier = NULL;
+    }
+    return nativeIdentifier;
 }
 
 static HKEY open_menus_reg_key(void)
@@ -2175,6 +2280,23 @@ static char *get_start_exe_path(void)
     return escape(start_path);
 }
 
+static char* escape_unix_link_arg(LPCSTR unix_link)
+{
+    char *ret = NULL;
+    WCHAR *unix_linkW = utf8_chars_to_wchars(unix_link);
+    if (unix_linkW)
+    {
+        char *escaped_lnk = escape(unix_linkW);
+        if (escaped_lnk)
+        {
+            ret = heap_printf("/Unix %s", escaped_lnk);
+            HeapFree(GetProcessHeap(), 0, escaped_lnk);
+        }
+        HeapFree(GetProcessHeap(), 0, unix_linkW);
+    }
+    return ret;
+}
+
 static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
 {
     static const WCHAR startW[] = {'\\','c','o','m','m','a','n','d',
@@ -2340,7 +2462,18 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
         location = heap_printf("%s/%s.desktop", xdg_desktop_dir, lastEntry);
         if (location)
         {
-            r = !write_desktop_entry(NULL, location, lastEntry, escaped_path, escaped_args, description, work_dir, icon_name);
+            if (csidl == CSIDL_COMMON_DESKTOPDIRECTORY)
+            {
+                char *link_arg = escape_unix_link_arg(unix_link);
+                if (link_arg)
+                {
+                    r = !write_desktop_entry(unix_link, location, lastEntry,
+                        start_path, link_arg, description, work_dir, icon_name);
+                    HeapFree(GetProcessHeap(), 0, link_arg);
+                }
+            }
+            else
+                r = !write_desktop_entry(NULL, location, lastEntry, escaped_path, escaped_args, description, work_dir, icon_name);
             if (r == 0)
                 chmod(location, 0755);
             HeapFree(GetProcessHeap(), 0, location);
@@ -2348,21 +2481,11 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
     }
     else
     {
-        WCHAR *unix_linkW = utf8_chars_to_wchars(unix_link);
-        if (unix_linkW)
+        char *link_arg = escape_unix_link_arg(unix_link);
+        if (link_arg)
         {
-            char *escaped_lnk = escape(unix_linkW);
-            if (escaped_lnk)
-            {
-                char *menuarg = heap_printf("/Unix %s", escaped_lnk);
-                if (menuarg)
-                {
-                    r = !write_menu_entry(unix_link, link_name, start_path, menuarg, description, work_dir, icon_name);
-                    HeapFree(GetProcessHeap(), 0, menuarg);
-                }
-                HeapFree(GetProcessHeap(), 0, escaped_lnk);
-            }
-            HeapFree(GetProcessHeap(), 0, unix_linkW);
+            r = !write_menu_entry(unix_link, link_name, start_path, link_arg, description, work_dir, icon_name);
+            HeapFree(GetProcessHeap(), 0, link_arg);
         }
     }
 

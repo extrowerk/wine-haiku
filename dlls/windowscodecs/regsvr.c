@@ -978,13 +978,19 @@ static struct regsvr_coclass const coclass_list[] = {
 	"windowscodecs.dll",
 	"Both"
     },
+    {   &CLSID_WineTgaDecoder,
+	"WIC TGA Decoder",
+	NULL,
+	"windowscodecs.dll",
+	"Both"
+    },
     { NULL }			/* list terminator */
 };
 
 /***********************************************************************
  *		decoder list
  */
-static const BYTE mask_all[] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+static const BYTE mask_all[] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
 
 static const BYTE bmp_magic[] = {0x42,0x4d};
 
@@ -1036,6 +1042,7 @@ static const BYTE jpeg_magic[] = {0xff, 0xd8, 0xff, 0xe0};
 
 static GUID const * const jpeg_formats[] = {
     &GUID_WICPixelFormat24bppBGR,
+    &GUID_WICPixelFormat32bppCMYK,
     &GUID_WICPixelFormat8bppGray,
     NULL
 };
@@ -1082,12 +1089,44 @@ static GUID const * const tiff_formats[] = {
     &GUID_WICPixelFormat32bppBGRA,
     &GUID_WICPixelFormat32bppPBGRA,
     &GUID_WICPixelFormat48bppRGB,
+    &GUID_WICPixelFormat64bppRGBA,
+    &GUID_WICPixelFormat64bppPRGBA,
     NULL
 };
 
 static struct decoder_pattern const tiff_patterns[] = {
     {4,0,tiff_magic_le,mask_all,0},
     {4,0,tiff_magic_be,mask_all,0},
+    {0}
+};
+
+static const BYTE tga_footer_magic[18] = "TRUEVISION-XFILE.";
+
+static const BYTE tga_indexed_magic[18] = {0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,8,0};
+static const BYTE tga_indexed_mask[18] = {0,0xff,0xf7,0,0,0,0,0,0,0,0,0,0,0,0,0,0xff,0xcf};
+
+static const BYTE tga_truecolor_magic[18] = {0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+static const BYTE tga_truecolor_mask[18] = {0,0xff,0xf7,0,0,0,0,0,0,0,0,0,0,0,0,0,0x87,0xc0};
+
+static const BYTE tga_grayscale_magic[18] = {0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,8,0};
+static const BYTE tga_grayscale_mask[18] = {0,0xff,0xf7,0,0,0,0,0,0,0,0,0,0,0,0,0,0xff,0xcf};
+
+static GUID const * const tga_formats[] = {
+    &GUID_WICPixelFormat8bppGray,
+    &GUID_WICPixelFormat8bppIndexed,
+    &GUID_WICPixelFormat16bppGray,
+    &GUID_WICPixelFormat16bppBGR555,
+    &GUID_WICPixelFormat24bppBGR,
+    &GUID_WICPixelFormat32bppBGRA,
+    &GUID_WICPixelFormat32bppPBGRA,
+    NULL
+};
+
+static struct decoder_pattern const tga_patterns[] = {
+    {18,18,tga_footer_magic,mask_all,1},
+    {18,0,tga_indexed_magic,tga_indexed_mask,0},
+    {18,0,tga_truecolor_magic,tga_truecolor_mask,0},
+    {18,0,tga_grayscale_magic,tga_grayscale_mask,0},
     {0}
 };
 
@@ -1151,6 +1190,16 @@ static struct regsvr_decoder const decoder_list[] = {
 	".tif;.tiff",
 	tiff_formats,
 	tiff_patterns
+    },
+    {   &CLSID_WineTgaDecoder,
+	"The Wine Project",
+	"TGA Decoder",
+	"1.0.0.0",
+	&GUID_VendorWine,
+	"image/x-targa",
+	".tga;.tpic",
+	tga_formats,
+	tga_patterns
     },
     { NULL }			/* list terminator */
 };
@@ -1225,11 +1274,13 @@ static GUID const * const converter_formats[] = {
     &GUID_WICPixelFormat16bppGray,
     &GUID_WICPixelFormat16bppBGR555,
     &GUID_WICPixelFormat16bppBGR565,
+    &GUID_WICPixelFormat16bppBGRA5551,
     &GUID_WICPixelFormat24bppBGR,
     &GUID_WICPixelFormat32bppBGR,
     &GUID_WICPixelFormat32bppBGRA,
     &GUID_WICPixelFormat48bppRGB,
     &GUID_WICPixelFormat64bppRGBA,
+    &GUID_WICPixelFormat32bppCMYK,
     NULL
 };
 
@@ -1244,13 +1295,18 @@ static struct regsvr_converter const converter_list[] = {
     { NULL }			/* list terminator */
 };
 
+extern HRESULT WINAPI WIC_DllRegisterServer(void) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI WIC_DllUnregisterServer(void) DECLSPEC_HIDDEN;
+
 HRESULT WINAPI DllRegisterServer(void)
 {
     HRESULT hr;
 
     TRACE("\n");
 
-    hr = register_coclasses(coclass_list);
+    hr = WIC_DllRegisterServer();
+    if (SUCCEEDED(hr))
+        hr = register_coclasses(coclass_list);
     if (SUCCEEDED(hr))
         register_decoders(decoder_list);
     if (SUCCEEDED(hr))
@@ -1266,7 +1322,9 @@ HRESULT WINAPI DllUnregisterServer(void)
 
     TRACE("\n");
 
-    hr = unregister_coclasses(coclass_list);
+    hr = WIC_DllUnregisterServer();
+    if (SUCCEEDED(hr))
+        hr = unregister_coclasses(coclass_list);
     if (SUCCEEDED(hr))
         unregister_decoders(decoder_list);
     if (SUCCEEDED(hr))

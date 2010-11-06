@@ -70,7 +70,7 @@ WINE_DECLARE_DEBUG_CHANNEL(module);
 #endif
 
 /* File view */
-typedef struct file_view
+struct file_view
 {
     struct list   entry;       /* Entry in global view list */
     void         *base;        /* Base address */
@@ -78,7 +78,7 @@ typedef struct file_view
     HANDLE        mapping;     /* Handle to the file mapping */
     unsigned int  protect;     /* Protection for all pages at allocation time */
     BYTE          prot[1];     /* Protection byte for each page */
-} FILE_VIEW;
+};
 
 
 /* Conversion from VPROT_* to Win32 flags */
@@ -137,6 +137,7 @@ static void *address_space_limit;
 static void *user_space_limit;
 static void *working_set_limit;
 #endif  /* __i386__ */
+static void * const address_space_start = (void *)0x110000;
 
 #define ROUND_ADDR(addr,mask) \
    ((void *)((UINT_PTR)(addr) & ~(UINT_PTR)(mask)))
@@ -196,7 +197,7 @@ static int VIRTUAL_GetUnixProt( BYTE vprot )
 /***********************************************************************
  *           VIRTUAL_DumpView
  */
-static void VIRTUAL_DumpView( FILE_VIEW *view )
+static void VIRTUAL_DumpView( struct file_view *view )
 {
     UINT i, count;
     char *addr = view->base;
@@ -238,7 +239,7 @@ static void VIRTUAL_Dump(void)
 
     TRACE( "Dump of all virtual memory views:\n" );
     server_enter_uninterrupted_section( &csVirtual, &sigset );
-    LIST_FOR_EACH_ENTRY( view, &views_list, FILE_VIEW, entry )
+    LIST_FOR_EACH_ENTRY( view, &views_list, struct file_view, entry )
     {
         VIRTUAL_DumpView( view );
     }
@@ -597,7 +598,7 @@ static NTSTATUS get_vprot_flags( DWORD protect, unsigned int *vprot )
  *	TRUE: Success
  *	FALSE: Failure
  */
-static BOOL VIRTUAL_SetProt( FILE_VIEW *view, /* [in] Pointer to view */
+static BOOL VIRTUAL_SetProt( struct file_view *view, /* [in] Pointer to view */
                              void *base,      /* [in] Starting address */
                              size_t size,     /* [in] Size in bytes */
                              BYTE vprot )     /* [in] Protections to use */
@@ -726,7 +727,6 @@ struct alloc_area
  */
 static int alloc_reserved_area_callback( void *start, size_t size, void *arg )
 {
-    static void * const address_space_start = (void *)0x110000;
     struct alloc_area *alloc = arg;
     void *end = (char *)start + size;
 
@@ -993,8 +993,12 @@ static NTSTATUS allocate_dos_memory( struct file_view **view, unsigned int vprot
         addr = wine_anon_mmap( (void *)page_size, 0x10000 - page_size, unix_prot, 0 );
         if (addr == (void *)page_size)
         {
-            addr = NULL;
-            TRACE( "successfully mapped low 64K range\n" );
+            if (!wine_anon_mmap( NULL, page_size, unix_prot, MAP_FIXED ))
+            {
+                addr = NULL;
+                TRACE( "successfully mapped low 64K range\n" );
+            }
+            else TRACE( "failed to map page 0\n" );
         }
         else
         {
@@ -1009,6 +1013,26 @@ static NTSTATUS allocate_dos_memory( struct file_view **view, unsigned int vprot
     size = (char *)dosmem_size - (char *)addr;
     wine_anon_mmap( addr, size, unix_prot, MAP_FIXED );
     return create_view( view, addr, size, vprot );
+}
+
+
+/***********************************************************************
+ *           stat_mapping_file
+ *
+ * Stat the underlying file for a memory view.
+ */
+static NTSTATUS stat_mapping_file( struct file_view *view, struct stat *st )
+{
+    NTSTATUS status;
+    int unix_fd, needs_close;
+
+    if (!view->mapping) return STATUS_NOT_MAPPED_VIEW;
+    if (!(status = server_get_unix_fd( view->mapping, 0, &unix_fd, &needs_close, NULL, NULL )))
+    {
+        if (fstat( unix_fd, st ) == -1) status = FILE_GetNtStatus();
+        if (needs_close) close( unix_fd );
+    }
+    return status;
 }
 
 
@@ -1077,6 +1101,9 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
 
 #ifdef __x86_64__
     if (nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64)
+#elif defined(__ARMEL__)
+    if (nt->FileHeader.Machine != IMAGE_FILE_MACHINE_ARM &&
+        nt->FileHeader.Machine != IMAGE_FILE_MACHINE_THUMB)
 #else
     if (nt->FileHeader.Machine != IMAGE_FILE_MACHINE_I386)
 #endif
@@ -1096,6 +1123,7 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
         case IMAGE_FILE_MACHINE_ALPHA64: MESSAGE("Alpha-64"); break;
         case IMAGE_FILE_MACHINE_AMD64:   MESSAGE("AMD-64"); break;
         case IMAGE_FILE_MACHINE_ARM:     MESSAGE("ARM"); break;
+        case IMAGE_FILE_MACHINE_THUMB:   MESSAGE("ARM Thumb"); break;
         case IMAGE_FILE_MACHINE_SPARC:   MESSAGE("SPARC"); break;
         default: MESSAGE("Unknown-%04x", nt->FileHeader.Machine); break;
         }
@@ -1403,7 +1431,7 @@ NTSTATUS virtual_create_builtin_view( void *module )
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( module );
     SIZE_T size = nt->OptionalHeader.SizeOfImage;
     IMAGE_SECTION_HEADER *sec;
-    FILE_VIEW *view;
+    struct file_view *view;
     void *base;
     int i;
 
@@ -1438,7 +1466,7 @@ NTSTATUS virtual_create_builtin_view( void *module )
  */
 NTSTATUS virtual_alloc_thread_stack( TEB *teb, SIZE_T reserve_size, SIZE_T commit_size )
 {
-    FILE_VIEW *view;
+    struct file_view *view;
     NTSTATUS status;
     sigset_t sigset;
     SIZE_T size;
@@ -1499,7 +1527,7 @@ void virtual_clear_thread_stack(void)
  */
 NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err )
 {
-    FILE_VIEW *view;
+    struct file_view *view;
     NTSTATUS ret = STATUS_ACCESS_VIOLATION;
     sigset_t sigset;
 
@@ -1538,7 +1566,7 @@ NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err )
  */
 BOOL virtual_handle_stack_fault( void *addr )
 {
-    FILE_VIEW *view;
+    struct file_view *view;
     BOOL ret = FALSE;
 
     RtlEnterCriticalSection( &csVirtual );  /* no need for signal masking inside signal handler */
@@ -1882,7 +1910,7 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG zero_
  */
 NTSTATUS WINAPI NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *size_ptr, ULONG type )
 {
-    FILE_VIEW *view;
+    struct file_view *view;
     char *base;
     sigset_t sigset;
     NTSTATUS status = STATUS_SUCCESS;
@@ -1966,7 +1994,7 @@ NTSTATUS WINAPI NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *si
 NTSTATUS WINAPI NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *size_ptr,
                                         ULONG new_prot, ULONG *old_prot )
 {
-    FILE_VIEW *view;
+    struct file_view *view;
     sigset_t sigset;
     NTSTATUS status = STATUS_SUCCESS;
     char *base;
@@ -2048,7 +2076,7 @@ static int get_free_mem_state_callback( void *start, size_t size, void *arg )
         return 0;
     }
 
-    if (info->BaseAddress >= start)
+    if (info->BaseAddress >= start || start <= address_space_start)
     {
         /* it's a real free area */
         info->State             = MEM_FREE;
@@ -2083,7 +2111,7 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
                                       MEMORY_INFORMATION_CLASS info_class, PVOID buffer,
                                       SIZE_T len, SIZE_T *res_len )
 {
-    FILE_VIEW *view;
+    struct file_view *view;
     char *base, *alloc_base = 0;
     struct list *ptr;
     SIZE_T size = 0;
@@ -2179,17 +2207,22 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
         {
             /* not in a reserved area at all, pretend it's allocated */
 #ifdef __i386__
-            info->State             = MEM_RESERVE;
-            info->Protect           = PAGE_NOACCESS;
-            info->AllocationProtect = PAGE_NOACCESS;
-            info->Type              = MEM_PRIVATE;
-#else
-            info->State             = MEM_FREE;
-            info->Protect           = PAGE_NOACCESS;
-            info->AllocationBase    = 0;
-            info->AllocationProtect = 0;
-            info->Type              = 0;
+            if (base >= (char *)address_space_start)
+            {
+                info->State             = MEM_RESERVE;
+                info->Protect           = PAGE_NOACCESS;
+                info->AllocationProtect = PAGE_NOACCESS;
+                info->Type              = MEM_PRIVATE;
+            }
+            else
 #endif
+            {
+                info->State             = MEM_FREE;
+                info->Protect           = PAGE_NOACCESS;
+                info->AllocationBase    = 0;
+                info->AllocationProtect = 0;
+                info->Type              = 0;
+            }
         }
     }
     else
@@ -2561,7 +2594,7 @@ done:
  */
 NTSTATUS WINAPI NtUnmapViewOfSection( HANDLE process, PVOID addr )
 {
-    FILE_VIEW *view;
+    struct file_view *view;
     NTSTATUS status = STATUS_NOT_MAPPED_VIEW;
     sigset_t sigset;
     void *base = ROUND_ADDR( addr, page_mask );
@@ -2598,7 +2631,7 @@ NTSTATUS WINAPI NtUnmapViewOfSection( HANDLE process, PVOID addr )
 NTSTATUS WINAPI NtFlushVirtualMemory( HANDLE process, LPCVOID *addr_ptr,
                                       SIZE_T *size_ptr, ULONG unknown )
 {
-    FILE_VIEW *view;
+    struct file_view *view;
     NTSTATUS status = STATUS_SUCCESS;
     sigset_t sigset;
     void *addr = ROUND_ADDR( *addr_ptr, page_mask );
@@ -2780,7 +2813,32 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
  */
 NTSTATUS WINAPI NtAreMappedFilesTheSame(PVOID addr1, PVOID addr2)
 {
+    struct file_view *view1, *view2;
+    struct stat st1, st2;
+    NTSTATUS status;
+    sigset_t sigset;
+
     TRACE("%p %p\n", addr1, addr2);
 
-    return STATUS_NOT_SAME_DEVICE;
+    server_enter_uninterrupted_section( &csVirtual, &sigset );
+
+    view1 = VIRTUAL_FindView( addr1, 0 );
+    view2 = VIRTUAL_FindView( addr2, 0 );
+
+    if (!view1 || !view2)
+        status = STATUS_INVALID_ADDRESS;
+    else if ((view1->protect & VPROT_VALLOC) || (view2->protect & VPROT_VALLOC))
+        status = STATUS_CONFLICTING_ADDRESSES;
+    else if (!(view1->protect & VPROT_IMAGE) || !(view2->protect & VPROT_IMAGE))
+        status = STATUS_NOT_SAME_DEVICE;
+    else if (view1 == view2)
+        status = STATUS_SUCCESS;
+    else if (!stat_mapping_file( view1, &st1 ) && !stat_mapping_file( view2, &st2 ) &&
+             st1.st_dev == st2.st_dev && st1.st_ino == st2.st_ino)
+        status = STATUS_SUCCESS;
+    else
+        status = STATUS_NOT_SAME_DEVICE;
+
+    server_leave_uninterrupted_section( &csVirtual, &sigset );
+    return status;
 }

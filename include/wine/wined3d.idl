@@ -271,8 +271,10 @@ enum wined3d_format_id
     WINED3DFMT_R8G8_B8G8                    = WINEMAKEFOURCC('R','G','B','G'),
     WINED3DFMT_ATI2N                        = WINEMAKEFOURCC('A','T','I','2'),
     WINED3DFMT_INST                         = WINEMAKEFOURCC('I','N','S','T'),
+    WINED3DFMT_NVDB                         = WINEMAKEFOURCC('N','V','D','B'),
     WINED3DFMT_NVHU                         = WINEMAKEFOURCC('N','V','H','U'),
     WINED3DFMT_NVHS                         = WINEMAKEFOURCC('N','V','H','S'),
+    WINED3DFMT_INTZ                         = WINEMAKEFOURCC('I','N','T','Z'),
 
     WINED3DFMT_FORCE_DWORD = 0xffffffff
 };
@@ -2373,15 +2375,15 @@ interface IWineD3DClipper : IUnknown
 ]
 interface IWineD3DSurface : IWineD3DResource
 {
-    HRESULT GetDesc(
+    void GetDesc(
         [out] WINED3DSURFACE_DESC *desc
     );
-    HRESULT LockRect(
+    HRESULT Map(
         [out] WINED3DLOCKED_RECT *locked_rect,
         [in] const RECT *rect,
         [in] DWORD flags
     );
-    HRESULT UnlockRect(
+    HRESULT Unmap(
     );
     HRESULT GetDC(
         [out] HDC *dc
@@ -2486,15 +2488,15 @@ interface IWineD3DSurface : IWineD3DResource
 ]
 interface IWineD3DVolume : IWineD3DResource
 {
-    HRESULT GetDesc(
+    void GetDesc(
         [out] WINED3DVOLUME_DESC *desc
     );
-    HRESULT LockBox(
+    HRESULT Map(
         [out] WINED3DLOCKED_BOX *locked_box,
         [in] const WINED3DBOX *box,
         [in] DWORD flags
     );
-    HRESULT UnlockBox(
+    HRESULT Unmap(
     );
     HRESULT LoadTexture(
         [in] int gl_level,
@@ -2531,8 +2533,6 @@ interface IWineD3DBaseTexture : IWineD3DResource
     HRESULT BindTexture(
         [in] BOOL srgb
     );
-    UINT GetTextureDimensions(
-    );
     BOOL IsCondNP2(
     );
 }
@@ -2545,21 +2545,21 @@ interface IWineD3DBaseTexture : IWineD3DResource
 interface IWineD3DTexture : IWineD3DBaseTexture
 {
     HRESULT GetLevelDesc(
-        [in] UINT level,
+        [in] UINT sub_resource_idx,
         [out] WINED3DSURFACE_DESC *desc
     );
     HRESULT GetSurfaceLevel(
-        [in] UINT level,
+        [in] UINT sub_resource_idx,
         [out] IWineD3DSurface **surface
     );
-    HRESULT LockRect(
-        [in] UINT level,
+    HRESULT Map(
+        [in] UINT sub_resource_idx,
         [out] WINED3DLOCKED_RECT *locked_rect,
         [in] const RECT *rect,
         [in] DWORD flags
     );
-    HRESULT UnlockRect(
-        [in] UINT level
+    HRESULT Unmap(
+        [in] UINT sub_resource_idx
     );
     HRESULT AddDirtyRect(
         [in] const RECT *dirty_rect
@@ -2574,24 +2574,21 @@ interface IWineD3DTexture : IWineD3DBaseTexture
 interface IWineD3DCubeTexture : IWineD3DBaseTexture
 {
     HRESULT GetLevelDesc(
-        [in] UINT level,
+        [in] UINT sub_resource_idx,
         [out] WINED3DSURFACE_DESC *desc
     );
     HRESULT GetCubeMapSurface(
-        [in] WINED3DCUBEMAP_FACES face,
-        [in] UINT level,
+        [in] UINT sub_resource_idx,
         [out] IWineD3DSurface **surface
     );
-    HRESULT LockRect(
-        [in] WINED3DCUBEMAP_FACES face,
-        [in] UINT level,
+    HRESULT Map(
+        [in] UINT sub_resource_idx,
         [out] WINED3DLOCKED_RECT *locked_rect,
         [in] const RECT *rect,
         [in] DWORD flags
     );
-    HRESULT UnlockRect(
-        [in] WINED3DCUBEMAP_FACES face,
-        [in] UINT level
+    HRESULT Unmap(
+        [in] UINT sub_resource_idx
     );
     HRESULT AddDirtyRect(
         [in] WINED3DCUBEMAP_FACES face,
@@ -2607,21 +2604,21 @@ interface IWineD3DCubeTexture : IWineD3DBaseTexture
 interface IWineD3DVolumeTexture : IWineD3DBaseTexture
 {
     HRESULT GetLevelDesc(
-        [in] UINT level,
+        [in] UINT sub_resource_idx,
         [out] WINED3DVOLUME_DESC *desc
     );
     HRESULT GetVolumeLevel(
-        [in] UINT level,
+        [in] UINT sub_resource_idx,
         [out] IWineD3DVolume **volume
     );
-    HRESULT LockBox(
-        [in] UINT level,
+    HRESULT Map(
+        [in] UINT sub_resource_idx,
         [out] WINED3DLOCKED_BOX *locked_box,
         [in] const WINED3DBOX *box,
         [in] DWORD flags
     );
-    HRESULT UnlockBox(
-        [in] UINT level
+    HRESULT Unmap(
+        [in] UINT sub_resource_idx
     );
     HRESULT AddDirtyBox(
         [in] const WINED3DBOX *dirty_box
@@ -2647,8 +2644,6 @@ interface IWineD3DStateBlock : IUnknown
     HRESULT Capture(
     );
     HRESULT Apply(
-    );
-    HRESULT InitStartupStateBlock(
     );
 }
 
@@ -2734,9 +2729,9 @@ interface IWineD3DBuffer : IWineD3DResource
         [out] BYTE **data,
         [in] DWORD flags
     );
-    HRESULT Unmap(
+    void Unmap(
     );
-    HRESULT GetDesc(
+    void GetDesc(
         [out] WINED3DBUFFER_DESC *desc
     );
 }
@@ -3139,10 +3134,6 @@ interface IWineD3DDevice : IUnknown
     HRESULT GetRenderTarget(
         [in] DWORD render_target_idx,
         [out] IWineD3DSurface **render_target
-    );
-    HRESULT SetFrontBackBuffers(
-        [in] IWineD3DSurface *front,
-        [in] IWineD3DSurface *back
     );
     HRESULT SetSamplerState(
         [in] DWORD sampler_idx,

@@ -31,7 +31,6 @@
 #include "winbase.h"
 #include "wincon.h"
 #include "winternl.h"
-#include "wownt32.h"
 
 #include "wine/library.h"
 #include "kernel_private.h"
@@ -138,6 +137,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         return process_attach( hinst );
     case DLL_PROCESS_DETACH:
         WritePrivateProfileSectionW( NULL, NULL, NULL );
+        CONSOLE_Exit();
         break;
     }
     return TRUE;
@@ -205,4 +205,20 @@ ULONGLONG WINAPI GetTickCount64(void)
 DWORD WINAPI GetTickCount(void)
 {
     return GetTickCount64();
+}
+
+/******************************************************************************
+ *           GetSystemRegistryQuota       (KERNEL32.@)
+ */
+BOOL WINAPI GetSystemRegistryQuota(PDWORD pdwQuotaAllowed, PDWORD pdwQuotaUsed)
+{
+    FIXME("(%p, %p) faking reported quota values\n", pdwQuotaAllowed, pdwQuotaUsed);
+
+    if (pdwQuotaAllowed)
+        *pdwQuotaAllowed = 2 * 1000 * 1000 * 1000; /* 2 GB */
+
+    if (pdwQuotaUsed)
+        *pdwQuotaUsed = 100 * 1000 * 1000; /* 100 MB */
+
+    return TRUE;
 }

@@ -28,6 +28,7 @@
 #include "winternl.h"
 #include "wmistr.h"
 #include "evntrace.h"
+#include "evntprov.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -805,5 +806,33 @@ ULONG WINAPI TraceEvent( TRACEHANDLE SessionHandle, PEVENT_TRACE_HEADER EventTra
 ULONG WINAPI UnregisterTraceGuids( TRACEHANDLE RegistrationHandle )
 {
     FIXME("%s: stub\n", wine_dbgstr_longlong(RegistrationHandle));
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ * EventRegister [ADVAPI32.@]
+ */
+ULONG WINAPI EventRegister( LPCGUID provider, PENABLECALLBACK callback, PVOID context, PREGHANDLE handle )
+{
+    FIXME("%s, %p, %p, %p\n", debugstr_guid(provider), callback, context, handle);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ * EventEnabled [ADVAPI32.@]
+ *
+ */
+BOOLEAN WINAPI EventEnabled( REGHANDLE handle, PCEVENT_DESCRIPTOR descriptor )
+{
+    FIXME("(%s, %p): stub\n", wine_dbgstr_longlong(handle), descriptor);
+    return FALSE;
+}
+
+/******************************************************************************
+ * QueryTraceW [ADVAPI32.@]
+ */
+ULONG WINAPI QueryTraceW( TRACEHANDLE handle, LPCWSTR sessionname, PEVENT_TRACE_PROPERTIES properties )
+{
+    FIXME("%s %s %p: stub\n", wine_dbgstr_longlong(handle), debugstr_w(sessionname), properties);
     return ERROR_CALL_NOT_IMPLEMENTED;
 }

@@ -67,6 +67,7 @@ dlls/kernel32/nls/winerr_plk.mc.rc
 dlls/kernel32/nls/winerr_ptb.mc.rc
 dlls/kernel32/nls/winerr_ptg.mc.rc
 dlls/kernel32/nls/winerr_rus.mc.rc
+dlls/kernel32/nls/winerr_sve.mc.rc
 dlls/kernel32/nls/winerr_ukr.mc.rc
 dlls/libd3dcompiler.def
 dlls/libd3dx9.def
@@ -91,6 +92,9 @@ dlls/msi/sql.tab.h
 dlls/mstask/mstask_local.h
 dlls/mstask/mstask_local_i.c
 dlls/msxml3/msxml3_v1.tlb
+dlls/msxml3/xslpattern.tab.c
+dlls/msxml3/xslpattern.tab.h
+dlls/msxml3/xslpattern.yy.c
 dlls/ole32/dcom.h
 dlls/ole32/dcom_p.c
 dlls/ole32/irot.h
@@ -136,6 +140,8 @@ dlls/sti/sti_wia.h
 dlls/sti/sti_wia_p.c
 dlls/urlmon/urlmon_urlmon.h
 dlls/urlmon/urlmon_urlmon_p.c
+dlls/windowscodecs/windowscodecs_wincodec.h
+dlls/windowscodecs/windowscodecs_wincodec_p.c
 include/activaut.h
 include/activdbg.h
 include/activscp.h
@@ -154,6 +160,8 @@ include/control.h
 include/ctfutb.h
 include/ctxtcall.h
 include/d3d10.h
+include/d3d10_1.h
+include/d3d11.h
 include/d3dcommon.h
 include/ddstream.h
 include/devicetopology.h
@@ -175,6 +183,7 @@ include/imnact.h
 include/imnxport.h
 include/indexsrv.h
 include/mediaobj.h
+include/metahost.h
 include/mimeinfo.h
 include/mimeole.h
 include/mlang.h
@@ -231,6 +240,7 @@ include/wine/itss.h
 include/wine/svcctl.h
 include/wine/wined3d.h
 include/wine/winedxgi.h
+include/winsxs.h
 include/wtypes.h
 include/wuapi.h
 include/xmldom.h

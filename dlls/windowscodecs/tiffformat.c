@@ -183,6 +183,11 @@ static void tiff_stream_unmap(thandle_t client_data, tdata_t addr, toff_t size)
 
 static TIFF* tiff_open_stream(IStream *stream, const char *mode)
 {
+    LARGE_INTEGER zero;
+
+    zero.QuadPart = 0;
+    IStream_Seek(stream, zero, STREAM_SEEK_SET, NULL);
+
     return pTIFFClientOpen("<IStream object>", mode, stream, tiff_stream_read,
         tiff_stream_write, tiff_stream_seek, tiff_stream_close,
         tiff_stream_size, tiff_stream_map, tiff_stream_unmap);
@@ -227,6 +232,7 @@ static const IWICBitmapFrameDecodeVtbl TiffFrameDecode_Vtbl;
 static HRESULT tiff_get_decode_info(TIFF *tiff, tiff_decode_info *decode_info)
 {
     uint16 photometric, bps, samples, planar;
+    uint16 extra_sample_count, *extra_samples;
     int ret;
 
     decode_info->indexed = 0;
@@ -293,7 +299,16 @@ static HRESULT tiff_get_decode_info(TIFF *tiff, tiff_decode_info *decode_info)
     case 2: /* RGB */
         decode_info->bpp = bps * samples;
 
-        if (samples != 3)
+        if (samples == 4)
+        {
+            ret = pTIFFGetField(tiff, TIFFTAG_EXTRASAMPLES, &extra_sample_count, &extra_samples);
+            if (!ret)
+            {
+                WARN("Cannot get extra sample type for RGB data, ret=%i count=%i\n", ret, extra_sample_count);
+                return E_FAIL;
+            }
+        }
+        else if (samples != 3)
         {
             FIXME("unhandled RGB sample count %u\n", samples);
             return E_FAIL;
@@ -303,10 +318,38 @@ static HRESULT tiff_get_decode_info(TIFF *tiff, tiff_decode_info *decode_info)
         {
         case 8:
             decode_info->reverse_bgr = 1;
-            decode_info->format = &GUID_WICPixelFormat24bppBGR;
+            if (samples == 3)
+                decode_info->format = &GUID_WICPixelFormat24bppBGR;
+            else
+                switch(extra_samples[0])
+                {
+                case 1: /* Associated (pre-multiplied) alpha data */
+                    decode_info->format = &GUID_WICPixelFormat32bppPBGRA;
+                    break;
+                case 2: /* Unassociated alpha data */
+                    decode_info->format = &GUID_WICPixelFormat32bppBGRA;
+                    break;
+                default:
+                    FIXME("unhandled extra sample type %i\n", extra_samples[0]);
+                    return E_FAIL;
+                }
             break;
         case 16:
-            decode_info->format = &GUID_WICPixelFormat48bppRGB;
+            if (samples == 3)
+                decode_info->format = &GUID_WICPixelFormat48bppRGB;
+            else
+                switch(extra_samples[0])
+                {
+                case 1: /* Associated (pre-multiplied) alpha data */
+                    decode_info->format = &GUID_WICPixelFormat64bppPRGBA;
+                    break;
+                case 2: /* Unassociated alpha data */
+                    decode_info->format = &GUID_WICPixelFormat64bppRGBA;
+                    break;
+                default:
+                    FIXME("unhandled extra sample type %i\n", extra_samples[0]);
+                    return E_FAIL;
+                }
             break;
         default:
             FIXME("unhandled RGB bit count %u\n", bps);
@@ -692,8 +735,34 @@ static HRESULT WINAPI TiffFrameDecode_GetResolution(IWICBitmapFrameDecode *iface
 static HRESULT WINAPI TiffFrameDecode_CopyPalette(IWICBitmapFrameDecode *iface,
     IWICPalette *pIPalette)
 {
-    FIXME("(%p,%p)\n", iface, pIPalette);
-    return E_NOTIMPL;
+    TiffFrameDecode *This = (TiffFrameDecode*)iface;
+    uint16 *red, *green, *blue;
+    WICColor colors[256];
+    int color_count, ret, i;
+
+    TRACE("(%p,%p)\n", iface, pIPalette);
+
+    color_count = 1<<This->decode_info.bps;
+
+    EnterCriticalSection(&This->parent->lock);
+    ret = pTIFFGetField(This->parent->tiff, TIFFTAG_COLORMAP, &red, &green, &blue);
+    LeaveCriticalSection(&This->parent->lock);
+
+    if (!ret)
+    {
+        WARN("Couldn't read color map\n");
+        return E_FAIL;
+    }
+
+    for (i=0; i<color_count; i++)
+    {
+        colors[i] = 0xff000000 |
+            ((red[i]<<8) & 0xff0000) |
+            (green[i] & 0xff00) |
+            ((blue[i]>>8) & 0xff);
+    }
+
+    return IWICPalette_InitializeCustom(pIPalette, colors, color_count);
 }
 
 static HRESULT TiffFrameDecode_ReadTile(TiffFrameDecode *This, UINT tile_x, UINT tile_y)
@@ -719,19 +788,20 @@ static HRESULT TiffFrameDecode_ReadTile(TiffFrameDecode *This, UINT tile_x, UINT
 
     if (hr == S_OK && This->decode_info.reverse_bgr)
     {
-        if (This->decode_info.format == &GUID_WICPixelFormat24bppBGR)
+        if (This->decode_info.bps == 8)
         {
-            UINT i, total_pixels;
+            UINT i, total_pixels, sample_count;
             BYTE *pixel, temp;
 
             total_pixels = This->decode_info.tile_width * This->decode_info.tile_height;
             pixel = This->cached_tile;
+            sample_count = This->decode_info.samples;
             for (i=0; i<total_pixels; i++)
             {
                 temp = pixel[2];
                 pixel[2] = pixel[0];
                 pixel[0] = temp;
-                pixel += 3;
+                pixel += sample_count;
             }
         }
     }
@@ -799,12 +869,24 @@ static HRESULT WINAPI TiffFrameDecode_CopyPixels(IWICBitmapFrameDecode *iface,
     HRESULT hr=S_OK;
     BYTE *dst_tilepos;
     UINT bytesperrow;
+    WICRect rect;
 
     TRACE("(%p,%p,%u,%u,%p)\n", iface, prc, cbStride, cbBufferSize, pbBuffer);
 
-    if (prc->X < 0 || prc->Y < 0 || prc->X+prc->Width > This->decode_info.width ||
-        prc->Y+prc->Height > This->decode_info.height)
-        return E_INVALIDARG;
+    if (!prc)
+    {
+        rect.X = 0;
+        rect.Y = 0;
+        rect.Width = This->decode_info.width;
+        rect.Height = This->decode_info.height;
+        prc = &rect;
+    }
+    else
+    {
+        if (prc->X < 0 || prc->Y < 0 || prc->X+prc->Width > This->decode_info.width ||
+            prc->Y+prc->Height > This->decode_info.height)
+            return E_INVALIDARG;
+    }
 
     bytesperrow = ((This->decode_info.bpp * prc->Width)+7)/8;
 

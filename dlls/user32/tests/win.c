@@ -49,6 +49,7 @@ static BOOL (WINAPI *pGetWindowInfo)(HWND,WINDOWINFO*);
 static UINT (WINAPI *pGetWindowModuleFileNameA)(HWND,LPSTR,UINT);
 static BOOL (WINAPI *pGetLayeredWindowAttributes)(HWND,COLORREF*,BYTE*,DWORD*);
 static BOOL (WINAPI *pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
+static BOOL (WINAPI *pUpdateLayeredWindow)(HWND,HDC,POINT*,SIZE*,HDC,POINT*,COLORREF,BLENDFUNCTION*,DWORD);
 static BOOL (WINAPI *pGetMonitorInfoA)(HMONITOR,LPMONITORINFO);
 static HMONITOR (WINAPI *pMonitorFromPoint)(POINT,DWORD);
 static int  (WINAPI *pGetWindowRgnBox)(HWND,LPRECT);
@@ -57,6 +58,7 @@ static BOOL (WINAPI *pGetProcessDefaultLayout)( DWORD *layout );
 static BOOL (WINAPI *pSetProcessDefaultLayout)( DWORD layout );
 static DWORD (WINAPI *pSetLayout)(HDC hdc, DWORD layout);
 static DWORD (WINAPI *pGetLayout)(HDC hdc);
+static BOOL (WINAPI *pMirrorRgn)(HWND hwnd, HRGN hrgn);
 
 static BOOL test_lbuttondown_flag;
 static HWND hwndMessage;
@@ -1028,7 +1030,6 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
     case HCBT_MOVESIZE:
     case HCBT_MINMAX:
     case HCBT_ACTIVATE:
-    case HCBT_SETFOCUS:
 	if (pGetWindowInfo && IsWindow(hwnd))
 	{
 	    WINDOWINFO info;
@@ -1042,7 +1043,8 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 	    verify_window_info(code_name, hwnd, &info);
 	}
         break;
-    /* on HCBT_DESTROYWND window state is undefined */
+    /* window state is undefined */
+    case HCBT_SETFOCUS:
     case HCBT_DESTROYWND:
         break;
     default:
@@ -5568,21 +5570,38 @@ static void test_layered_window(void)
     COLORREF key = 0;
     BYTE alpha = 0;
     DWORD flags = 0;
+    POINT pt = { 0, 0 };
+    SIZE sz = { 200, 200 };
+    HDC hdc;
+    HBITMAP hbm;
     BOOL ret;
 
-    if (!pGetLayeredWindowAttributes || !pSetLayeredWindowAttributes)
+    if (!pGetLayeredWindowAttributes || !pSetLayeredWindowAttributes || !pUpdateLayeredWindow)
     {
         win_skip( "layered windows not supported\n" );
         return;
     }
+
+    hdc = CreateCompatibleDC( 0 );
+    hbm = CreateCompatibleBitmap( hdc, 200, 200 );
+    SelectObject( hdc, hbm );
+
     hwnd = CreateWindowExA(0, "MainWindowClass", "message window", WS_CAPTION,
                            100, 100, 200, 200, 0, 0, 0, NULL);
     assert( hwnd );
+    SetLastError( 0xdeadbeef );
+    ret = pUpdateLayeredWindow( hwnd, 0, NULL, &sz, hdc, &pt, 0, NULL, ULW_OPAQUE );
+    ok( !ret, "UpdateLayeredWindow should fail on non-layered window\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError() );
     ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
     ok( !ret, "GetLayeredWindowAttributes should fail on non-layered window\n" );
     ret = pSetLayeredWindowAttributes( hwnd, 0, 0, LWA_ALPHA );
     ok( !ret, "SetLayeredWindowAttributes should fail on non-layered window\n" );
     SetWindowLong( hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED );
+    ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
+    ok( !ret, "GetLayeredWindowAttributes should fail on layered but not initialized window\n" );
+    ret = pUpdateLayeredWindow( hwnd, 0, NULL, &sz, hdc, &pt, 0, NULL, ULW_OPAQUE );
+    ok( ret, "UpdateLayeredWindow should succeed on layered window\n" );
     ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
     ok( !ret, "GetLayeredWindowAttributes should fail on layered but not initialized window\n" );
     ret = pSetLayeredWindowAttributes( hwnd, 0x123456, 44, LWA_ALPHA );
@@ -5592,14 +5611,23 @@ static void test_layered_window(void)
     ok( key == 0x123456 || key == 0, "wrong color key %x\n", key );
     ok( alpha == 44, "wrong alpha %u\n", alpha );
     ok( flags == LWA_ALPHA, "wrong flags %x\n", flags );
+    SetLastError( 0xdeadbeef );
+    ret = pUpdateLayeredWindow( hwnd, 0, NULL, &sz, hdc, &pt, 0, NULL, ULW_OPAQUE );
+    ok( !ret, "UpdateLayeredWindow should fail on layered but initialized window\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError() );
 
     /* clearing WS_EX_LAYERED resets attributes */
     SetWindowLong( hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) & ~WS_EX_LAYERED );
+    SetLastError( 0xdeadbeef );
+    ret = pUpdateLayeredWindow( hwnd, 0, NULL, &sz, hdc, &pt, 0, NULL, ULW_OPAQUE );
+    ok( !ret, "UpdateLayeredWindow should fail on non-layered window\n" );
     ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
     ok( !ret, "GetLayeredWindowAttributes should fail on no longer layered window\n" );
     SetWindowLong( hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED );
     ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
     ok( !ret, "GetLayeredWindowAttributes should fail on layered but not initialized window\n" );
+    ret = pUpdateLayeredWindow( hwnd, 0, NULL, &sz, hdc, &pt, 0, NULL, ULW_OPAQUE );
+    ok( ret, "UpdateLayeredWindow should succeed on layered window\n" );
     ret = pSetLayeredWindowAttributes( hwnd, 0x654321, 22, LWA_COLORKEY | LWA_ALPHA );
     ok( ret, "SetLayeredWindowAttributes should succeed on layered window\n" );
     ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
@@ -5607,6 +5635,10 @@ static void test_layered_window(void)
     ok( key == 0x654321, "wrong color key %x\n", key );
     ok( alpha == 22, "wrong alpha %u\n", alpha );
     ok( flags == (LWA_COLORKEY | LWA_ALPHA), "wrong flags %x\n", flags );
+    SetLastError( 0xdeadbeef );
+    ret = pUpdateLayeredWindow( hwnd, 0, NULL, &sz, hdc, &pt, 0, NULL, ULW_OPAQUE );
+    ok( !ret, "UpdateLayeredWindow should fail on layered but initialized window\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError() );
 
     ret = pSetLayeredWindowAttributes( hwnd, 0x888888, 33, LWA_COLORKEY );
     ok( ret, "SetLayeredWindowAttributes should succeed on layered window\n" );
@@ -5640,6 +5672,8 @@ static void test_layered_window(void)
     ok( flags == 0, "wrong flags %x\n", flags );
 
     DestroyWindow( hwnd );
+    DeleteDC( hdc );
+    DeleteObject( hbm );
 }
 
 static MONITORINFO mi;
@@ -6093,7 +6127,7 @@ static void test_winregion(void)
 {
     HWND hwnd;
     RECT r;
-    int ret;
+    int ret, width;
     HRGN hrgn;
 
     if (!pGetWindowRgnBox)
@@ -6126,9 +6160,137 @@ static void test_winregion(void)
         ok( r.left == 2 && r.top == 3 && r.right == 10 && r.bottom == 15,
            "Expected (2,3,10,15), got (%d,%d,%d,%d)\n", r.left, r.top,
                                                             r.right, r.bottom);
-        DeleteObject(hrgn);
+        if (pMirrorRgn)
+        {
+            hrgn = CreateRectRgn(2, 3, 10, 15);
+            ret = pMirrorRgn( hwnd, hrgn );
+            ok( ret == TRUE, "MirrorRgn failed %u\n", ret );
+            r.left = r.top = r.right = r.bottom = 0;
+            GetWindowRect( hwnd, &r );
+            width = r.right - r.left;
+            r.left = r.top = r.right = r.bottom = 0;
+            ret = GetRgnBox( hrgn, &r );
+            ok( ret == SIMPLEREGION, "GetRgnBox failed %u\n", ret );
+            ok( r.left == width - 10 && r.top == 3 && r.right == width - 2 && r.bottom == 15,
+                "Wrong rectangle (%d,%d,%d,%d) for width %d\n", r.left, r.top, r.right, r.bottom, width );
+        }
+        else win_skip( "MirrorRgn not supported\n" );
     }
     DestroyWindow(hwnd);
+}
+
+static void test_rtl_layout(void)
+{
+    HWND parent, child;
+    RECT r;
+    POINT pt;
+
+    if (!pSetProcessDefaultLayout)
+    {
+        win_skip( "SetProcessDefaultLayout not supported\n" );
+        return;
+    }
+
+    parent = CreateWindowExA(WS_EX_LAYOUTRTL, "static", NULL, WS_POPUP, 100, 100, 300, 300, NULL, 0, 0, NULL);
+    child = CreateWindowExA(0, "static", NULL, WS_CHILD, 10, 10, 20, 20, parent, 0, 0, NULL);
+
+    GetWindowRect( parent, &r );
+    ok( r.left == 100 && r.right == 400, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    GetClientRect( parent, &r );
+    ok( r.left == 0 && r.right == 300, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    GetClientRect( child, &r );
+    ok( r.left == 0 && r.right == 20, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    MapWindowPoints( child, parent, (POINT *)&r, 2 );
+    ok( r.left == 10 && r.right == 30, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    GetWindowRect( child, &r );
+    ok( r.left == 370 && r.right == 390, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    MapWindowPoints( NULL, parent, (POINT *)&r, 2 );
+    ok( r.left == 10 && r.right == 30, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    GetWindowRect( child, &r );
+    MapWindowPoints( NULL, parent, (POINT *)&r, 1 );
+    MapWindowPoints( NULL, parent, (POINT *)&r + 1, 1 );
+    ok( r.left == 30 && r.right == 10, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    pt.x = pt.y = 12;
+    MapWindowPoints( child, parent, &pt, 1 );
+    ok( pt.x == 22 && pt.y == 22, "wrong point %d,%d\n", pt.x, pt.y );
+    SetWindowPos( parent, 0, 0, 0, 250, 250, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE );
+    GetWindowRect( parent, &r );
+    ok( r.left == 100 && r.right == 350, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    GetWindowRect( child, &r );
+    ok( r.left == 320 && r.right == 340, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    SetWindowLongW( parent, GWL_EXSTYLE, 0 );
+    GetWindowRect( child, &r );
+    ok( r.left == 320 && r.right == 340, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    MapWindowPoints( NULL, parent, (POINT *)&r, 2 );
+    ok( r.left == 220 && r.right == 240, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    SetWindowLongW( parent, GWL_EXSTYLE, WS_EX_LAYOUTRTL );
+    GetWindowRect( child, &r );
+    ok( r.left == 320 && r.right == 340, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    MapWindowPoints( NULL, parent, (POINT *)&r, 2 );
+    ok( r.left == 10 && r.right == 30, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    SetWindowPos( child, 0, 0, 0, 30, 30, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE );
+    GetWindowRect( child, &r );
+    ok( r.left == 310 && r.right == 340, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    MapWindowPoints( NULL, parent, (POINT *)&r, 2 );
+    ok( r.left == 10 && r.right == 40, "wrong rect %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom );
+    DestroyWindow( child );
+    DestroyWindow( parent );
+}
+
+static void test_FindWindowEx(void)
+{
+    HWND hwnd, found;
+    CHAR title[1];
+
+    hwnd = CreateWindowExA( 0, "MainWindowClass", "caption", WS_POPUP, 0,0,0,0, 0, 0, 0, NULL );
+    ok( hwnd != 0, "CreateWindowExA error %d\n", GetLastError() );
+
+    title[0] = 0;
+
+    found = FindWindowExA( 0, 0, "MainWindowClass", title );
+    ok( found == NULL, "expected a NULL hwnd\n" );
+    found = FindWindowExA( 0, 0, "MainWindowClass", NULL );
+    ok( found == hwnd, "found is %p, expected a valid hwnd\n", found );
+
+    DestroyWindow( hwnd );
+
+    hwnd = CreateWindowExA( 0, "MainWindowClass", NULL, WS_POPUP, 0,0,0,0, 0, 0, 0, NULL );
+    ok( hwnd != 0, "CreateWindowExA error %d\n", GetLastError() );
+
+    found = FindWindowExA( 0, 0, "MainWindowClass", title );
+    ok( found == hwnd, "found is %p, expected a valid hwnd\n", found );
+    found = FindWindowExA( 0, 0, "MainWindowClass", NULL );
+    ok( found == hwnd, "found is %p, expected a valid hwnd\n", found );
+
+    DestroyWindow( hwnd );
+
+    /* test behaviour with a window title that is an empty character */
+    found = FindWindowExA( 0, 0, "Shell_TrayWnd", title );
+    ok( found != NULL, "found is NULL, expected a valid hwnd\n" );
+    found = FindWindowExA( 0, 0, "Shell_TrayWnd", NULL );
+    ok( found != NULL, "found is NULL, expected a valid hwnd\n" );
+}
+
+static void test_GetLastActivePopup(void)
+{
+    HWND hwndOwner, hwndPopup1, hwndPopup2;
+
+    hwndOwner = CreateWindowExA(0, "MainWindowClass", NULL,
+                                WS_VISIBLE | WS_POPUPWINDOW,
+                                100, 100, 200, 200,
+                                NULL, 0, GetModuleHandle(0), NULL);
+    hwndPopup1 = CreateWindowExA(0, "MainWindowClass", NULL,
+                                 WS_VISIBLE | WS_POPUPWINDOW,
+                                 100, 100, 200, 200,
+                                 hwndOwner, 0, GetModuleHandle(0), NULL);
+    hwndPopup2 = CreateWindowExA(0, "MainWindowClass", NULL,
+                                 WS_VISIBLE | WS_POPUPWINDOW,
+                                 100, 100, 200, 200,
+                                 hwndPopup1, 0, GetModuleHandle(0), NULL);
+    ok( GetLastActivePopup(hwndOwner) == hwndPopup2, "wrong last active popup\n" );
+    DestroyWindow( hwndPopup2 );
+    DestroyWindow( hwndPopup1 );
+    DestroyWindow( hwndOwner );
 }
 
 START_TEST(win)
@@ -6140,6 +6302,7 @@ START_TEST(win)
     pGetWindowModuleFileNameA = (void *)GetProcAddress( user32, "GetWindowModuleFileNameA" );
     pGetLayeredWindowAttributes = (void *)GetProcAddress( user32, "GetLayeredWindowAttributes" );
     pSetLayeredWindowAttributes = (void *)GetProcAddress( user32, "SetLayeredWindowAttributes" );
+    pUpdateLayeredWindow = (void *)GetProcAddress( user32, "UpdateLayeredWindow" );
     pGetMonitorInfoA = (void *)GetProcAddress( user32,  "GetMonitorInfoA" );
     pMonitorFromPoint = (void *)GetProcAddress( user32,  "MonitorFromPoint" );
     pGetWindowRgnBox = (void *)GetProcAddress( user32, "GetWindowRgnBox" );
@@ -6148,6 +6311,7 @@ START_TEST(win)
     pSetProcessDefaultLayout = (void *)GetProcAddress( user32, "SetProcessDefaultLayout" );
     pGetLayout = (void *)GetProcAddress( gdi32, "GetLayout" );
     pSetLayout = (void *)GetProcAddress( gdi32, "SetLayout" );
+    pMirrorRgn = (void *)GetProcAddress( gdi32, "MirrorRgn" );
 
     if (!RegisterWindowClasses()) assert(0);
 
@@ -6157,6 +6321,9 @@ START_TEST(win)
 
     hhook = SetWindowsHookExA(WH_CBT, cbt_hook_proc, 0, GetCurrentThreadId());
     if (!hhook) win_skip( "Cannot set CBT hook, skipping some tests\n" );
+
+    /* make sure that FindWindow tests are executed first */
+    test_FindWindowEx();
 
     hwndMain = CreateWindowExA(/*WS_EX_TOOLWINDOW*/ 0, "MainWindowClass", "Main window",
                                WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
@@ -6184,6 +6351,7 @@ START_TEST(win)
     test_capture_2();
     test_capture_3(hwndMain, hwndMain2);
     test_capture_4();
+    test_rtl_layout();
 
     test_CreateWindow();
     test_parent_owner();
@@ -6201,6 +6369,7 @@ START_TEST(win)
     test_children_zorder(hwndMain);
     test_popup_zorder(hwndMain2, hwndMain, WS_POPUP);
     test_popup_zorder(hwndMain2, hwndMain, 0);
+    test_GetLastActivePopup();
     test_keyboard_input(hwndMain);
     test_mouse_input(hwndMain);
     test_validatergn(hwndMain);

@@ -178,6 +178,7 @@ static const char* MCI_MessageToString(UINT wMsg)
 	CASE(MCI_SAVE);
 	CASE(MCI_SEEK);
 	CASE(MCI_SET);
+	CASE(MCI_SOUND);
 	CASE(MCI_SPIN);
 	CASE(MCI_STATUS);
 	CASE(MCI_STEP);
@@ -969,7 +970,7 @@ static	WORD		MCI_GetMessage(LPCWSTR lpCmd)
 /**************************************************************************
  * 				MCI_GetDWord			[internal]
  */
-static	BOOL		MCI_GetDWord(DWORD_PTR* data, LPWSTR* ptr)
+static	BOOL		MCI_GetDWord(DWORD* data, LPWSTR* ptr)
 {
     DWORD	val;
     LPWSTR	ret;
@@ -1022,7 +1023,7 @@ static	DWORD	MCI_GetString(LPWSTR* str, LPWSTR* args)
 /**************************************************************************
  * 				MCI_ParseOptArgs		[internal]
  */
-static	DWORD	MCI_ParseOptArgs(DWORD_PTR* data, int _offset, LPCWSTR lpCmd,
+static	DWORD	MCI_ParseOptArgs(DWORD* data, int _offset, LPCWSTR lpCmd,
 				 LPWSTR args, LPDWORD dwFlags)
 {
     int		len, offset;
@@ -1097,7 +1098,7 @@ static	DWORD	MCI_ParseOptArgs(DWORD_PTR* data, int _offset, LPCWSTR lpCmd,
 			if (!MCI_GetDWord(&(data[offset]), &args)) {
 			    return MCIERR_BAD_INTEGER;
 			}
-			TRACE("flag=%08x int=%ld\n", flg, data[offset]);
+			TRACE("flag=%08x int=%d\n", flg, data[offset]);
 		    }
 		    break;
 		case MCI_RECT:
@@ -1116,7 +1117,7 @@ static	DWORD	MCI_ParseOptArgs(DWORD_PTR* data, int _offset, LPCWSTR lpCmd,
 		    *dwFlags |= flg;
 		    if ((dwRet = MCI_GetString((LPWSTR*)&data[offset], &args)))
 			return dwRet;
-		    TRACE("flag=%08x string=%s\n", flg, debugstr_w((LPWSTR)data[offset]));
+		    TRACE("flag=%08x string=%s\n", flg, debugstr_w(*(LPWSTR*)&data[offset]));
 		    break;
 		default:	ERR("oops\n");
 		}
@@ -1132,8 +1133,8 @@ static	DWORD	MCI_ParseOptArgs(DWORD_PTR* data, int _offset, LPCWSTR lpCmd,
 		case MCI_CONSTANT:
 		case MCI_FLAG:			break;
 		case MCI_INTEGER:		if (!inCst) offset++;	break;
-		case MCI_END_CONSTANT:
-		case MCI_STRING:		offset++; break;
+		case MCI_END_CONSTANT:		offset++; break;
+		case MCI_STRING:		offset += sizeof(LPWSTR)/sizeof(DWORD); break;
 		case MCI_RECT:			offset += 4; break;
 		default:			ERR("oops\n");
 		}
@@ -1155,10 +1156,10 @@ static	DWORD	MCI_ParseOptArgs(DWORD_PTR* data, int _offset, LPCWSTR lpCmd,
  * 				MCI_HandleReturnValues	[internal]
  */
 static	DWORD	MCI_HandleReturnValues(DWORD dwRet, LPWINE_MCIDRIVER wmd, DWORD retType,
-                                       DWORD_PTR* data, LPWSTR lpstrRet, UINT uRetLen)
+                                       MCI_GENERIC_PARMS *params, LPWSTR lpstrRet, UINT uRetLen)
 {
-    static const WCHAR wszLd  [] = {'%','l','d',0};
-    static const WCHAR wszLd4 [] = {'%','l','d',' ','%','l','d',' ','%','l','d',' ','%','l','d',0};
+    static const WCHAR fmt_d  [] = {'%','d',0};
+    static const WCHAR fmt_d4 [] = {'%','d',' ','%','d',' ','%','d',' ','%','d',0};
     static const WCHAR wszCol3[] = {'%','0','2','d',':','%','0','2','d',':','%','0','2','d',0};
     static const WCHAR wszCol4[] = {'%','0','2','d',':','%','0','2','d',':','%','0','2','d',':','%','0','2','d',0};
 
@@ -1167,56 +1168,101 @@ static	DWORD	MCI_HandleReturnValues(DWORD dwRet, LPWINE_MCIDRIVER wmd, DWORD ret
 	case 0: /* nothing to return */
 	    break;
 	case MCI_INTEGER:
+        {
+            DWORD data = *(DWORD *)(params + 1);
 	    switch (dwRet & 0xFFFF0000ul) {
 	    case 0:
 	    case MCI_INTEGER_RETURNED:
-		snprintfW(lpstrRet, uRetLen, wszLd, data[1]);
+		snprintfW(lpstrRet, uRetLen, fmt_d, data);
 		break;
 	    case MCI_RESOURCE_RETURNED:
-		/* return string which ID is HIWORD(data[1]),
+		/* return string which ID is HIWORD(data),
 		 * string is loaded from mmsystem.dll */
-		LoadStringW(hWinMM32Instance, HIWORD(data[1]), lpstrRet, uRetLen);
+		LoadStringW(hWinMM32Instance, HIWORD(data), lpstrRet, uRetLen);
 		break;
 	    case MCI_RESOURCE_RETURNED|MCI_RESOURCE_DRIVER:
-		/* return string which ID is HIWORD(data[1]),
+		/* return string which ID is HIWORD(data),
 		 * string is loaded from driver */
 		/* FIXME: this is wrong for a 16 bit handle */
 		LoadStringW(GetDriverModuleHandle(wmd->hDriver),
-			    HIWORD(data[1]), lpstrRet, uRetLen);
+			    HIWORD(data), lpstrRet, uRetLen);
 		break;
 	    case MCI_COLONIZED3_RETURN:
 		snprintfW(lpstrRet, uRetLen, wszCol3,
-			  LOBYTE(LOWORD(data[1])), HIBYTE(LOWORD(data[1])),
-			  LOBYTE(HIWORD(data[1])));
+			  LOBYTE(LOWORD(data)), HIBYTE(LOWORD(data)),
+			  LOBYTE(HIWORD(data)));
 		break;
 	    case MCI_COLONIZED4_RETURN:
 		snprintfW(lpstrRet, uRetLen, wszCol4,
-			  LOBYTE(LOWORD(data[1])), HIBYTE(LOWORD(data[1])),
-			  LOBYTE(HIWORD(data[1])), HIBYTE(HIWORD(data[1])));
+			  LOBYTE(LOWORD(data)), HIBYTE(LOWORD(data)),
+			  LOBYTE(HIWORD(data)), HIBYTE(HIWORD(data)));
 		break;
 	    default:	ERR("Ooops (%04X)\n", HIWORD(dwRet));
 	    }
 	    break;
+        }
+#ifdef MCI_INTEGER64
+	case MCI_INTEGER64:
+        {
+	    static const WCHAR fmt_ld [] = {'%','l','d',0};
+	    DWORD_PTR data = *(DWORD_PTR *)(params + 1);
+	    switch (dwRet & 0xFFFF0000ul) {
+	    case 0:
+	    case MCI_INTEGER_RETURNED:
+		snprintfW(lpstrRet, uRetLen, fmt_ld, data);
+		break;
+	    case MCI_RESOURCE_RETURNED:
+		/* return string which ID is HIWORD(data),
+		 * string is loaded from mmsystem.dll */
+		LoadStringW(hWinMM32Instance, HIWORD(data), lpstrRet, uRetLen);
+		break;
+	    case MCI_RESOURCE_RETURNED|MCI_RESOURCE_DRIVER:
+		/* return string which ID is HIWORD(data),
+		 * string is loaded from driver */
+		/* FIXME: this is wrong for a 16 bit handle */
+		LoadStringW(GetDriverModuleHandle(wmd->hDriver),
+			    HIWORD(data), lpstrRet, uRetLen);
+		break;
+	    case MCI_COLONIZED3_RETURN:
+		snprintfW(lpstrRet, uRetLen, wszCol3,
+			  LOBYTE(LOWORD(data)), HIBYTE(LOWORD(data)),
+			  LOBYTE(HIWORD(data)));
+		break;
+	    case MCI_COLONIZED4_RETURN:
+		snprintfW(lpstrRet, uRetLen, wszCol4,
+			  LOBYTE(LOWORD(data)), HIBYTE(LOWORD(data)),
+			  LOBYTE(HIWORD(data)), HIBYTE(HIWORD(data)));
+		break;
+	    default:	ERR("Ooops (%04X)\n", HIWORD(dwRet));
+	    }
+	    break;
+        }
+#endif
 	case MCI_STRING:
 	    switch (dwRet & 0xFFFF0000ul) {
 	    case 0:
-		/* nothing to do data[1] == lpstrRet */
+		/* nothing to do data[0] == lpstrRet */
 		break;
 	    case MCI_INTEGER_RETURNED:
-		data[1] = *(LPDWORD)lpstrRet;
-		snprintfW(lpstrRet, uRetLen, wszLd, data[1]);
+            {
+                DWORD *data = (DWORD *)(params + 1);
+		*data = *(LPDWORD)lpstrRet;
+		snprintfW(lpstrRet, uRetLen, fmt_d, *data);
 		break;
+            }
 	    default:
 		WARN("Oooch. MCI_STRING and HIWORD(dwRet)=%04x\n", HIWORD(dwRet));
 		break;
 	    }
 	    break;
 	case MCI_RECT:
+        {
+            DWORD *data = (DWORD *)(params + 1);
 	    if (dwRet & 0xFFFF0000ul)
 		WARN("Oooch. MCI_STRING and HIWORD(dwRet)=%04x\n", HIWORD(dwRet));
-	    snprintfW(lpstrRet, uRetLen, wszLd4,
-                      data[1], data[2], data[3], data[4]);
+	    snprintfW(lpstrRet, uRetLen, fmt_d4, data[0], data[1], data[2], data[3]);
 	    break;
+        }
 	default:		ERR("oops\n");
 	}
     }
@@ -1234,16 +1280,20 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
     MCIDEVICEID		uDevID, auto_open = 0;
     DWORD		dwFlags = 0, dwRet = 0;
     int			offset = 0;
-    DWORD_PTR		data[MCI_DATA_SIZE];
     DWORD		retType;
     LPCWSTR		lpCmd = 0;
     WORD		wMsg = 0;
     static const WCHAR  wszNew[] = {'n','e','w',0};
     static const WCHAR  wszSAliasS[] = {' ','a','l','i','a','s',' ',0};
     static const WCHAR  wszTypeS[]   = {'t','y','p','e',' ',0};
-    static const WCHAR  wszSysinfo[] = {'s','y','s','i','n','f','o',0};
-    static const WCHAR  wszSound[]   = {'s','o','u','n','d',0};
-    static const WCHAR  wszBreak[]   = {'b','r','e','a','k',0};
+    union
+    {
+        MCI_GENERIC_PARMS  generic;
+        MCI_OPEN_PARMSW    open;
+        MCI_SOUND_PARMSW   sound;
+        MCI_SYSINFO_PARMSW sysinfo;
+        DWORD              dw[MCI_DATA_SIZE];
+    } data;
 
     TRACE("(%s, %p, %d, %p)\n", 
           debugstr_w(lpstrCommand), lpstrRet, uRetLen, hwndCallback);
@@ -1255,7 +1305,7 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
     strcpyW( verb, lpstrCommand );
     CharLowerW(verb);
 
-    memset(data, 0, sizeof(data));
+    memset(&data, 0, sizeof(data));
 
     if (!(args = strchrW(verb, ' '))) {
 	dwRet = MCIERR_MISSING_DEVICE_NAME;
@@ -1292,15 +1342,15 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 	    tmp = devType; devType = dev; dev = tmp;
 
 	    dwFlags |= MCI_OPEN_TYPE;
-	    data[2] = (DWORD_PTR)devType;
+	    data.open.lpstrDeviceType = devType;
 	    devType = str_dup_upper(devType);
 	    dwFlags |= MCI_OPEN_ELEMENT;
-	    data[3] = (DWORD_PTR)dev;
+	    data.open.lpstrElementName = dev;
 	} else if (DRIVER_GetLibName(dev, wszMci, buf, sizeof(buf))) {
             /* this is the name of a mci driver's type */
 	    tmp = strchrW(dev, ' ');
 	    if (tmp) *tmp = '\0';
-	    data[2] = (DWORD_PTR)dev;
+	    data.open.lpstrDeviceType = dev;
 	    devType = str_dup_upper(dev);
 	    if (tmp) *tmp = ' ';
 	    dwFlags |= MCI_OPEN_TYPE;
@@ -1311,7 +1361,7 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 		if (tmp) *tmp = '\0';
 		devType = str_dup_upper(devType);
 		if (tmp) *tmp = ' ';
-		/* dwFlags and data[2] will be correctly set in ParseOpt loop */
+		/* dwFlags and lpstrDeviceType will be correctly set in ParseOpt loop */
 	    } else {
 		if ((dwRet = MCI_GetDevTypeFromFileName(dev, buf, sizeof(buf))))
 		    goto errCleanUp;
@@ -1319,7 +1369,7 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 		devType = str_dup_upper(buf);
 	    }
 	    dwFlags |= MCI_OPEN_ELEMENT;
-	    data[3] = (DWORD_PTR)dev;
+	    data.open.lpstrElementName = dev;
 	}
 	if (MCI_ALL_DEVICE_ID == uDevID) {
 	    dwRet = MCIERR_CANNOT_USE_ALL;
@@ -1336,26 +1386,37 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 	HeapFree(GetProcessHeap(), 0, devType);
 	if (dwRet)
 	    goto errCleanUp;
-    } else if (!strcmpW(verb, wszSysinfo) || !strcmpW(verb, wszSound) || !strcmpW(verb, wszBreak)) {
-	/* Prevent auto-open for system commands. */
-    } else if ((MCI_ALL_DEVICE_ID != uDevID) && !(wmd = MCI_GetDriver(mciGetDeviceIDW(dev)))) {
-	/* auto open */
-        static const WCHAR wszOpenWait[] = {'o','p','e','n',' ','%','s',' ','w','a','i','t',0};
-	WCHAR   buf[138], retbuf[6];
-	snprintfW(buf, sizeof(buf)/sizeof(WCHAR), wszOpenWait, dev);
-	/* open via mciSendString handles quoting, dev!file syntax and alias creation */
-	if ((dwRet = mciSendStringW(buf, retbuf, sizeof(retbuf)/sizeof(WCHAR), 0)) != 0)
+    } else if ((MCI_ALL_DEVICE_ID != uDevID) && !(wmd = MCI_GetDriver(mciGetDeviceIDW(dev)))
+	       && (lpCmd = MCI_FindCommand(MCI_GetCommandTable(0), verb))) {
+	/* auto-open uses the core command table */
+	switch (MCI_GetMessage(lpCmd)) {
+	case MCI_SOUND:   /* command does not use a device name */
+	case MCI_SYSINFO:
+	    break;
+	case MCI_CLOSE:   /* don't auto-open for close */
+	case MCI_BREAK:   /* no auto-open for system commands */
+	    dwRet = MCIERR_INVALID_DEVICE_NAME;
 	    goto errCleanUp;
-	auto_open = strtoulW(retbuf, NULL, 10);
-	TRACE("auto-opened %u\n", auto_open);
+	    break;
+	default:
+	    {
+		static const WCHAR wszOpenWait[] = {'o','p','e','n',' ','%','s',' ','w','a','i','t',0};
+		WCHAR   buf[138], retbuf[6];
+		snprintfW(buf, sizeof(buf)/sizeof(WCHAR), wszOpenWait, dev);
+		/* open via mciSendString handles quoting, dev!file syntax and alias creation */
+		if ((dwRet = mciSendStringW(buf, retbuf, sizeof(retbuf)/sizeof(WCHAR), 0)) != 0)
+		    goto errCleanUp;
+		auto_open = strtoulW(retbuf, NULL, 10);
+		TRACE("auto-opened %u for %s\n", auto_open, debugstr_w(dev));
 
-	/* FIXME: test for notify flag (how to preparse?) before opening */
-	/* FIXME: Accept only core commands yet parse them with the specific table */
-	wmd = MCI_GetDriver(auto_open);
-	if (!wmd) {
-	    ERR("No auto-open device %d for %s\n", auto_open, debugstr_w(dev));
-	    dwRet = MCIERR_INVALID_DEVICE_ID;
-	    goto errCleanUp;
+		/* FIXME: test for notify flag (how to preparse?) before opening */
+		wmd = MCI_GetDriver(auto_open);
+		if (!wmd) {
+		    ERR("No auto-open device %u\n", auto_open);
+		    dwRet = MCIERR_INVALID_DEVICE_ID;
+		    goto errCleanUp;
+		}
+	    }
 	}
     }
 
@@ -1382,18 +1443,34 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
     wMsg = MCI_GetMessage(lpCmd);
 
     /* set return information */
+    offset = sizeof(data.generic);
     switch (retType = MCI_GetReturnType(lpCmd)) {
-    case 0:		offset = 1;	break;
-    case MCI_INTEGER:	offset = 2;	break;
-    case MCI_STRING:	data[1] = (DWORD_PTR)lpstrRet; data[2] = uRetLen; offset = 3; break;
-    case MCI_RECT:	offset = 5;	break;
-    default:	ERR("oops\n");
+    case 0:
+        break;
+    case MCI_INTEGER:
+        offset += sizeof(DWORD);
+        break;
+    case MCI_STRING:
+        data.sysinfo.lpstrReturn = lpstrRet;
+        data.sysinfo.dwRetSize = uRetLen;
+        offset = FIELD_OFFSET( MCI_SYSINFO_PARMSW, dwNumber );
+        break;
+    case MCI_RECT:
+        offset += 4 * sizeof(DWORD);
+        break;
+#ifdef MCI_INTEGER64
+    case MCI_INTEGER64:
+	offset += sizeof(DWORD_PTR);
+        break;
+#endif
+    default:
+	ERR("oops\n");
     }
 
     TRACE("verb=%s on dev=%s; offset=%d\n", 
           debugstr_w(verb), debugstr_w(dev), offset);
 
-    if ((dwRet = MCI_ParseOptArgs(data, offset, lpCmd, args, &dwFlags)))
+    if ((dwRet = MCI_ParseOptArgs(data.dw, offset / sizeof(DWORD), lpCmd, args, &dwFlags)))
 	goto errCleanUp;
 
     /* set up call back */
@@ -1409,7 +1486,7 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 	 * In the meantime special-case all commands but PLAY and RECORD below. */
     }
     if (dwFlags & MCI_NOTIFY) {
-	data[0] = (DWORD_PTR)hwndCallback;
+	data.generic.dwCallback = (DWORD_PTR)hwndCallback;
     }
 
     switch (wMsg) {
@@ -1426,35 +1503,42 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 	 * alias with INSTALLNAME, name like "digitalvideo"
 	 * with QUANTITY and NAME. */
 	{
-	    LPMCI_SYSINFO_PARMSW lpParms = (LPMCI_SYSINFO_PARMSW)data;
-	    lpParms->wDeviceType = MCI_ALL_DEVICE_ID;
+	    data.sysinfo.wDeviceType = MCI_ALL_DEVICE_ID;
 	    if (uDevID != MCI_ALL_DEVICE_ID) {
 		if (dwFlags & MCI_SYSINFO_INSTALLNAME)
 		    wmd = MCI_GetDriver(mciGetDeviceIDW(dev));
-		else if (!(lpParms->wDeviceType = MCI_GetDevTypeFromResource(dev))) {
+		else if (!(data.sysinfo.wDeviceType = MCI_GetDevTypeFromResource(dev))) {
 		    dwRet = MCIERR_DEVICE_TYPE_REQUIRED;
 		    goto errCleanUp;
 		}
 	    }
 	}
 	break;
+    case MCI_SOUND:
+	/* FIXME: name is optional, "sound" is a valid command.
+	 * FIXME: Parse "sound notify" as flag, not as name. */
+	data.sound.lpstrSoundName = dev;
+	dwFlags |= MCI_SOUND_NAME;
+	break;
     }
 
-    TRACE("[%d, %s, %08x, %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx]\n",
+    TRACE("[%d, %s, %08x, %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x]\n",
 	  wmd ? wmd->wDeviceID : uDevID, MCI_MessageToString(wMsg), dwFlags,
-	  data[0], data[1], data[2], data[3], data[4],
-	  data[5], data[6], data[7], data[8], data[9]);
+	  data.dw[0], data.dw[1], data.dw[2], data.dw[3], data.dw[4],
+	  data.dw[5], data.dw[6], data.dw[7], data.dw[8], data.dw[9]);
 
     if (wMsg == MCI_OPEN) {
-	if ((dwRet = MCI_FinishOpen(wmd, (LPMCI_OPEN_PARMSW)data, dwFlags)))
+	if ((dwRet = MCI_FinishOpen(wmd, &data.open, dwFlags)))
 	    goto errCleanUp;
 	/* FIXME: notification is not properly shared across two opens */
     } else {
-	dwRet = MCI_SendCommand(wmd ? wmd->wDeviceID : uDevID, wMsg, dwFlags, (DWORD_PTR)data);
+	dwRet = MCI_SendCommand(wmd ? wmd->wDeviceID : uDevID, wMsg, dwFlags, (DWORD_PTR)&data);
     }
     TRACE("=> 1/ %x (%s)\n", dwRet, debugstr_w(lpstrRet));
-    dwRet = MCI_HandleReturnValues(dwRet, wmd, retType, data, lpstrRet, uRetLen);
-    TRACE("=> 2/ %x (%s)\n", dwRet, debugstr_w(lpstrRet));
+    if (!LOWORD(dwRet)) {
+	dwRet = MCI_HandleReturnValues(dwRet, wmd, retType, &data.generic, lpstrRet, uRetLen);
+	TRACE("=> 2/ %x (%s)\n", dwRet, debugstr_w(lpstrRet));
+    }
 
 errCleanUp:
     if (auto_open) {
@@ -1487,9 +1571,9 @@ DWORD WINAPI mciSendStringA(LPCSTR lpstrCommand, LPSTR lpstrRet,
     MultiByteToWideChar( CP_ACP, 0, lpstrCommand, -1, lpwstrCommand, len );
     if (lpstrRet)
     {
+        if (uRetLen) *lpstrRet = '\0'; /* NT-w2k3 use memset(lpstrRet, 0, uRetLen); */
         lpwstrRet = HeapAlloc(GetProcessHeap(), 0, uRetLen * sizeof(WCHAR));
         if (!lpwstrRet) {
-            WARN("no memory\n");
             HeapFree( GetProcessHeap(), 0, lpwstrCommand );
             return MCIERR_OUT_OF_MEMORY;
         }
@@ -1759,7 +1843,6 @@ static DWORD MCI_WriteString(LPWSTR lpDstStr, DWORD dstSize, LPCWSTR lpSrcStr)
 
     if (lpSrcStr) {
 	if (dstSize <= strlenW(lpSrcStr)) {
-	    lstrcpynW(lpDstStr, lpSrcStr, dstSize - 1);
 	    ret = MCIERR_PARAM_OVERFLOW;
 	} else {
 	    strcpyW(lpDstStr, lpSrcStr);
@@ -1847,7 +1930,6 @@ static	DWORD MCI_SysInfo(UINT uDevID, DWORD dwFlags, LPMCI_SYSINFO_PARMSW lpParm
 	    ret = MCI_WriteString(lpParms->lpstrReturn, lpParms->dwRetSize,
 				  wmd->lpstrDeviceType);
 	} else {
-	    *lpParms->lpstrReturn = 0;
 	    ret = (uDevID == MCI_ALL_DEVICE_ID)
 		? MCIERR_CANNOT_USE_ALL : MCIERR_INVALID_DEVICE_NAME;
 	}
@@ -1942,16 +2024,18 @@ static	DWORD MCI_Break(UINT wDevID, DWORD dwFlags, LPMCI_BREAK_PARMS lpParms)
  */
 static	DWORD MCI_Sound(UINT wDevID, DWORD dwFlags, LPMCI_SOUND_PARMSW lpParms)
 {
-    DWORD	dwRet = 0;
+    DWORD	dwRet;
 
-    if (lpParms == NULL)	return MCIERR_NULL_PARAMETER_BLOCK;
+    if (dwFlags & MCI_SOUND_NAME) {
+	if (lpParms == NULL)	return MCIERR_NULL_PARAMETER_BLOCK;
+	else dwRet = PlaySoundW(lpParms->lpstrSoundName, NULL,
+				SND_ALIAS    | (dwFlags & MCI_WAIT ? SND_SYNC : SND_ASYNC))
+		? 0 : MCIERR_HARDWARE;
+    } else   dwRet = PlaySoundW((LPCWSTR)SND_ALIAS_SYSTEMDEFAULT, NULL,
+				SND_ALIAS_ID | (dwFlags & MCI_WAIT ? SND_SYNC : SND_ASYNC))
+		? 0 : MCIERR_HARDWARE;
 
-    if (dwFlags & MCI_SOUND_NAME)
-        dwRet = sndPlaySoundW(lpParms->lpstrSoundName, SND_SYNC) ? MMSYSERR_NOERROR : MMSYSERR_ERROR;
-    else
-        dwRet = MMSYSERR_ERROR; /* what should be done ??? */
-
-    if (MMSYSERR_NOERROR==dwRet && (dwFlags & MCI_NOTIFY))
+    if (!dwRet && lpParms && (dwFlags & MCI_NOTIFY))
         mciDriverNotify((HWND)lpParms->dwCallback, wDevID, MCI_NOTIFY_SUCCESSFUL);
     return dwRet;
 }

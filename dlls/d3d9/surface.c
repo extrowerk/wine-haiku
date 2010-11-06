@@ -246,27 +246,23 @@ static HRESULT WINAPI IDirect3DSurface9Impl_GetContainer(LPDIRECT3DSURFACE9 ifac
 static HRESULT WINAPI IDirect3DSurface9Impl_GetDesc(LPDIRECT3DSURFACE9 iface, D3DSURFACE_DESC* pDesc) {
     IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
     WINED3DSURFACE_DESC wined3ddesc;
-    HRESULT hr;
 
     TRACE("iface %p, desc %p.\n", iface, pDesc);
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_GetDesc(This->wineD3DSurface, &wined3ddesc);
+    IWineD3DSurface_GetDesc(This->wineD3DSurface, &wined3ddesc);
     wined3d_mutex_unlock();
 
-    if (SUCCEEDED(hr))
-    {
-        pDesc->Format = d3dformat_from_wined3dformat(wined3ddesc.format);
-        pDesc->Type = wined3ddesc.resource_type;
-        pDesc->Usage = wined3ddesc.usage;
-        pDesc->Pool = wined3ddesc.pool;
-        pDesc->MultiSampleType = wined3ddesc.multisample_type;
-        pDesc->MultiSampleQuality = wined3ddesc.multisample_quality;
-        pDesc->Width = wined3ddesc.width;
-        pDesc->Height = wined3ddesc.height;
-    }
+    pDesc->Format = d3dformat_from_wined3dformat(wined3ddesc.format);
+    pDesc->Type = wined3ddesc.resource_type;
+    pDesc->Usage = wined3ddesc.usage;
+    pDesc->Pool = wined3ddesc.pool;
+    pDesc->MultiSampleType = wined3ddesc.multisample_type;
+    pDesc->MultiSampleQuality = wined3ddesc.multisample_quality;
+    pDesc->Width = wined3ddesc.width;
+    pDesc->Height = wined3ddesc.height;
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI IDirect3DSurface9Impl_LockRect(LPDIRECT3DSURFACE9 iface, D3DLOCKED_RECT* pLockedRect, CONST RECT* pRect, DWORD Flags) {
@@ -276,7 +272,7 @@ static HRESULT WINAPI IDirect3DSurface9Impl_LockRect(LPDIRECT3DSURFACE9 iface, D
     TRACE("iface %p, locked_rect %p, rect %p, flags %#x.\n", iface, pLockedRect, pRect, Flags);
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_LockRect(This->wineD3DSurface, (WINED3DLOCKED_RECT *) pLockedRect, pRect, Flags);
+    hr = IWineD3DSurface_Map(This->wineD3DSurface, (WINED3DLOCKED_RECT *)pLockedRect, pRect, Flags);
     wined3d_mutex_unlock();
 
     return hr;
@@ -289,7 +285,7 @@ static HRESULT WINAPI IDirect3DSurface9Impl_UnlockRect(LPDIRECT3DSURFACE9 iface)
     TRACE("iface %p.\n", iface);
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_UnlockRect(This->wineD3DSurface);
+    hr = IWineD3DSurface_Unmap(This->wineD3DSurface);
     wined3d_mutex_unlock();
 
     switch(hr)

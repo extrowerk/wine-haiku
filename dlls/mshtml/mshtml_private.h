@@ -34,6 +34,9 @@
 
 #include "nsiface.h"
 
+#define NS_ERROR_GENERATE_FAILURE(module,code) \
+    ((nsresult) (((PRUint32)(1<<31)) | ((PRUint32)(module+0x45)<<16) | ((PRUint32)(code))))
+
 #define NS_OK                     ((nsresult)0x00000000L)
 #define NS_ERROR_FAILURE          ((nsresult)0x80004005L)
 #define NS_ERROR_OUT_OF_MEMORY    ((nsresult)0x8007000EL)
@@ -42,7 +45,11 @@
 #define NS_ERROR_NOT_AVAILABLE    ((nsresult)0x80040111L)
 #define NS_ERROR_INVALID_ARG      ((nsresult)0x80070057L) 
 #define NS_ERROR_UNEXPECTED       ((nsresult)0x8000ffffL)
-#define NS_ERROR_UNKNOWN_PROTOCOL ((nsresult)0x804b0012L)
+
+#define NS_ERROR_MODULE_NETWORK    6
+
+#define NS_BINDING_ABORTED         NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_NETWORK, 2)
+#define NS_ERROR_UNKNOWN_PROTOCOL  NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_NETWORK, 18)
 
 #define NS_FAILED(res) ((res) & 0x80000000)
 #define NS_SUCCEEDED(res) (!NS_FAILED(res))
@@ -68,6 +75,7 @@ typedef enum {
     DispHTMLDocument_tid,
     DispHTMLDOMTextNode_tid,
     DispHTMLElementCollection_tid,
+    DispHTMLEmbed_tid,
     DispHTMLFormElement_tid,
     DispHTMLGenericElement_tid,
     DispHTMLFrameElement_tid,
@@ -76,6 +84,7 @@ typedef enum {
     DispHTMLInputElement_tid,
     DispHTMLLocation_tid,
     DispHTMLNavigator_tid,
+    DispHTMLObjectElement_tid,
     DispHTMLOptionElement_tid,
     DispHTMLScreen_tid,
     DispHTMLScriptElement_tid,
@@ -108,6 +117,7 @@ typedef enum {
     IHTMLElement3_tid,
     IHTMLElement4_tid,
     IHTMLElementCollection_tid,
+    IHTMLEmbedElement_tid,
     IHTMLEventObj_tid,
     IHTMLFiltersCollection_tid,
     IHTMLFormElement_tid,
@@ -120,6 +130,7 @@ typedef enum {
     IHTMLImgElement_tid,
     IHTMLInputElement_tid,
     IHTMLLocation_tid,
+    IHTMLObjectElement_tid,
     IHTMLOptionElement_tid,
     IHTMLRect_tid,
     IHTMLScreen_tid,
@@ -463,7 +474,6 @@ typedef struct {
 
     nsWineURI *uri;
     nsIInputStream *post_data_stream;
-    BOOL parse_stream;
     nsILoadGroup *load_group;
     nsIInterfaceRequestor *notif_callback;
     nsISupports *owner;
@@ -798,11 +808,13 @@ HTMLElement *HTMLElement_Create(HTMLDocumentNode*,nsIDOMNode*,BOOL);
 HTMLElement *HTMLCommentElement_Create(HTMLDocumentNode*,nsIDOMNode*);
 HTMLElement *HTMLAnchorElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLBodyElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
+HTMLElement *HTMLEmbedElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLFormElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLFrameElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLIFrame_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLImgElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLInputElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
+HTMLElement *HTMLObjectElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLOptionElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLScriptElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLSelectElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);

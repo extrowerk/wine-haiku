@@ -12,6 +12,7 @@
 @ cdecl DescribePixelFormat(ptr long long ptr) X11DRV_DescribePixelFormat
 @ cdecl Ellipse(ptr long long long long) X11DRV_Ellipse
 @ cdecl EnumDeviceFonts(ptr ptr ptr long) X11DRV_EnumDeviceFonts
+@ cdecl EnumICMProfiles(ptr ptr long) X11DRV_EnumICMProfiles
 @ cdecl ExtEscape(ptr long long ptr long ptr) X11DRV_ExtEscape
 @ cdecl ExtFloodFill(ptr long long long long) X11DRV_ExtFloodFill
 @ cdecl ExtTextOut(ptr long long long ptr ptr long ptr) X11DRV_ExtTextOut
@@ -145,7 +146,7 @@
 @ cdecl wglUseFontBitmapsW(ptr long long long) X11DRV_wglUseFontBitmapsW
 
 #IME Interface
-@ stdcall ImeInquire(ptr wstr wstr)
+@ stdcall ImeInquire(ptr ptr wstr)
 @ stdcall ImeConfigure(long long long ptr)
 @ stdcall ImeDestroy(long)
 @ stdcall ImeEscape(long long ptr)

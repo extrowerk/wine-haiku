@@ -70,6 +70,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(treeview);
 
 typedef struct _TREEITEM    /* HTREEITEM is a _TREEINFO *. */
 {
+  HTREEITEM parent;         /* handle to parent or 0 if at root */
+  HTREEITEM nextSibling;    /* handle to next item in list, 0 if last */
+  HTREEITEM firstChild;     /* handle to first child or 0 if no child */
+
   UINT      callbackMask;
   UINT      state;
   UINT      stateMask;
@@ -82,11 +86,8 @@ typedef struct _TREEITEM    /* HTREEITEM is a _TREEINFO *. */
   LPARAM    lParam;
   int       iIntegral;      /* item height multiplier (1 is normal) */
   int       iLevel;         /* indentation level:0=root level */
-  HTREEITEM parent;         /* handle to parent or 0 if at root */
-  HTREEITEM firstChild;     /* handle to first child or 0 if no child */
   HTREEITEM lastChild;
   HTREEITEM prevSibling;    /* handle to prev item in list, 0 if first */
-  HTREEITEM nextSibling;    /* handle to next item in list, 0 if last */
   RECT      rect;
   LONG      linesOffset;
   LONG      stateOffset;
@@ -1479,11 +1480,11 @@ TREEVIEW_RemoveItem(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem)
 {
     TRACE("%p, (%s)\n", wineItem, TREEVIEW_ItemName(wineItem));
 
-    TREEVIEW_SendTreeviewNotify(infoPtr, TVN_DELETEITEMW, TVC_UNKNOWN,
-				TVIF_HANDLE | TVIF_PARAM, wineItem, 0);
-
     if (wineItem->firstChild)
 	TREEVIEW_RemoveAllChildren(infoPtr, wineItem);
+
+    TREEVIEW_SendTreeviewNotify(infoPtr, TVN_DELETEITEMW, TVC_UNKNOWN,
+				TVIF_HANDLE | TVIF_PARAM, wineItem, 0);
 
     TREEVIEW_UnlinkItem(wineItem);
 
@@ -1513,7 +1514,7 @@ TREEVIEW_DeleteItem(TREEVIEW_INFO *infoPtr, HTREEITEM wineItem)
     TREEVIEW_ITEM *parent, *prev = NULL;
     BOOL visible = FALSE;
 
-    if (wineItem == TVI_ROOT)
+    if (wineItem == TVI_ROOT || !wineItem)
     {
 	TRACE("TVI_ROOT\n");
 	parent = infoPtr->root;
@@ -1828,7 +1829,7 @@ TREEVIEW_SetItemHeight(TREEVIEW_INFO *infoPtr, INT newHeight)
 {
     INT prevHeight = infoPtr->uItemHeight;
 
-    TRACE("%d\n", newHeight);
+    TRACE("new=%d, old=%d\n", newHeight, prevHeight);
     if (newHeight == -1)
     {
 	infoPtr->uItemHeight = TREEVIEW_NaturalHeight(infoPtr);
@@ -1836,13 +1837,17 @@ TREEVIEW_SetItemHeight(TREEVIEW_INFO *infoPtr, INT newHeight)
     }
     else
     {
-	infoPtr->uItemHeight = newHeight;
-	infoPtr->bHeightSet = TRUE;
+        if (newHeight == 0) newHeight = 1;
+        infoPtr->uItemHeight = newHeight;
+        infoPtr->bHeightSet = TRUE;
     }
 
     /* Round down, unless we support odd ("non even") heights. */
-    if (!(infoPtr->dwStyle & TVS_NONEVENHEIGHT))
-	infoPtr->uItemHeight &= ~1;
+    if (!(infoPtr->dwStyle & TVS_NONEVENHEIGHT) && infoPtr->uItemHeight != 1)
+    {
+        infoPtr->uItemHeight &= ~1;
+        TRACE("after rounding=%d\n", infoPtr->uItemHeight);
+    }
 
     if (infoPtr->uItemHeight != prevHeight)
     {
@@ -2062,6 +2067,7 @@ static inline LRESULT
 TREEVIEW_GetVisibleCount(const TREEVIEW_INFO *infoPtr)
 {
     /* Surprise! This does not take integral height into account. */
+    TRACE("client=%d, item=%d\n", infoPtr->clientHeight, infoPtr->uItemHeight);
     return infoPtr->clientHeight / infoPtr->uItemHeight;
 }
 
@@ -2921,6 +2927,7 @@ TREEVIEW_Paint(TREEVIEW_INFO *infoPtr, HDC hdc_ref)
     {
         hdc = hdc_ref;
         GetClientRect(infoPtr->hwnd, &rc);
+        TREEVIEW_FillBkgnd(infoPtr, hdc, &rc);
     }
     else
     {

@@ -53,6 +53,7 @@ typedef struct
     BOOL useSSL;
     int socketFD;
     void *ssl_s;
+    DWORD security_flags;
 } WININET_NETCONNECTION;
 
 static inline LPWSTR heap_strdupW(LPCWSTR str)
@@ -459,6 +460,7 @@ DWORD NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int 
 		int *recvd /* out */);
 BOOL NETCON_query_data_available(WININET_NETCONNECTION *connection, DWORD *available);
 LPCVOID NETCON_GetCert(WININET_NETCONNECTION *connection);
+int NETCON_GetCipherStrength(WININET_NETCONNECTION *connection);
 DWORD NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value);
 int sock_get_error(int);
 

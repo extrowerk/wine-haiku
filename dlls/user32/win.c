@@ -27,6 +27,7 @@
 #include <string.h>
 #include "windef.h"
 #include "winbase.h"
+#include "winver.h"
 #include "wine/server.h"
 #include "wine/unicode.h"
 #include "win.h"
@@ -40,7 +41,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(win);
 #define NB_USER_HANDLES  ((LAST_USER_HANDLE - FIRST_USER_HANDLE + 1) >> 1)
 #define USER_HANDLE_TO_INDEX(hwnd) ((LOWORD(hwnd) - FIRST_USER_HANDLE) >> 1)
 
-static DWORD process_layout;
+static DWORD process_layout = ~0u;
 
 /**********************************************************************/
 
@@ -689,12 +690,38 @@ BOOL WIN_GetRectangles( HWND hwnd, enum coords_relative relative, RECT *rectWind
         case COORDS_CLIENT:
             OffsetRect( &window_rect, -win->rectClient.left, -win->rectClient.top );
             OffsetRect( &client_rect, -win->rectClient.left, -win->rectClient.top );
+            if (win->dwExStyle & WS_EX_LAYOUTRTL)
+                mirror_rect( &win->rectClient, &window_rect );
             break;
         case COORDS_WINDOW:
             OffsetRect( &window_rect, -win->rectWindow.left, -win->rectWindow.top );
             OffsetRect( &client_rect, -win->rectWindow.left, -win->rectWindow.top );
+            if (win->dwExStyle & WS_EX_LAYOUTRTL)
+                mirror_rect( &win->rectWindow, &client_rect );
             break;
         case COORDS_PARENT:
+            if (win->parent)
+            {
+                WND *parent = WIN_GetPtr( win->parent );
+                if (parent == WND_DESKTOP) break;
+                if (!parent || parent == WND_OTHER_PROCESS)
+                {
+                    WIN_ReleasePtr( win );
+                    goto other_process;
+                }
+                if (parent->flags & WIN_CHILDREN_MOVED)
+                {
+                    WIN_ReleasePtr( parent );
+                    WIN_ReleasePtr( win );
+                    goto other_process;
+                }
+                if (parent->dwExStyle & WS_EX_LAYOUTRTL)
+                {
+                    mirror_rect( &parent->rectClient, &window_rect );
+                    mirror_rect( &parent->rectClient, &client_rect );
+                }
+                WIN_ReleasePtr( parent );
+            }
             break;
         case COORDS_SCREEN:
             while (win->parent)
@@ -707,15 +734,21 @@ BOOL WIN_GetRectangles( HWND hwnd, enum coords_relative relative, RECT *rectWind
                     goto other_process;
                 }
                 WIN_ReleasePtr( win );
+                if (parent->flags & WIN_CHILDREN_MOVED)
+                {
+                    WIN_ReleasePtr( parent );
+                    goto other_process;
+                }
                 win = parent;
-                OffsetRect( &window_rect, -win->rectClient.left, -win->rectClient.top );
-                OffsetRect( &client_rect, -win->rectClient.left, -win->rectClient.top );
+                OffsetRect( &window_rect, win->rectClient.left, win->rectClient.top );
+                OffsetRect( &client_rect, win->rectClient.left, win->rectClient.top );
             }
             break;
         }
         if (rectWindow) *rectWindow = window_rect;
         if (rectClient) *rectClient = client_rect;
         WIN_ReleasePtr( win );
+        return TRUE;
     }
 
 other_process:
@@ -1232,8 +1265,12 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
         /* are we creating the desktop or HWND_MESSAGE parent itself? */
         if (className != (LPCWSTR)DESKTOP_CLASS_ATOM &&
             (IS_INTRESOURCE(className) || strcmpiW( className, messageW )))
+        {
+            DWORD layout;
+            GetProcessDefaultLayout( &layout );
+            if (layout & LAYOUT_RTL) cs->dwExStyle |= WS_EX_LAYOUTRTL;
             parent = GetDesktopWindow();
-        if (process_layout & LAYOUT_RTL) cs->dwExStyle |= WS_EX_LAYOUTRTL;
+        }
     }
 
     WIN_FixCoordinates(cs, &sw); /* fix default coordinates */
@@ -1730,7 +1767,14 @@ HWND WINAPI FindWindowExW( HWND parent, HWND child, LPCWSTR className, LPCWSTR t
     {
         while (list[i])
         {
-            if (GetWindowTextW( list[i], buffer, len + 1 ) && !strcmpiW( buffer, title )) break;
+            if (GetWindowTextW( list[i], buffer, len + 1 ))
+            {
+                if (!strcmpiW( buffer, title )) break;
+            }
+            else
+            {
+                if (!title[0]) break;
+            }
             i++;
         }
     }
@@ -3431,6 +3475,13 @@ BOOL WINAPI UpdateLayeredWindowIndirect( HWND hwnd, const UPDATELAYEREDWINDOWINF
 {
     BYTE alpha = 0xff;
 
+    if (!(GetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_LAYERED) ||
+        GetLayeredWindowAttributes( hwnd, NULL, NULL, NULL ))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
     if (!(info->dwFlags & ULW_EX_NORESIZE) && (info->pptDst || info->psize))
     {
         int x = 0, y = 0, cx = 0, cy = 0;
@@ -3521,6 +3572,41 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
     {
         SetLastError( ERROR_NOACCESS );
         return FALSE;
+    }
+    if (process_layout == ~0u)
+    {
+        static const WCHAR translationW[] = { '\\','V','a','r','F','i','l','e','I','n','f','o',
+                                              '\\','T','r','a','n','s','l','a','t','i','o','n', 0 };
+        static const WCHAR filedescW[] = { '\\','S','t','r','i','n','g','F','i','l','e','I','n','f','o',
+                                           '\\','%','0','4','x','%','0','4','x',
+                                           '\\','F','i','l','e','D','e','s','c','r','i','p','t','i','o','n',0 };
+        WCHAR *str, buffer[MAX_PATH];
+        DWORD i, len, version_layout = 0;
+        DWORD user_lang = GetUserDefaultLangID();
+        DWORD *languages;
+        void *data = NULL;
+
+        GetModuleFileNameW( 0, buffer, MAX_PATH );
+        if (!(len = GetFileVersionInfoSizeW( buffer, NULL ))) goto done;
+        if (!(data = HeapAlloc( GetProcessHeap(), 0, len ))) goto done;
+        if (!GetFileVersionInfoW( buffer, 0, len, data )) goto done;
+        if (!VerQueryValueW( data, translationW, (void **)&languages, &len ) || !len) goto done;
+
+        len /= sizeof(DWORD);
+        for (i = 0; i < len; i++) if (LOWORD(languages[i]) == user_lang) break;
+        if (i == len)  /* try neutral language */
+            for (i = 0; i < len; i++)
+                if (LOWORD(languages[i]) == MAKELANGID( PRIMARYLANGID(user_lang), SUBLANG_NEUTRAL )) break;
+        if (i == len) i = 0;  /* default to the first one */
+
+        sprintfW( buffer, filedescW, LOWORD(languages[i]), HIWORD(languages[i]) );
+        if (!VerQueryValueW( data, buffer, (void **)&str, &len )) goto done;
+        TRACE( "found description %s\n", debugstr_w( str ));
+        if (str[0] == 0x200e && str[1] == 0x200e) version_layout = LAYOUT_RTL;
+
+    done:
+        HeapFree( GetProcessHeap(), 0, data );
+        process_layout = version_layout;
     }
     *layout = process_layout;
     return TRUE;

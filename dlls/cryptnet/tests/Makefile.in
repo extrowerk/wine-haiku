@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 TESTDLL   = cryptnet.dll
-IMPORTS   = cryptnet crypt32
+IMPORTS   = cryptnet crypt32 shlwapi
 
 C_SRCS = \
 	cryptnet.c

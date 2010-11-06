@@ -691,19 +691,19 @@ sub source_scan_project_file($$$)
                         # this option is always present and is already specified in the suffix rules
                     } elsif (/^GB$/) {
                         # Blend Optimization
-                        $prj_target_cflags.="-march=pentiumpro -D_M_IX86=500 ";
+                        $prj_target_cflags.="-D_M_IX86=500 ";
                     } elsif (/^G6$/) {
                         # Pentium Pro Optimization
-                        $prj_target_cflags.="-march=pentiumpro -D_M_IX86=600 ";
+                        $prj_target_cflags.="-D_M_IX86=600 ";
                     } elsif (/^G5$/) {
                         # Pentium Optimization
-                        $prj_target_cflags.="-march=pentium -D_M_IX86=500 ";
+                        $prj_target_cflags.="-D_M_IX86=500 ";
                     } elsif (/^G3$/) {
                         # 80386 Optimization
-                        $prj_target_cflags.="-march=i386 -D_M_IX86=300 ";
+                        $prj_target_cflags.="-D_M_IX86=300 ";
                     } elsif (/^G4$/) {
                         # 80486 Optimization
-                        $prj_target_cflags.="-march=i486 -D_M_IX86=400 ";
+                        $prj_target_cflags.="-D_M_IX86=400 ";
                     } elsif (/^Yc/) {
                         # Create Precompiled Header
                     } elsif (/^Yu/) {
@@ -1010,7 +1010,7 @@ sub source_scan_project_file($$$)
         push @local_depends,"$prj_name.so";
         push @local_dlls,$prj_name;
         my $canon=canonize($prj_name);
-        push @{@$target[$T_LDFLAGS]},("-shared","\$(${canon}_MODULE:%=%.spec)");
+        push @{@$target[$T_LDFLAGS]},("-shared","\$(${canon}_MODULE:.dll=.spec)");
     }
 
     @$target[$T_NAME]=$prj_name;
@@ -1504,7 +1504,7 @@ sub source_scan_directory($$$$)
       push @local_depends,"$target_name.so";
       push @local_dlls,$target_name;
       my $canon=canonize($target_name);
-      push @{@$target[$T_LDFLAGS]},("-shared","\$(${canon}_MODULE:%=%.spec)");
+      push @{@$target[$T_LDFLAGS]},("-shared","\$(${canon}_MODULE:.dll=.spec)");
     } else {
       @$target[$T_TYPE]=$opt_target_type;
       push @exe_list,$target;

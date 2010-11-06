@@ -688,9 +688,31 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture2D(ID3D10Device *ifac
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture3D(ID3D10Device *iface,
         const D3D10_TEXTURE3D_DESC *desc, const D3D10_SUBRESOURCE_DATA *data, ID3D10Texture3D **texture)
 {
-    FIXME("iface %p, desc %p, data %p, texture %p stub!\n", iface, desc, data, texture);
+    struct d3d10_device *device = (struct d3d10_device *)iface;
+    struct d3d10_texture3d *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, desc %p, data %p, texture %p.\n", iface, desc, data, texture);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 texture3d object memory.\n");
+        return E_OUTOFMEMORY;
+    }
+
+    hr = d3d10_texture3d_init(object, device, desc);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize texture, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created 3D texture %p.\n", object);
+    *texture = (ID3D10Texture3D *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateShaderResourceView(ID3D10Device *iface,
@@ -1253,6 +1275,13 @@ static const struct IUnknownVtbl d3d10_device_inner_unknown_vtbl =
     d3d10_device_inner_Release,
 };
 
+static void STDMETHODCALLTYPE d3d10_subresource_destroyed(void *parent) {}
+
+const struct wined3d_parent_ops d3d10_subresource_parent_ops =
+{
+    d3d10_subresource_destroyed,
+};
+
 /* IWineD3DDeviceParent IUnknown methods */
 
 static inline struct d3d10_device *device_from_device_parent(IWineD3DDeviceParent *iface)
@@ -1418,10 +1447,20 @@ static HRESULT STDMETHODCALLTYPE device_parent_CreateVolume(IWineD3DDeviceParent
         IUnknown *superior, UINT width, UINT height, UINT depth, enum wined3d_format_id format,
         WINED3DPOOL pool, DWORD usage, IWineD3DVolume **volume)
 {
-    FIXME("iface %p, superior %p, width %u, height %u, depth %u, format %#x, pool %#x, usage %#x, volume %p stub!\n",
+    HRESULT hr;
+
+    TRACE("iface %p, superior %p, width %u, height %u, depth %u, format %#x, pool %#x, usage %#x, volume %p.\n",
             iface, superior, width, height, depth, format, pool, usage, volume);
 
-    return E_NOTIMPL;
+    hr = IWineD3DDevice_CreateVolume(device_from_device_parent(iface)->wined3d_device,
+            width, height, depth, usage, format, pool, NULL, &d3d10_subresource_parent_ops, volume);
+    if (FAILED(hr))
+    {
+        WARN("Failed to create wined3d volume, hr %#x.\n", hr);
+        return hr;
+    }
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE device_parent_CreateSwapChain(IWineD3DDeviceParent *iface,

@@ -1,8 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = wer.dll
+IMPORTLIB = wer
+IMPORTS   = advapi32
 
 C_SRCS = \
 	main.c

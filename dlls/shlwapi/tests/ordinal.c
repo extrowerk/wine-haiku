@@ -61,7 +61,11 @@ static HWND    (WINAPI *pSHCreateWorkerWindowA)(LONG, HWND, DWORD, DWORD, HMENU,
 static HRESULT (WINAPI *pSHIShellFolder_EnumObjects)(LPSHELLFOLDER, HWND, SHCONTF, IEnumIDList**);
 static DWORD   (WINAPI *pSHGetIniStringW)(LPCWSTR, LPCWSTR, LPWSTR, DWORD, LPCWSTR);
 static BOOL    (WINAPI *pSHSetIniStringW)(LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR);
-static HKEY    (WINAPI *pSHGetShellKey)(DWORD, LPWSTR, BOOL);
+static HKEY    (WINAPI *pSHGetShellKey)(DWORD, LPCWSTR, BOOL);
+static HRESULT (WINAPI *pSKGetValueW)(DWORD, LPCWSTR, LPCWSTR, DWORD*, void*, DWORD*);
+static HRESULT (WINAPI *pSKSetValueW)(DWORD, LPCWSTR, LPCWSTR, DWORD, void*, DWORD);
+static HRESULT (WINAPI *pSKDeleteValueW)(DWORD, LPCWSTR, LPCWSTR);
+static HRESULT (WINAPI *pSKAllocValueW)(DWORD, LPCWSTR, LPCWSTR, DWORD*, void**, DWORD*);
 
 static HMODULE hmlang;
 static HRESULT (WINAPI *pLcidToRfc1766A)(LCID, LPSTR, INT);
@@ -2680,15 +2684,30 @@ static void test_SHSetIniString(void)
 }
 
 enum _shellkey_flags {
-    SHKEY_Explorer  = 0x00,
-    SHKEY_Root_HKCU = 0x01
+    SHKEY_Root_HKCU = 0x1,
+    SHKEY_Root_HKLM = 0x2,
+    SHKEY_Key_Explorer  = 0x00,
+    SHKEY_Key_Shell = 0x10,
+    SHKEY_Key_ShellNoRoam = 0x20,
+    SHKEY_Key_Classes = 0x30,
+    SHKEY_Subkey_Default = 0x0000,
+    SHKEY_Subkey_ResourceName = 0x1000,
+    SHKEY_Subkey_Handlers = 0x2000,
+    SHKEY_Subkey_Associations = 0x3000,
+    SHKEY_Subkey_Volatile = 0x4000,
+    SHKEY_Subkey_MUICache = 0x5000,
+    SHKEY_Subkey_FileExts = 0x6000
 };
 
 static void test_SHGetShellKey(void)
 {
+    static const WCHAR ShellFoldersW[] = { 'S','h','e','l','l',' ','F','o','l','d','e','r','s',0 };
+    static const WCHAR WineTestW[] = { 'W','i','n','e','T','e','s','t',0 };
+
     void *pPathBuildRootW = GetProcAddress(hShlwapi, "PathBuildRootW");
-    HKEY hkey, hkey2;
-    DWORD ret;
+    DWORD *alloc_data, data, size;
+    HKEY hkey;
+    HRESULT hres;
 
     if (!pSHGetShellKey)
     {
@@ -2709,30 +2728,82 @@ static void test_SHGetShellKey(void)
         return;
     }
 
-    /* marking broken cause latest Vista+ versions fail here */
+    /* Vista+ limits SHKEY enumeration values */
     SetLastError(0xdeadbeef);
-    hkey = pSHGetShellKey(SHKEY_Explorer, NULL, FALSE);
-    ok(hkey == NULL || broken(hkey != NULL), "got %p\n", hkey);
+    hkey = pSHGetShellKey(SHKEY_Key_Explorer, ShellFoldersW, FALSE);
     if (hkey)
     {
-        hkey2 = 0;
-        ret = RegOpenKeyExA(hkey, "Shell Folders", 0, KEY_READ, &hkey2);
-        ok(ret == ERROR_SUCCESS, "got %d\n", ret);
-        ok(hkey2 != NULL, "got %p\n", hkey2);
-        RegCloseKey( hkey2 );
-        RegCloseKey( hkey );
+        /* Tests not working on Vista+ */
+        RegCloseKey(hkey);
+
+        hkey = pSHGetShellKey(SHKEY_Root_HKLM|SHKEY_Key_Classes, NULL, FALSE);
+        ok(hkey != NULL, "hkey = NULL\n");
+        RegCloseKey(hkey);
     }
 
-    hkey = pSHGetShellKey(SHKEY_Explorer | SHKEY_Root_HKCU, NULL, FALSE);
-    ok(hkey != NULL, "got %p\n", hkey);
+    hkey = pSHGetShellKey(SHKEY_Root_HKCU|SHKEY_Key_Explorer, ShellFoldersW, FALSE);
+    ok(hkey != NULL, "hkey = NULL\n");
+    RegCloseKey(hkey);
 
-    hkey2 = 0;
-    ret = RegOpenKeyExA(hkey, "Shell Folders", 0, KEY_READ, &hkey2);
-    ok(ret == ERROR_SUCCESS, "got %d\n", ret);
-    ok(hkey2 != NULL, "got %p\n", hkey2);
-    RegCloseKey( hkey2 );
+    hkey = pSHGetShellKey(SHKEY_Root_HKLM|SHKEY_Key_Explorer, ShellFoldersW, FALSE);
+    ok(hkey != NULL, "hkey = NULL\n");
+    RegCloseKey(hkey);
 
-    RegCloseKey( hkey );
+    hkey = pSHGetShellKey(SHKEY_Root_HKLM, WineTestW, FALSE);
+    ok(hkey == NULL, "hkey != NULL\n");
+
+    hkey = pSHGetShellKey(SHKEY_Root_HKLM, WineTestW, TRUE);
+    ok(hkey != NULL, "Can't create key\n");
+    RegCloseKey(hkey);
+
+    hkey = pSHGetShellKey(SHKEY_Root_HKLM, NULL, FALSE);
+    ok(hkey != NULL, "Can't create key\n");
+    ok(SUCCEEDED(RegDeleteKeyW(hkey, WineTestW)), "Can't delte key\n");
+    RegCloseKey(hkey);
+
+    if (!pSKGetValueW || !pSKSetValueW || !pSKDeleteValueW || !pSKAllocValueW)
+    {
+        win_skip("SKGetValueW, SKSetValueW, SKDeleteValueW or SKAllocValueW not available\n");
+        return;
+    }
+
+    hres = pSKGetValueW(SHKEY_Root_HKLM, WineTestW, NULL, NULL, &data, &size);
+    ok(hres == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "hres = %x\n", hres);
+
+    data = 1234;
+    hres = pSKSetValueW(SHKEY_Root_HKLM, WineTestW, NULL, REG_DWORD, &data, sizeof(DWORD));
+    ok(hres == S_OK, "hres = %x\n", hres);
+
+    size = 1;
+    hres = pSKGetValueW(SHKEY_Root_HKLM, WineTestW, NULL, NULL, NULL, &size);
+    ok(hres == S_OK, "hres = %x\n", hres);
+    ok(size == sizeof(DWORD), "size = %d\n", size);
+
+    data = 0xdeadbeef;
+    hres = pSKGetValueW(SHKEY_Root_HKLM, WineTestW, NULL, NULL, &data, &size);
+    ok(hres == S_OK, "hres = %x\n", hres);
+    ok(size == sizeof(DWORD), "size = %d\n", size);
+    ok(data == 1234, "data = %d\n", data);
+
+    hres = pSKAllocValueW(SHKEY_Root_HKLM, WineTestW, NULL, NULL, (void**)&alloc_data, &size);
+    ok(hres == S_OK, "hres= %x\n", hres);
+    ok(size == sizeof(DWORD), "size = %d\n", size);
+    ok(*alloc_data == 1234, "*alloc_data = %d\n", *alloc_data);
+    LocalFree(alloc_data);
+
+    hres = pSKDeleteValueW(SHKEY_Root_HKLM, WineTestW, NULL);
+    ok(hres == S_OK, "hres = %x\n", hres);
+
+    hres = pSKDeleteValueW(SHKEY_Root_HKLM, WineTestW, NULL);
+    ok(hres == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "hres = %x\n", hres);
+
+    hres = pSKGetValueW(SHKEY_Root_HKLM, WineTestW, NULL, NULL, &data, &size);
+    ok(hres == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "hres = %x\n", hres);
+
+    hkey = pSHGetShellKey(SHKEY_Root_HKLM, NULL, FALSE);
+    ok(hkey != NULL, "Can't create key\n");
+    ok(SUCCEEDED(RegDeleteKeyW(hkey, WineTestW)), "Can't delte key\n");
+    RegCloseKey(hkey);
 }
 
 static void init_pointers(void)
@@ -2761,6 +2832,10 @@ static void init_pointers(void)
     MAKEFUNC(SHGetShellKey, 491);
     MAKEFUNC(SHPropertyBag_ReadLONG, 496);
     MAKEFUNC(IUnknown_ProfferService, 514);
+    MAKEFUNC(SKGetValueW, 516);
+    MAKEFUNC(SKSetValueW, 517);
+    MAKEFUNC(SKDeleteValueW, 518);
+    MAKEFUNC(SKAllocValueW, 519);
 #undef MAKEFUNC
 }
 
@@ -2769,6 +2844,12 @@ START_TEST(ordinal)
     hShlwapi = GetModuleHandleA("shlwapi.dll");
     is_win2k_and_lower = GetProcAddress(hShlwapi, "StrChrNW") == 0;
     is_win9x = GetProcAddress(hShlwapi, (LPSTR)99) == 0; /* StrCpyNXA */
+
+    /* SHCreateStreamOnFileEx was introduced in shlwapi v6.0 */
+    if(!GetProcAddress(hShlwapi, "SHCreateStreamOnFileEx")){
+        win_skip("Too old shlwapi version\n");
+        return;
+    }
 
     init_pointers();
 

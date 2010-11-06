@@ -1382,8 +1382,8 @@
 @ stub -arch=win64 ??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAAEAV01@AEBV01@@Z
 @ stub -arch=win32 ??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV01@D@Z
 @ stub -arch=win64 ??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAAEAV01@D@Z
-@ stub -arch=win32 ??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV01@PBD@Z
-@ stub -arch=win64 ??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAAEAV01@PEBD@Z
+@ thiscall -arch=win32 ??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV01@PBD@Z(ptr ptr) msvcp90.??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV01@PBD@Z
+@ cdecl -arch=win64 ??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAAEAV01@PEBD@Z(ptr ptr) msvcp90.??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAAEAV01@PEBD@Z
 @ stub -arch=win32 ??4?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QAEAAV01@ABV01@@Z
 @ stub -arch=win64 ??4?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QEAAAEAV01@AEBV01@@Z
 @ stub -arch=win32 ??4?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QAEAAV01@G@Z
@@ -5550,7 +5550,7 @@
 @ cdecl -arch=win32 ?to_char_type@?$char_traits@D@std@@SADABH@Z(ptr) msvcp90.?to_char_type@?$char_traits@D@std@@SADABH@Z
 @ cdecl -arch=win64 ?to_char_type@?$char_traits@D@std@@SADAEBH@Z(ptr) msvcp90.?to_char_type@?$char_traits@D@std@@SADAEBH@Z
 @ cdecl -arch=win32 ?to_char_type@?$char_traits@G@std@@SAGABG@Z(ptr) msvcp90.?to_char_type@?$char_traits@G@std@@SAGABG@Z
-@ cdecl -arch=win64 ?to_char_type@?$char_traits@G@std@@SAGAEBG@Z(ptr) msvcp90.to_char_type@?$char_traits@G@std@@SAGAEBG@Z
+@ cdecl -arch=win64 ?to_char_type@?$char_traits@G@std@@SAGAEBG@Z(ptr) msvcp90.?to_char_type@?$char_traits@G@std@@SAGAEBG@Z
 @ cdecl -arch=win32 ?to_char_type@?$char_traits@_W@std@@SA_WABG@Z(ptr) msvcp90.?to_char_type@?$char_traits@_W@std@@SA_WABG@Z
 @ cdecl -arch=win64 ?to_char_type@?$char_traits@_W@std@@SA_WAEBG@Z(ptr) msvcp90.?to_char_type@?$char_traits@_W@std@@SA_WAEBG@Z
 @ cdecl -arch=win32 ?to_int_type@?$char_traits@D@std@@SAHABD@Z(ptr) msvcp90.?to_int_type@?$char_traits@D@std@@SAHABD@Z

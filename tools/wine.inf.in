@@ -89,6 +89,7 @@ AddReg=\
     ContentIndex,\
     ControlClass,\
     CurrentVersion,\
+    CurrentVersionWow64,\
     Debugger,\
     Desktop,\
     Dotnet,\
@@ -113,6 +114,7 @@ WineFakeDlls=FakeDllsWin32,FakeDllsWow64
 CopyFiles=@l_intl.nls
 AddReg=\
     CurrentVersion,\
+    CurrentVersionWow64,\
     Debugger,\
     DirectX,\
     Dotnet,\
@@ -474,10 +476,14 @@ HKLM,%CurrentVersionNT%\Ports,,16
 HKLM,%CurrentVersionNT%\Print,,16
 HKLM,%CurrentVersionNT%\ProfileList,,16
 
+[CurrentVersionWow64]
+HKLM,%CurrentVersion%,"ProgramFilesDir (x86)",,"%16426%"
+HKLM,%CurrentVersion%,"CommonFilesDir (x86)",,"%16428%"
+
 [Debugger]
 HKLM,%CurrentVersionNT%\AeDebug,"Debugger",2,"winedbg --auto %ld %ld"
 HKLM,%CurrentVersionNT%\AeDebug,"Auto",2,"1"
-HKCU,Software\Wine\Debug,"RelayExclude",2,"ntdll.RtlEnterCriticalSection;ntdll.RtlLeaveCriticalSection;kernel32.48;kernel32.49;kernel32.94;kernel32.95;kernel32.96;kernel32.97;kernel32.98"
+HKCU,Software\Wine\Debug,"RelayExclude",2,"ntdll.RtlEnterCriticalSection;ntdll.RtlLeaveCriticalSection;kernel32.48;kernel32.49;kernel32.94;kernel32.95;kernel32.96;kernel32.97;kernel32.98;kernel32.TlsGetValue;kernel32.TlsSetValue;kernel32.FlsGetValue;kernel32.FlsSetValue;kernel32.SetLastError"
 HKCU,Software\Wine\Debug,"RelayFromExclude",2,"winex11.drv;user32;gdi32;advapi32;kernel32"
 
 [Desktop]
@@ -2545,6 +2551,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,wbemprox.dll,1
 11,,wiaservc.dll,1
 11,,windowscodecs.dll,1
+11,,winegstreamer.dll,1
 11,,wintrust.dll,1
 11,,wmiutils.dll,1
 11,,wuapi.dll,1
@@ -2582,7 +2589,6 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,mui,
 11,spool\drivers\color,
 11,spool\printers,
-11,wbem,
 10,,explorer.exe
 10,,hh.exe
 10,,notepad.exe
@@ -2591,8 +2597,14 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,notepad.exe
 11,,winetest.exe,-
 12,,mountmgr.sys
+10,Microsoft.NET\Framework\v1.1.4322,aspnet_regiis.exe
 10,Microsoft.NET\Framework\v1.1.4322,ngen.exe
+10,Microsoft.NET\Framework\v1.1.4322,fusion.dll
 10,Microsoft.NET\Framework\v2.0.50727,ngen.exe
+10,Microsoft.NET\Framework\v2.0.50727,fusion.dll
+10,Microsoft.NET\Framework\v4.0.30319,ngen.exe
+10,Microsoft.NET\Framework\v4.0.30319,fusion.dll
+11,wbem,mofcomp.exe
 16422,Internet Explorer,iexplore.exe
 11,,*
 

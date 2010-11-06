@@ -2271,6 +2271,12 @@ BOOL WINAPI CreateUrlCacheEntryW(
     if (((lpszUrlEnd - lpszUrlName) > 1) && (*(lpszUrlEnd - 1) == '/' || *(lpszUrlEnd - 1) == '\\'))
         lpszUrlEnd--;
 
+    lpszUrlPart = memchrW(lpszUrlName, '?', lpszUrlEnd - lpszUrlName);
+    if (!lpszUrlPart)
+        lpszUrlPart = memchrW(lpszUrlName, '#', lpszUrlEnd - lpszUrlName);
+    if (lpszUrlPart)
+        lpszUrlEnd = lpszUrlPart;
+
     for (lpszUrlPart = lpszUrlEnd; 
         (lpszUrlPart >= lpszUrlName); 
         lpszUrlPart--)
@@ -2280,10 +2286,6 @@ BOOL WINAPI CreateUrlCacheEntryW(
             bFound = TRUE;
             lpszUrlPart++;
             break;
-        }
-        else if(*lpszUrlPart == '?' || *lpszUrlPart == '#')
-        {
-            lpszUrlEnd = lpszUrlPart;
         }
     }
     if (!lstrcmpW(lpszUrlPart, szWWW))
@@ -2330,7 +2332,13 @@ BOOL WINAPI CreateUrlCacheEntryW(
     CacheDir = (BYTE)(rand() % pHeader->DirectoryCount);
 
     lBufferSize = MAX_PATH * sizeof(WCHAR);
-    URLCache_LocalFileNameToPathW(pContainer, pHeader, szFile, CacheDir, lpszFileName, &lBufferSize);
+    if (!URLCache_LocalFileNameToPathW(pContainer, pHeader, szFile, CacheDir, lpszFileName, &lBufferSize))
+    {
+        WARN("Failed to get full path for filename %s, needed %u bytes.\n",
+                debugstr_a(szFile), lBufferSize);
+        URLCacheContainer_UnlockIndex(pContainer, pHeader);
+        return FALSE;
+    }
 
     URLCacheContainer_UnlockIndex(pContainer, pHeader);
 

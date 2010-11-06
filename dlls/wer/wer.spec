@@ -61,15 +61,15 @@
 @ stub WerpShowUpsellUI
 @ stub WerpSubmitReportFromStore
 @ stub WerpSvcReportFromMachineQueue
-@ stub WerAddExcludedApplication
-@ stub WerRemoveExcludedApplication
+@ stdcall WerAddExcludedApplication(wstr long)
+@ stdcall WerRemoveExcludedApplication(wstr long)
 @ stub WerReportAddDump
 @ stub WerReportAddFile
-@ stub WerReportCloseHandle
-@ stub WerReportCreate
-@ stub WerReportSetParameter
+@ stdcall WerReportCloseHandle(ptr)
+@ stdcall WerReportCreate(wstr long ptr ptr)
+@ stdcall WerReportSetParameter(ptr long wstr wstr)
 @ stub WerReportSetUIOption
-@ stub WerReportSubmit
+@ stdcall WerReportSubmit(ptr long long ptr)
 @ stub WerpGetReportConsent
 @ stub WerpIsDisabled
 @ stub WerpOpenUserQueue

@@ -123,6 +123,9 @@ static const TEST_URL_CANONICALIZE TEST_CANONICALIZE[] = {
     {"http://www.winehq.org/tests/../#example", URL_DONT_SIMPLIFY, S_OK, "http://www.winehq.org/tests/../#example", FALSE},
     {"http://www.winehq.org/tests/foo bar", URL_ESCAPE_SPACES_ONLY| URL_DONT_ESCAPE_EXTRA_INFO , S_OK, "http://www.winehq.org/tests/foo%20bar", FALSE},
     {"http://www.winehq.org/tests/foo%20bar", URL_UNESCAPE , S_OK, "http://www.winehq.org/tests/foo bar", FALSE},
+    {"http://www.winehq.org", 0, S_OK, "http://www.winehq.org/", FALSE},
+    {"http:///www.winehq.org", 0, S_OK, "http:///www.winehq.org", FALSE},
+    {"http:////www.winehq.org", 0, S_OK, "http:////www.winehq.org", FALSE},
     {"file:///c:/tests/foo%20bar", URL_UNESCAPE , S_OK, "file:///c:/tests/foo bar", FALSE},
     {"file:///c:/tests\\foo%20bar", URL_UNESCAPE , S_OK, "file:///c:/tests/foo bar", FALSE},
     {"file:///c:/tests/foo%20bar", 0, S_OK, "file:///c:/tests/foo%20bar", FALSE},
@@ -137,6 +140,24 @@ static const TEST_URL_CANONICALIZE TEST_CANONICALIZE[] = {
     {"file:///c://tests/foo%20bar", URL_FILE_USE_PATHURL, S_OK, "file://c:\\\\tests\\foo bar", FALSE},
     {"file:///c:\\tests\\foo bar", 0, S_OK, "file:///c:/tests/foo bar", FALSE},
     {"file:///c:\\tests\\foo bar", URL_DONT_SIMPLIFY, S_OK, "file:///c:/tests/foo bar", FALSE},
+    {"file:///c:\\tests\\foobar", 0, S_OK, "file:///c:/tests/foobar", FALSE},
+    {"file:///c:\\tests\\foobar", URL_WININET_COMPATIBILITY, S_OK, "file://c:\\tests\\foobar", FALSE},
+    {"file://home/user/file", 0, S_OK, "file://home/user/file", FALSE},
+    {"file:///home/user/file", 0, S_OK, "file:///home/user/file", FALSE},
+    {"file:////home/user/file", 0, S_OK, "file://home/user/file", FALSE},
+    {"file://home/user/file", URL_WININET_COMPATIBILITY, S_OK, "file://\\\\home\\user\\file", FALSE},
+    {"file:///home/user/file", URL_WININET_COMPATIBILITY, S_OK, "file://\\home\\user\\file", FALSE},
+    {"file:////home/user/file", URL_WININET_COMPATIBILITY, S_OK, "file://\\\\home\\user\\file", FALSE},
+    {"file://///home/user/file", URL_WININET_COMPATIBILITY, S_OK, "file://\\\\home\\user\\file", FALSE},
+    {"file://C:/user/file", 0, S_OK, "file:///C:/user/file", FALSE},
+    {"file://C:/user/file/../asdf", 0, S_OK, "file:///C:/user/asdf", FALSE},
+    {"file:///C:/user/file", 0, S_OK, "file:///C:/user/file", FALSE},
+    {"file:////C:/user/file", 0, S_OK, "file:///C:/user/file", FALSE},
+    {"file://C:/user/file", URL_WININET_COMPATIBILITY, S_OK, "file://C:\\user\\file", FALSE},
+    {"file:///C:/user/file", URL_WININET_COMPATIBILITY, S_OK, "file://C:\\user\\file", FALSE},
+    {"file:////C:/user/file", URL_WININET_COMPATIBILITY, S_OK, "file://C:\\user\\file", FALSE},
+    {"http:///www.winehq.org", 0, S_OK, "http:///www.winehq.org", FALSE},
+    {"http:///www.winehq.org", URL_WININET_COMPATIBILITY, S_OK, "http:///www.winehq.org", FALSE},
     {"http://www.winehq.org/site/about", URL_FILE_USE_PATHURL, S_OK, "http://www.winehq.org/site/about", FALSE},
     {"file_://www.winehq.org/site/about", URL_FILE_USE_PATHURL, S_OK, "file_://www.winehq.org/site/about", FALSE},
     {"c:\\dir\\file", 0, S_OK, "file:///c:/dir/file", FALSE},
@@ -599,6 +620,9 @@ static void test_UrlGetPart(void)
   const char* http_url = "http://user:pass 123@www.wine hq.org";
   const char* res_url = "res://some.dll/find.dlg";
   const char* about_url = "about:blank";
+  const char* excid_url = "x-excid://36C00000/guid:{048B4E89-2E92-496F-A837-33BA02FF6D32}/Message.htm";
+  const char* foo_url = "foo://bar-url/test";
+  const char* short_url = "ascheme:";
 
   CHAR szPart[INTERNET_MAX_URL_LENGTH];
   DWORD dwSize;
@@ -635,6 +659,20 @@ static void test_UrlGetPart(void)
   ok(szPart[0]==0, "UrlGetPartA(\"hi\") return \"%s\" instead of \"\"\n", szPart);
   ok(dwSize == 0, "dwSize = %d\n", dwSize);
 
+  if(pUrlGetPartW)
+  {
+      const WCHAR hiW[] = {'h','i',0};
+      WCHAR bufW[5];
+
+      /* UrlGetPartW returns S_OK instead of S_FALSE */
+      dwSize = sizeof szPart;
+      bufW[0]='x'; bufW[1]=0;
+      res = pUrlGetPartW(hiW, bufW, &dwSize, URL_PART_SCHEME, 0);
+      todo_wine ok(res==S_OK, "UrlGetPartW(\"hi\") returned %08X\n", res);
+      ok(bufW[0] == 0, "UrlGetPartW(\"hi\") return \"%c\"\n", bufW[0]);
+      ok(dwSize == 0, "dwSize = %d\n", dwSize);
+  }
+
   dwSize = sizeof szPart;
   szPart[0]='x'; szPart[1]=0;
   res = pUrlGetPartA("hi", szPart, &dwSize, URL_PART_QUERY, 0);
@@ -655,6 +693,10 @@ static void test_UrlGetPart(void)
   test_url_part(http_url, URL_PART_PASSWORD, 0, "pass 123");
 
   test_url_part(about_url, URL_PART_SCHEME, 0, "about");
+
+  test_url_part(excid_url, URL_PART_SCHEME, 0, "x-excid");
+  test_url_part(foo_url, URL_PART_SCHEME, 0, "foo");
+  test_url_part(short_url, URL_PART_SCHEME, 0, "ascheme");
 
   dwSize = sizeof(szPart);
   res = pUrlGetPartA(about_url, szPart, &dwSize, URL_PART_HOSTNAME, 0);
@@ -686,6 +728,34 @@ static void test_UrlGetPart(void)
   szPart[0] = 'x'; szPart[1] = '\0';
   res = pUrlGetPartA("index.htm", szPart, &dwSize, URL_PART_HOSTNAME, 0);
   ok(res==E_FAIL, "returned %08x\n", res);
+
+  dwSize = sizeof(szPart);
+  szPart[0] = 'x'; szPart[1] = '\0';
+  res = pUrlGetPartA(excid_url, szPart, &dwSize, URL_PART_HOSTNAME, 0);
+  ok(res==E_FAIL, "returned %08x\n", res);
+  ok(szPart[0] == 'x', "szPart[0] = %c\n", szPart[0]);
+  ok(dwSize == sizeof(szPart), "dwSize = %d\n", dwSize);
+
+  dwSize = sizeof(szPart);
+  szPart[0] = 'x'; szPart[1] = '\0';
+  res = pUrlGetPartA(excid_url, szPart, &dwSize, URL_PART_QUERY, 0);
+  ok(res==S_FALSE, "returned %08x\n", res);
+  ok(szPart[0] == 0, "szPart[0] = %c\n", szPart[0]);
+  ok(dwSize == 0, "dwSize = %d\n", dwSize);
+
+  dwSize = sizeof(szPart);
+  szPart[0] = 'x'; szPart[1] = '\0';
+  res = pUrlGetPartA(foo_url, szPart, &dwSize, URL_PART_HOSTNAME, 0);
+  ok(res==E_FAIL, "returned %08x\n", res);
+  ok(szPart[0] == 'x', "szPart[0] = %c\n", szPart[0]);
+  ok(dwSize == sizeof(szPart), "dwSize = %d\n", dwSize);
+
+  dwSize = sizeof(szPart);
+  szPart[0] = 'x'; szPart[1] = '\0';
+  res = pUrlGetPartA(foo_url, szPart, &dwSize, URL_PART_QUERY, 0);
+  ok(res==S_FALSE, "returned %08x\n", res);
+  ok(szPart[0] == 0, "szPart[0] = %c\n", szPart[0]);
+  ok(dwSize == 0, "dwSize = %d\n", dwSize);
 }
 
 /* ########################### */
@@ -1408,8 +1478,17 @@ static void test_HashData(void)
 
 START_TEST(url)
 {
+  char *pFunc;
 
   hShlwapi = GetModuleHandleA("shlwapi.dll");
+
+  /* SHCreateStreamOnFileEx was introduced in shlwapi v6.0 */
+  pFunc = (void*)GetProcAddress(hShlwapi, "SHCreateStreamOnFileEx");
+  if(!pFunc){
+      win_skip("Too old shlwapi version\n");
+      return;
+  }
+
   pUrlUnescapeA = (void *) GetProcAddress(hShlwapi, "UrlUnescapeA");
   pUrlUnescapeW = (void *) GetProcAddress(hShlwapi, "UrlUnescapeW");
   pUrlIsA = (void *) GetProcAddress(hShlwapi, "UrlIsA");

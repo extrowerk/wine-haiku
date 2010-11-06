@@ -920,6 +920,8 @@ void fill_cpu_info(void)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_AMD64;
 #elif defined(__powerpc__)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_PPC;
+#elif defined(__arm__)
+    cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_ARM;
 #elif defined(__ALPHA__)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_ALPHA;
 #elif defined(__sparc__)
@@ -1047,6 +1049,8 @@ void fill_cpu_info(void)
             {
                 if (strstr(value, "cx8"))
                     user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE_DOUBLE] = TRUE;
+                if (strstr(value, "cx16"))
+                    user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE128] = TRUE;
                 if (strstr(value, "mmx"))
                     user_shared_data->ProcessorFeatures[PF_MMX_INSTRUCTIONS_AVAILABLE] = TRUE;
                 if (strstr(value, "tsc"))
@@ -1059,9 +1063,12 @@ void fill_cpu_info(void)
                     user_shared_data->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE] = TRUE;
                 if (strstr(value, "sse2"))
                     user_shared_data->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE] = TRUE;
+                if (strstr(value, "pni"))
+                    user_shared_data->ProcessorFeatures[PF_SSE3_INSTRUCTIONS_AVAILABLE] = TRUE;
                 if (strstr(value, "pae"))
                     user_shared_data->ProcessorFeatures[PF_PAE_ENABLED] = TRUE;
-
+                if (strstr(value, "ht"))
+                    cached_sci.FeatureSet |= CPU_FEATURE_HTT;
                 continue;
             }
 	}
@@ -1191,15 +1198,16 @@ void fill_cpu_info(void)
     }
 #elif defined (__OpenBSD__)
     {
-        int mib[2], num;
+        int mib[2], num, ret;
         size_t len;
 
         mib[0] = CTL_HW;
         mib[1] = HW_NCPU;
         len = sizeof(num);
 
-        num = sysctl(mib, 2, &num, &len, NULL, 0);
-        NtCurrentTeb()->Peb->NumberOfProcessors = num;
+        ret = sysctl(mib, 2, &num, &len, NULL, 0);
+        if (!ret)
+            NtCurrentTeb()->Peb->NumberOfProcessors = num;
     }
 #elif defined (__APPLE__)
     {
@@ -1271,11 +1279,13 @@ void fill_cpu_info(void)
                 {
                     cached_sci.Revision |= value;
                     if (strstr(buffer, "CX8"))   user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE_DOUBLE] = TRUE;
+                    if (strstr(buffer, "CX16"))  user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE128] = TRUE;
                     if (strstr(buffer, "MMX"))   user_shared_data->ProcessorFeatures[PF_MMX_INSTRUCTIONS_AVAILABLE] = TRUE;
                     if (strstr(buffer, "TSC"))   user_shared_data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE] = TRUE;
                     if (strstr(buffer, "3DNOW")) user_shared_data->ProcessorFeatures[PF_3DNOW_INSTRUCTIONS_AVAILABLE] = TRUE;
                     if (strstr(buffer, "SSE"))   user_shared_data->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE] = TRUE;
                     if (strstr(buffer, "SSE2"))  user_shared_data->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE] = TRUE;
+                    if (strstr(buffer, "SSE3"))  user_shared_data->ProcessorFeatures[PF_SSE3_INSTRUCTIONS_AVAILABLE] = TRUE;
                     if (strstr(buffer, "PAE"))   user_shared_data->ProcessorFeatures[PF_PAE_ENABLED] = TRUE;
                 }
                 break; /* CPU_TYPE_I386 */

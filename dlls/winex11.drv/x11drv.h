@@ -596,6 +596,8 @@ extern int dxgrab;
 extern int use_xkb;
 extern int use_take_focus;
 extern int use_primary_selection;
+extern int use_system_cursors;
+extern int show_systray;
 extern int usexcomposite;
 extern int managed_mode;
 extern int decorated_mode;
@@ -617,6 +619,7 @@ enum x11drv_atoms
     XATOM_CLIPBOARD = FIRST_XATOM,
     XATOM_COMPOUND_TEXT,
     XATOM_INCR,
+    XATOM_MANAGER,
     XATOM_MULTIPLE,
     XATOM_SELECTION_DATA,
     XATOM_TARGETS,
@@ -658,6 +661,7 @@ enum x11drv_atoms
     XATOM__NET_WM_WINDOW_TYPE_NORMAL,
     XATOM__NET_WM_WINDOW_TYPE_UTILITY,
     XATOM__NET_WORKAREA,
+    XATOM__XEMBED,
     XATOM__XEMBED_INFO,
     XATOM_XdndAware,
     XATOM_XdndEnter,
@@ -688,6 +692,7 @@ enum x11drv_atoms
 };
 
 extern Atom X11DRV_Atoms[NB_XATOMS - FIRST_XATOM];
+extern Atom systray_atom;
 
 #define x11drv_atom(name) (X11DRV_Atoms[XATOM_##name - FIRST_XATOM])
 
@@ -756,6 +761,7 @@ struct x11drv_win_data
     BOOL        shaped : 1;     /* is window using a custom region shape? */
     int         wm_state;       /* current value of the WM_STATE property */
     DWORD       net_wm_state;   /* bit mask of active x11drv_net_wm_state values */
+    Window      embedder;       /* window id of embedder */
     unsigned long configure_serial; /* serial number of last configure request */
     HBITMAP     hWMIconBitmap;
     HBITMAP     hWMIconMask;
@@ -776,6 +782,15 @@ extern void wait_for_withdrawn_state( Display *display, struct x11drv_win_data *
 extern void update_user_time( Time time );
 extern void update_net_wm_states( Display *display, struct x11drv_win_data *data );
 extern void make_window_embedded( Display *display, struct x11drv_win_data *data );
+extern void change_systray_owner( Display *display, Window systray_window );
+
+static inline void mirror_rect( const RECT *window_rect, RECT *rect )
+{
+    int width = window_rect->right - window_rect->left;
+    int tmp = rect->left;
+    rect->left = width - rect->right;
+    rect->right = width - tmp;
+}
 
 /* X context to associate a hwnd to an X window */
 extern XContext winContext;
@@ -790,7 +805,7 @@ extern BOOL CDECL X11DRV_ClipCursor( LPCRECT clip );
 extern void X11DRV_InitKeyboard( Display *display );
 extern void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD dwFlags, DWORD time,
                                         DWORD dwExtraInfo, UINT injected_flags );
-extern void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
+extern void X11DRV_send_mouse_input( HWND top_hwnd, HWND cursor_hwnd, DWORD flags, DWORD x, DWORD y,
                                      DWORD data, DWORD time, DWORD extra_info, UINT injected_flags );
 extern DWORD CDECL X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
                                                        DWORD mask, DWORD flags );

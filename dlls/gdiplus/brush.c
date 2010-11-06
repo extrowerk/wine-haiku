@@ -325,6 +325,9 @@ GpStatus WINGDIPAPI GdipCreateLineBrush(GDIPCONST GpPointF* startpoint,
     if(!line || !startpoint || !endpoint || wrap == WrapModeClamp)
         return InvalidParameter;
 
+    if (startpoint->X == endpoint->X && startpoint->Y == endpoint->Y)
+        return OutOfMemory;
+
     *line = GdipAlloc(sizeof(GpLineGradient));
     if(!*line)  return OutOfMemory;
 
@@ -401,7 +404,7 @@ GpStatus WINGDIPAPI GdipCreateLineBrushI(GDIPCONST GpPoint* startpoint,
     stF.X  = (REAL)startpoint->X;
     stF.Y  = (REAL)startpoint->Y;
     endF.X = (REAL)endpoint->X;
-    endF.X = (REAL)endpoint->Y;
+    endF.Y = (REAL)endpoint->Y;
 
     return GdipCreateLineBrush(&stF, &endF, startcolor, endcolor, wrap, line);
 }

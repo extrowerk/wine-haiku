@@ -450,7 +450,9 @@ HRESULT WINAPI RegisterDragDrop(HWND hwnd, LPDROPTARGET pDropTarget)
   hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
   if(FAILED(hr)) return hr;
 
+  unk = NULL;
   hr = IDropTarget_QueryInterface(pDropTarget, &IID_IUnknown, (void**)&unk);
+  if (SUCCEEDED(hr) && !unk) hr = E_NOINTERFACE;
   if(FAILED(hr))
   {
       IStream_Release(stream);
@@ -1179,13 +1181,12 @@ HRESULT WINAPI OleLoad(
     }
   }
 
-  if (SUCCEEDED(hres))
-    /*
-     * Initialize the object with it's IPersistStorage interface.
-     */
-    hres = IOleObject_QueryInterface(pUnk,
-				     &IID_IPersistStorage,
-				     (void**)&persistStorage);
+  /*
+   * Initialize the object with its IPersistStorage interface.
+   */
+  hres = IOleObject_QueryInterface(pUnk,
+                                   &IID_IPersistStorage,
+                                   (void**)&persistStorage);
 
   if (SUCCEEDED(hres))
   {
@@ -2222,19 +2223,19 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
 
     if (*trackerInfo->pdwEffect & DROPEFFECT_MOVE)
     {
-      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(1));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(2));
     }
     else if (*trackerInfo->pdwEffect & DROPEFFECT_COPY)
     {
-      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(2));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(3));
     }
     else if (*trackerInfo->pdwEffect & DROPEFFECT_LINK)
     {
-      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(3));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(4));
     }
     else
     {
-      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(0));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(1));
     }
 
     SetCursor(hCur);
@@ -2528,7 +2529,17 @@ HRESULT WINAPI OleCreate(
             if (SUCCEEDED(hres2))
             {
                 DWORD dwConnection;
-                hres = IOleCache_Cache(pOleCache, pFormatEtc, ADVF_PRIMEFIRST, &dwConnection);
+                if (renderopt == OLERENDER_DRAW && !pFormatEtc) {
+                    FORMATETC pfe;
+                    pfe.cfFormat = 0;
+                    pfe.ptd = NULL;
+                    pfe.dwAspect = DVASPECT_CONTENT;
+                    pfe.lindex = -1;
+                    pfe.tymed = TYMED_NULL;
+                    hres = IOleCache_Cache(pOleCache, &pfe, ADVF_PRIMEFIRST, &dwConnection);
+                }
+                else
+                    hres = IOleCache_Cache(pOleCache, pFormatEtc, ADVF_PRIMEFIRST, &dwConnection);
                 IOleCache_Release(pOleCache);
             }
         }

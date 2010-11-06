@@ -84,7 +84,8 @@ typedef enum {
     JSCLASS_OBJECT,
     JSCLASS_REGEXP,
     JSCLASS_STRING,
-    JSCLASS_ARGUMENTS
+    JSCLASS_ARGUMENTS,
+    JSCLASS_VBARRAY
 } jsclass_t;
 
 jsdisp_t *iface_to_jsdisp(IUnknown*);
@@ -242,6 +243,7 @@ HRESULT create_regexp_var(script_ctx_t*,VARIANT*,VARIANT*,jsdisp_t**);
 HRESULT create_string(script_ctx_t*,const WCHAR*,DWORD,jsdisp_t**);
 HRESULT create_bool(script_ctx_t*,VARIANT_BOOL,jsdisp_t**);
 HRESULT create_number(script_ctx_t*,VARIANT*,jsdisp_t**);
+HRESULT create_vbarray(script_ctx_t*,SAFEARRAY*,jsdisp_t**);
 
 typedef enum {
     NO_HINT,
@@ -304,6 +306,7 @@ struct _script_ctx_t {
     jsdisp_t *object_constr;
     jsdisp_t *regexp_constr;
     jsdisp_t *string_constr;
+    jsdisp_t *vbarray_constr;
 };
 
 void script_release(script_ctx_t*);
@@ -326,6 +329,7 @@ HRESULT create_number_constr(script_ctx_t*,jsdisp_t*,jsdisp_t**);
 HRESULT create_object_constr(script_ctx_t*,jsdisp_t*,jsdisp_t**);
 HRESULT create_regexp_constr(script_ctx_t*,jsdisp_t*,jsdisp_t**);
 HRESULT create_string_constr(script_ctx_t*,jsdisp_t*,jsdisp_t**);
+HRESULT create_vbarray_constr(script_ctx_t*,jsdisp_t*,jsdisp_t**);
 
 IUnknown *create_ax_site(script_ctx_t*);
 
@@ -371,6 +375,12 @@ static inline BOOL is_num_vt(enum VARENUM vt)
 static inline DOUBLE num_val(const VARIANT *v)
 {
     return V_VT(v) == VT_I4 ? V_I4(v) : V_R8(v);
+}
+
+static inline void num_set_int(VARIANT *v, INT i)
+{
+    V_VT(v) = VT_I4;
+    V_I4(v) = i;
 }
 
 static inline void num_set_val(VARIANT *v, DOUBLE d)

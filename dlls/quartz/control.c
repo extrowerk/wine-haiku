@@ -224,473 +224,6 @@ HRESULT SeekingPassThru_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     return S_OK;
 }
 
-typedef HRESULT (*SeekFunc)( IMediaSeeking *to, LPVOID arg );
-
-static HRESULT ForwardCmdSeek( PCRITICAL_SECTION crit_sect, IBaseFilter* from, SeekFunc fnSeek, LPVOID arg )
-{
-    HRESULT hr = S_OK;
-    HRESULT hr_return = S_OK;
-    IEnumPins *enumpins = NULL;
-    BOOL foundend = FALSE, allnotimpl = TRUE;
-
-    hr = IBaseFilter_EnumPins( from, &enumpins );
-    if (FAILED(hr))
-        goto out;
-
-    hr = IEnumPins_Reset( enumpins );
-    while (hr == S_OK) {
-        IPin *pin = NULL;
-        hr = IEnumPins_Next( enumpins, 1, &pin, NULL );
-        if (hr == VFW_E_ENUM_OUT_OF_SYNC)
-        {
-            hr = IEnumPins_Reset( enumpins );
-            continue;
-        }
-        if (pin)
-        {
-            PIN_DIRECTION dir;
-
-            IPin_QueryDirection( pin, &dir );
-            if (dir == PINDIR_INPUT)
-            {
-                IPin *connected = NULL;
-
-                IPin_ConnectedTo( pin, &connected );
-                if (connected)
-                {
-                    HRESULT hr_local;
-                    IMediaSeeking *seek = NULL;
-
-                    hr_local = IPin_QueryInterface( connected, &IID_IMediaSeeking, (void**)&seek );
-                    if (hr_local == S_OK)
-                    {
-                        foundend = TRUE;
-                        if (crit_sect)
-                        {
-                            LeaveCriticalSection( crit_sect );
-                            hr_local = fnSeek( seek , arg );
-                            EnterCriticalSection( crit_sect );
-                        }
-                        else
-                            hr_local = fnSeek( seek , arg );
-
-                        if (hr_local != E_NOTIMPL)
-                            allnotimpl = FALSE;
-
-                        hr_return = updatehres( hr_return, hr_local );
-                        IMediaSeeking_Release( seek );
-                    }
-                    IPin_Release(connected);
-                }
-            }
-            IPin_Release( pin );
-        }
-    }
-    IEnumPins_Release( enumpins );
-
-    if (foundend && allnotimpl)
-        hr = E_NOTIMPL;
-    else
-        hr = hr_return;
-
-out:
-    TRACE("Returning: %08x\n", hr);
-    return hr;
-}
-
-
-HRESULT MediaSeekingImpl_Init(IBaseFilter *pUserData, CHANGEPROC fnChangeStop, CHANGEPROC fnChangeCurrent, CHANGEPROC fnChangeRate, MediaSeekingImpl * pSeeking, PCRITICAL_SECTION crit_sect)
-{
-    assert(fnChangeStop && fnChangeCurrent && fnChangeRate);
-
-    pSeeking->refCount = 1;
-    pSeeking->pUserData = pUserData;
-    pSeeking->fnChangeRate = fnChangeRate;
-    pSeeking->fnChangeStop = fnChangeStop;
-    pSeeking->fnChangeCurrent = fnChangeCurrent;
-    pSeeking->dwCapabilities = AM_SEEKING_CanSeekForwards |
-        AM_SEEKING_CanSeekBackwards |
-        AM_SEEKING_CanSeekAbsolute |
-        AM_SEEKING_CanGetStopPos |
-        AM_SEEKING_CanGetDuration;
-    pSeeking->llCurrent = 0;
-    pSeeking->llStop = ((ULONGLONG)0x80000000) << 32;
-    pSeeking->llDuration = pSeeking->llStop;
-    pSeeking->dRate = 1.0;
-    pSeeking->timeformat = TIME_FORMAT_MEDIA_TIME;
-    pSeeking->crst = crit_sect;
-
-    return S_OK;
-}
-
-struct pos_args {
-    LONGLONG* current, *stop;
-    DWORD curflags, stopflags;
-};
-
-static HRESULT fwd_setposition(IMediaSeeking *seek, LPVOID pargs)
-{
-    struct pos_args *args = (void*)pargs;
-
-    return IMediaSeeking_SetPositions(seek, args->current, args->curflags, args->stop, args->stopflags);
-}
-
-static HRESULT fwd_checkcaps(IMediaSeeking *iface, LPVOID pcaps)
-{
-    DWORD *caps = pcaps;
-    return IMediaSeeking_CheckCapabilities(iface, caps);
-}
-
-static HRESULT fwd_settimeformat(IMediaSeeking *iface, LPVOID pformat)
-{
-    const GUID *format = pformat;
-    return IMediaSeeking_SetTimeFormat(iface, format);
-}
-
-static HRESULT fwd_getduration(IMediaSeeking *iface, LPVOID pdur)
-{
-    LONGLONG *duration = pdur;
-    LONGLONG mydur = *duration;
-    HRESULT hr;
-
-    hr = IMediaSeeking_GetDuration(iface, &mydur);
-    if (FAILED(hr))
-        return hr;
-
-    if ((mydur < *duration) || (*duration < 0 && mydur > 0))
-        *duration = mydur;
-    return hr;
-}
-
-static HRESULT fwd_getstopposition(IMediaSeeking *iface, LPVOID pdur)
-{
-    LONGLONG *duration = pdur;
-    LONGLONG mydur = *duration;
-    HRESULT hr;
-
-    hr = IMediaSeeking_GetStopPosition(iface, &mydur);
-    if (FAILED(hr))
-        return hr;
-
-    if ((mydur < *duration) || (*duration < 0 && mydur > 0))
-        *duration = mydur;
-    return hr;
-}
-
-static HRESULT fwd_getcurposition(IMediaSeeking *iface, LPVOID pdur)
-{
-    LONGLONG *duration = pdur;
-    LONGLONG mydur = *duration;
-    HRESULT hr;
-
-    hr = IMediaSeeking_GetCurrentPosition(iface, &mydur);
-    if (FAILED(hr))
-        return hr;
-
-    if ((mydur < *duration) || (*duration < 0 && mydur > 0))
-        *duration = mydur;
-    return hr;
-}
-
-static HRESULT fwd_setrate(IMediaSeeking *iface, LPVOID prate)
-{
-    double *rate = prate;
-
-    HRESULT hr;
-
-    hr = IMediaSeeking_SetRate(iface, *rate);
-    if (FAILED(hr))
-        return hr;
-
-    return hr;
-}
-
-
-HRESULT WINAPI MediaSeekingImpl_GetCapabilities(IMediaSeeking * iface, DWORD * pCapabilities)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-
-    TRACE("(%p)\n", pCapabilities);
-
-    *pCapabilities = This->dwCapabilities;
-
-    return S_OK;
-}
-
-HRESULT WINAPI MediaSeekingImpl_CheckCapabilities(IMediaSeeking * iface, DWORD * pCapabilities)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-    HRESULT hr;
-    DWORD dwCommonCaps;
-
-    TRACE("(%p)\n", pCapabilities);
-
-    if (!pCapabilities)
-        return E_POINTER;
-
-    EnterCriticalSection(This->crst);
-    hr = ForwardCmdSeek(This->crst, This->pUserData, fwd_checkcaps, pCapabilities);
-    LeaveCriticalSection(This->crst);
-    if (FAILED(hr) && hr != E_NOTIMPL)
-        return hr;
-
-    dwCommonCaps = *pCapabilities & This->dwCapabilities;
-
-    if (!dwCommonCaps)
-        hr = E_FAIL;
-    else
-        hr = (*pCapabilities == dwCommonCaps) ?  S_OK : S_FALSE;
-    *pCapabilities = dwCommonCaps;
-
-    return hr;
-}
-
-HRESULT WINAPI MediaSeekingImpl_IsFormatSupported(IMediaSeeking * iface, const GUID * pFormat)
-{
-    TRACE("(%s)\n", qzdebugstr_guid(pFormat));
-
-    return (IsEqualIID(pFormat, &TIME_FORMAT_MEDIA_TIME) ? S_OK : S_FALSE);
-}
-
-HRESULT WINAPI MediaSeekingImpl_QueryPreferredFormat(IMediaSeeking * iface, GUID * pFormat)
-{
-    TRACE("(%s)\n", qzdebugstr_guid(pFormat));
-
-    *pFormat = TIME_FORMAT_MEDIA_TIME;
-    return S_OK;
-}
-
-HRESULT WINAPI MediaSeekingImpl_GetTimeFormat(IMediaSeeking * iface, GUID * pFormat)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-    TRACE("(%s)\n", qzdebugstr_guid(pFormat));
-
-    EnterCriticalSection(This->crst);
-    *pFormat = This->timeformat;
-    LeaveCriticalSection(This->crst);
-
-    return S_OK;
-}
-
-HRESULT WINAPI MediaSeekingImpl_IsUsingTimeFormat(IMediaSeeking * iface, const GUID * pFormat)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-    HRESULT hr = S_OK;
-
-    TRACE("(%s)\n", qzdebugstr_guid(pFormat));
-
-    EnterCriticalSection(This->crst);
-    if (!IsEqualIID(pFormat, &This->timeformat))
-        hr = S_FALSE;
-    LeaveCriticalSection(This->crst);
-
-    return hr;
-}
-
-
-HRESULT WINAPI MediaSeekingImpl_SetTimeFormat(IMediaSeeking * iface, const GUID * pFormat)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-    TRACE("(%s)\n", qzdebugstr_guid(pFormat));
-
-    EnterCriticalSection(This->crst);
-    ForwardCmdSeek(This->crst, This->pUserData, fwd_settimeformat, (LPVOID)pFormat);
-    LeaveCriticalSection(This->crst);
-
-    return (IsEqualIID(pFormat, &TIME_FORMAT_MEDIA_TIME) ? S_OK : S_FALSE);
-}
-
-
-HRESULT WINAPI MediaSeekingImpl_GetDuration(IMediaSeeking * iface, LONGLONG * pDuration)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-
-    TRACE("(%p)\n", pDuration);
-
-    EnterCriticalSection(This->crst);
-    *pDuration = This->llDuration;
-    ForwardCmdSeek(This->crst, This->pUserData, fwd_getduration, pDuration);
-    LeaveCriticalSection(This->crst);
-
-    return S_OK;
-}
-
-HRESULT WINAPI MediaSeekingImpl_GetStopPosition(IMediaSeeking * iface, LONGLONG * pStop)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-
-    TRACE("(%p)\n", pStop);
-
-    EnterCriticalSection(This->crst);
-    *pStop = This->llStop;
-    ForwardCmdSeek(This->crst, This->pUserData, fwd_getstopposition, pStop);
-    LeaveCriticalSection(This->crst);
-
-    return S_OK;
-}
-
-/* FIXME: Make use of the info the filter should expose */
-HRESULT WINAPI MediaSeekingImpl_GetCurrentPosition(IMediaSeeking * iface, LONGLONG * pCurrent)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-
-    TRACE("(%p)\n", pCurrent);
-
-    EnterCriticalSection(This->crst);
-    *pCurrent = This->llCurrent;
-    ForwardCmdSeek(This->crst, This->pUserData, fwd_getcurposition, pCurrent);
-    LeaveCriticalSection(This->crst);
-
-    return S_OK;
-}
-
-HRESULT WINAPI MediaSeekingImpl_ConvertTimeFormat(IMediaSeeking * iface, LONGLONG * pTarget, const GUID * pTargetFormat, LONGLONG Source, const GUID * pSourceFormat)
-{
-    if (IsEqualIID(pTargetFormat, &TIME_FORMAT_MEDIA_TIME) && IsEqualIID(pSourceFormat, &TIME_FORMAT_MEDIA_TIME))
-    {
-        *pTarget = Source;
-        return S_OK;
-    }
-    /* FIXME: clear pTarget? */
-    return E_INVALIDARG;
-}
-
-static inline LONGLONG Adjust(LONGLONG value, const LONGLONG * pModifier, DWORD dwFlags)
-{
-    switch (dwFlags & AM_SEEKING_PositioningBitsMask)
-    {
-    case AM_SEEKING_NoPositioning:
-        return value;
-    case AM_SEEKING_AbsolutePositioning:
-        return *pModifier;
-    case AM_SEEKING_RelativePositioning:
-    case AM_SEEKING_IncrementalPositioning:
-        return value + *pModifier;
-    default:
-        assert(FALSE);
-        return 0;
-    }
-}
-
-HRESULT WINAPI MediaSeekingImpl_SetPositions(IMediaSeeking * iface, LONGLONG * pCurrent, DWORD dwCurrentFlags, LONGLONG * pStop, DWORD dwStopFlags)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-    BOOL bChangeCurrent = FALSE, bChangeStop = FALSE;
-    LONGLONG llNewCurrent, llNewStop;
-    struct pos_args args;
-
-    TRACE("(%p, %x, %p, %x)\n", pCurrent, dwCurrentFlags, pStop, dwStopFlags);
-
-    args.current = pCurrent;
-    args.stop = pStop;
-    args.curflags = dwCurrentFlags;
-    args.stopflags = dwStopFlags;
-
-    EnterCriticalSection(This->crst);
-
-    llNewCurrent = Adjust(This->llCurrent, pCurrent, dwCurrentFlags);
-    llNewStop = Adjust(This->llStop, pStop, dwStopFlags);
-
-    if (pCurrent)
-        bChangeCurrent = TRUE;
-    if (llNewStop != This->llStop)
-        bChangeStop = TRUE;
-
-    TRACE("Old: %u, New: %u\n", (DWORD)(This->llCurrent/10000000), (DWORD)(llNewCurrent/10000000));
-
-    This->llCurrent = llNewCurrent;
-    This->llStop = llNewStop;
-
-    if (pCurrent && (dwCurrentFlags & AM_SEEKING_ReturnTime))
-        *pCurrent = llNewCurrent;
-    if (pStop && (dwStopFlags & AM_SEEKING_ReturnTime))
-        *pStop = llNewStop;
-
-    ForwardCmdSeek(This->crst, This->pUserData, fwd_setposition, &args);
-    LeaveCriticalSection(This->crst);
-
-    if (bChangeCurrent)
-        This->fnChangeCurrent(This->pUserData);
-    if (bChangeStop)
-        This->fnChangeStop(This->pUserData);
-
-    return S_OK;
-}
-
-HRESULT WINAPI MediaSeekingImpl_GetPositions(IMediaSeeking * iface, LONGLONG * pCurrent, LONGLONG * pStop)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-
-    TRACE("(%p, %p)\n", pCurrent, pStop);
-
-    EnterCriticalSection(This->crst);
-    IMediaSeeking_GetCurrentPosition(iface, pCurrent);
-    IMediaSeeking_GetStopPosition(iface, pStop);
-    LeaveCriticalSection(This->crst);
-
-    return S_OK;
-}
-
-HRESULT WINAPI MediaSeekingImpl_GetAvailable(IMediaSeeking * iface, LONGLONG * pEarliest, LONGLONG * pLatest)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-
-    TRACE("(%p, %p)\n", pEarliest, pLatest);
-
-    EnterCriticalSection(This->crst);
-    *pEarliest = 0;
-    *pLatest = This->llDuration;
-    LeaveCriticalSection(This->crst);
-
-    return S_OK;
-}
-
-HRESULT WINAPI MediaSeekingImpl_SetRate(IMediaSeeking * iface, double dRate)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-    BOOL bChangeRate = (dRate != This->dRate);
-    HRESULT hr = S_OK;
-
-    TRACE("(%e)\n", dRate);
-
-    if (dRate > 100 || dRate < .001)
-    {
-        FIXME("Excessive rate %e, ignoring\n", dRate);
-        return VFW_E_UNSUPPORTED_AUDIO;
-    }
-
-    EnterCriticalSection(This->crst);
-    This->dRate = dRate;
-    if (bChangeRate)
-        hr = This->fnChangeRate(This->pUserData);
-    ForwardCmdSeek(This->crst, This->pUserData, fwd_setrate, &dRate);
-    LeaveCriticalSection(This->crst);
-
-    return hr;
-}
-
-HRESULT WINAPI MediaSeekingImpl_GetRate(IMediaSeeking * iface, double * dRate)
-{
-    MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-
-    TRACE("(%p)\n", dRate);
-
-    EnterCriticalSection(This->crst);
-    /* Forward? */
-    *dRate = This->dRate;
-    LeaveCriticalSection(This->crst);
-
-    return S_OK;
-}
-
-HRESULT WINAPI MediaSeekingImpl_GetPreroll(IMediaSeeking * iface, LONGLONG * pPreroll)
-{
-    TRACE("(%p)\n", pPreroll);
-
-    *pPreroll = 0;
-    return S_OK;
-}
-
 static HRESULT WINAPI MediaSeekingPassThru_QueryInterface(IMediaSeeking *iface, REFIID riid, LPVOID *ppvObj)
 {
     ICOM_THIS_MULTI(PassThruImpl, IMediaSeeking_vtbl, iface);
@@ -724,7 +257,7 @@ static HRESULT get_connected(PassThruImpl *This, IMediaSeeking **seek) {
     *seek = NULL;
     hr = IPin_ConnectedTo(This->pin, &pin);
     if (FAILED(hr))
-        return hr;
+        return VFW_E_NOT_CONNECTED;
     hr = IPin_QueryInterface(pin, &IID_IMediaSeeking, (void**)seek);
     IPin_Release(pin);
     if (FAILED(hr))
@@ -743,6 +276,8 @@ static HRESULT WINAPI MediaSeekingPassThru_GetCapabilities(IMediaSeeking * iface
         hr = IMediaSeeking_GetCapabilities(seek, pCapabilities);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -757,6 +292,8 @@ static HRESULT WINAPI MediaSeekingPassThru_CheckCapabilities(IMediaSeeking * ifa
         hr = IMediaSeeking_CheckCapabilities(seek, pCapabilities);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -771,6 +308,8 @@ static HRESULT WINAPI MediaSeekingPassThru_IsFormatSupported(IMediaSeeking * ifa
         hr = IMediaSeeking_IsFormatSupported(seek, pFormat);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -785,6 +324,8 @@ static HRESULT WINAPI MediaSeekingPassThru_QueryPreferredFormat(IMediaSeeking * 
         hr = IMediaSeeking_QueryPreferredFormat(seek, pFormat);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -799,6 +340,8 @@ static HRESULT WINAPI MediaSeekingPassThru_GetTimeFormat(IMediaSeeking * iface, 
         hr = IMediaSeeking_GetTimeFormat(seek, pFormat);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -813,6 +356,8 @@ static HRESULT WINAPI MediaSeekingPassThru_IsUsingTimeFormat(IMediaSeeking * ifa
         hr = IMediaSeeking_IsUsingTimeFormat(seek, pFormat);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -827,6 +372,8 @@ static HRESULT WINAPI MediaSeekingPassThru_SetTimeFormat(IMediaSeeking * iface, 
         hr = IMediaSeeking_SetTimeFormat(seek, pFormat);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -841,6 +388,8 @@ static HRESULT WINAPI MediaSeekingPassThru_GetDuration(IMediaSeeking * iface, LO
         hr = IMediaSeeking_GetDuration(seek, pDuration);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -855,6 +404,8 @@ static HRESULT WINAPI MediaSeekingPassThru_GetStopPosition(IMediaSeeking * iface
         hr = IMediaSeeking_GetStopPosition(seek, pStop);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -881,6 +432,8 @@ static HRESULT WINAPI MediaSeekingPassThru_GetCurrentPosition(IMediaSeeking * if
         hr = IMediaSeeking_GetCurrentPosition(seek, pCurrent);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -895,6 +448,8 @@ static HRESULT WINAPI MediaSeekingPassThru_ConvertTimeFormat(IMediaSeeking * ifa
         hr = IMediaSeeking_ConvertTimeFormat(seek, pTarget, pTargetFormat, Source, pSourceFormat);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -908,7 +463,8 @@ static HRESULT WINAPI MediaSeekingPassThru_SetPositions(IMediaSeeking * iface, L
     if (SUCCEEDED(hr)) {
         hr = IMediaSeeking_SetPositions(seek, pCurrent, dwCurrentFlags, pStop, dwStopFlags);
         IMediaSeeking_Release(seek);
-    }
+    } else if (hr == VFW_E_NOT_CONNECTED)
+        hr = S_OK;
     return hr;
 }
 
@@ -923,6 +479,8 @@ static HRESULT WINAPI MediaSeekingPassThru_GetPositions(IMediaSeeking * iface, L
         hr = IMediaSeeking_GetPositions(seek, pCurrent, pStop);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -937,6 +495,8 @@ static HRESULT WINAPI MediaSeekingPassThru_GetAvailable(IMediaSeeking * iface, L
         hr = IMediaSeeking_GetAvailable(seek, pEarliest, pLatest);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -951,6 +511,8 @@ static HRESULT WINAPI MediaSeekingPassThru_SetRate(IMediaSeeking * iface, double
         hr = IMediaSeeking_SetRate(seek, dRate);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -965,6 +527,8 @@ static HRESULT WINAPI MediaSeekingPassThru_GetRate(IMediaSeeking * iface, double
         hr = IMediaSeeking_GetRate(seek, dRate);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 
@@ -979,6 +543,8 @@ static HRESULT WINAPI MediaSeekingPassThru_GetPreroll(IMediaSeeking * iface, LON
         hr = IMediaSeeking_GetPreroll(seek, pPreroll);
         IMediaSeeking_Release(seek);
     }
+    else
+        return E_NOTIMPL;
     return hr;
 }
 

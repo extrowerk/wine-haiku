@@ -39,8 +39,8 @@ struct mem_file_desc
     unsigned int pos;
 };
 
-struct mem_file_desc current_shader;
-LPD3DINCLUDE current_include;
+static struct mem_file_desc current_shader;
+static ID3DInclude *current_include;
 
 #define INCLUDES_INITIAL_CAPACITY 4
 
@@ -50,15 +50,15 @@ struct loaded_include
     const char *data;
 };
 
-struct loaded_include *includes;
-int includes_capacity, includes_size;
-const char *parent_include;
+static struct loaded_include *includes;
+static int includes_capacity, includes_size;
+static const char *parent_include;
 
-char *wpp_output;
-int wpp_output_capacity, wpp_output_size;
+static char *wpp_output;
+static int wpp_output_capacity, wpp_output_size;
 
-char *wpp_messages;
-int wpp_messages_capacity, wpp_messages_size;
+static char *wpp_messages;
+static int wpp_messages_capacity, wpp_messages_size;
 
 /* Mutex used to guarantee a single invocation
    of the D3DXAssembleShader function (or its variants) at a time.
@@ -309,6 +309,86 @@ static int wpp_close_output(void)
     return 1;
 }
 
+static HRESULT preprocess_shader(const void *data, SIZE_T data_size,
+        const D3D_SHADER_MACRO *defines, ID3DInclude *include, ID3DBlob **error_messages)
+{
+    int ret;
+    HRESULT hr = S_OK;
+    const D3D_SHADER_MACRO *def = defines;
+
+    static const struct wpp_callbacks wpp_callbacks =
+    {
+        wpp_lookup_mem,
+        wpp_open_mem,
+        wpp_close_mem,
+        wpp_read_mem,
+        wpp_write_mem,
+        wpp_error,
+        wpp_warning,
+    };
+
+    if (def != NULL)
+    {
+        while (def->Name != NULL)
+        {
+            wpp_add_define(def->Name, def->Definition);
+            def++;
+        }
+    }
+    current_include = include;
+    includes_size = 0;
+
+    wpp_output_size = wpp_output_capacity = 0;
+    wpp_output = NULL;
+
+    wpp_set_callbacks(&wpp_callbacks);
+    wpp_messages_size = wpp_messages_capacity = 0;
+    wpp_messages = NULL;
+    current_shader.buffer = data;
+    current_shader.size = data_size;
+
+    ret = wpp_parse("", NULL);
+    if (!wpp_close_output())
+        ret = 1;
+    if (ret)
+    {
+        TRACE("Error during shader preprocessing\n");
+        if (wpp_messages)
+        {
+            int size;
+            ID3DBlob *buffer;
+
+            TRACE("Preprocessor messages:\n%s", wpp_messages);
+
+            if (error_messages)
+            {
+                size = strlen(wpp_messages) + 1;
+                hr = D3DCreateBlob(size, &buffer);
+                if (FAILED(hr))
+                    goto cleanup;
+                CopyMemory(ID3D10Blob_GetBufferPointer(buffer), wpp_messages, size);
+                *error_messages = buffer;
+            }
+        }
+        if (data)
+            TRACE("Shader source:\n%s\n", debugstr_an(data, data_size));
+        hr = E_FAIL;
+    }
+
+cleanup:
+    /* Remove the previously added defines */
+    if (defines != NULL)
+    {
+        while (defines->Name != NULL)
+        {
+            wpp_del_define(defines->Name);
+            defines++;
+        }
+    }
+    HeapFree(GetProcessHeap(), 0, wpp_messages);
+    return hr;
+}
+
 static HRESULT assemble_shader(const char *preprocShader, const char *preprocMessages,
                                LPD3DBLOB* ppShader, LPD3DBLOB* ppErrorMsgs)
 {
@@ -396,97 +476,24 @@ static HRESULT assemble_shader(const char *preprocShader, const char *preprocMes
     return S_OK;
 }
 
-HRESULT WINAPI D3DAssemble(LPCVOID data, SIZE_T datasize, LPCSTR filename,
-                           const D3D_SHADER_MACRO *defines, ID3DInclude *include,
-                           UINT flags,
-                           ID3DBlob **shader, ID3DBlob **error_messages){
-    int ret;
+HRESULT WINAPI D3DAssemble(const void *data, SIZE_T datasize, const char *filename,
+        const D3D_SHADER_MACRO *defines, ID3DInclude *include, UINT flags,
+        ID3DBlob **shader, ID3DBlob **error_messages)
+{
     HRESULT hr;
-    CONST D3D_SHADER_MACRO* def = defines;
-
-    static const struct wpp_callbacks wpp_callbacks = {
-        wpp_lookup_mem,
-        wpp_open_mem,
-        wpp_close_mem,
-        wpp_read_mem,
-        wpp_write_mem,
-        wpp_error,
-        wpp_warning,
-    };
 
     EnterCriticalSection(&wpp_mutex);
 
     /* TODO: flags */
-    if(flags) FIXME("flags: %x\n", flags);
+    if (flags) FIXME("flags %x\n", flags);
 
-    if(def != NULL)
-    {
-        while(def->Name != NULL)
-        {
-            wpp_add_define(def->Name, def->Definition);
-            def++;
-        }
-    }
-    current_include = include;
-    includes_size = 0;
+    if (shader) *shader = NULL;
+    if (error_messages) *error_messages = NULL;
 
-    if(shader) *shader = NULL;
-    if(error_messages) *error_messages = NULL;
-    wpp_output_size = wpp_output_capacity = 0;
-    wpp_output = NULL;
+    hr = preprocess_shader(data, datasize, defines, include, error_messages);
+    if (SUCCEEDED(hr))
+        hr = assemble_shader(wpp_output, wpp_messages, shader, error_messages);
 
-    /* Preprocess shader */
-    wpp_set_callbacks(&wpp_callbacks);
-    wpp_messages_size = wpp_messages_capacity = 0;
-    wpp_messages = NULL;
-    current_shader.buffer = data;
-    current_shader.size = datasize;
-
-    ret = wpp_parse("", NULL);
-    if(!wpp_close_output())
-        ret = 1;
-    if(ret)
-    {
-        TRACE("Error during shader preprocessing\n");
-        if(wpp_messages)
-        {
-            int size;
-            LPD3DBLOB buffer;
-
-            TRACE("Preprocessor messages:\n");
-            TRACE("%s", wpp_messages);
-
-            if(error_messages)
-            {
-                size = strlen(wpp_messages) + 1;
-                hr = D3DCreateBlob(size, &buffer);
-                if(FAILED(hr)) goto cleanup;
-                CopyMemory(ID3D10Blob_GetBufferPointer(buffer), wpp_messages, size);
-                *error_messages = buffer;
-            }
-        }
-        if(data)
-        {
-            TRACE("Shader source:\n");
-            TRACE("%s\n", debugstr_an(data, datasize));
-        }
-        hr = D3DXERR_INVALIDDATA;
-        goto cleanup;
-    }
-
-    hr = assemble_shader(wpp_output, wpp_messages, shader, error_messages);
-
-cleanup:
-    /* Remove the previously added defines */
-    if(defines != NULL)
-    {
-        while(defines->Name != NULL)
-        {
-            wpp_del_define(defines->Name);
-            defines++;
-        }
-    }
-    HeapFree(GetProcessHeap(), 0, wpp_messages);
     HeapFree(GetProcessHeap(), 0, wpp_output);
     LeaveCriticalSection(&wpp_mutex);
     return hr;
@@ -507,4 +514,41 @@ HRESULT WINAPI D3DCompile(const void *data, SIZE_T data_size, const char *filena
         D3DCreateBlob(1, error_messages); /* zero fill used as string end */
 
     return D3DERR_INVALIDCALL;
+}
+
+HRESULT WINAPI D3DPreprocess(const void *data, SIZE_T size, const char *filename,
+        const D3D_SHADER_MACRO *defines, ID3DInclude *include,
+        ID3DBlob **shader, ID3DBlob **error_messages)
+{
+    HRESULT hr;
+    ID3DBlob *buffer;
+
+    if (!data)
+        return E_INVALIDARG;
+
+    EnterCriticalSection(&wpp_mutex);
+
+    if (shader) *shader = NULL;
+    if (error_messages) *error_messages = NULL;
+
+    hr = preprocess_shader(data, size, defines, include, error_messages);
+
+    if (SUCCEEDED(hr))
+    {
+        if (shader)
+        {
+            hr = D3DCreateBlob(wpp_output_size, &buffer);
+            if (FAILED(hr))
+                goto cleanup;
+            CopyMemory(ID3D10Blob_GetBufferPointer(buffer), wpp_output, wpp_output_size);
+            *shader = buffer;
+        }
+        else
+            hr = E_INVALIDARG;
+    }
+
+cleanup:
+    HeapFree(GetProcessHeap(), 0, wpp_output);
+    LeaveCriticalSection(&wpp_mutex);
+    return hr;
 }

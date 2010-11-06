@@ -116,6 +116,25 @@ static void msvcrt_fttofd64( const WIN32_FIND_DATAA *fd, struct MSVCRT__finddata
   strcpy(ft->name, fd->cFileName);
 }
 
+/* INTERNAL: Translate WIN32_FIND_DATAA to finddata64i32_t  */
+static void msvcrt_fttofd64i32( const WIN32_FIND_DATAA *fd, struct MSVCRT__finddata64i32_t* ft)
+{
+  DWORD dw;
+
+  if (fd->dwFileAttributes == FILE_ATTRIBUTE_NORMAL)
+    ft->attrib = 0;
+  else
+    ft->attrib = fd->dwFileAttributes;
+
+  RtlTimeToSecondsSince1970( (const LARGE_INTEGER *)&fd->ftCreationTime, &dw );
+  ft->time_create = dw;
+  RtlTimeToSecondsSince1970( (const LARGE_INTEGER *)&fd->ftLastAccessTime, &dw );
+  ft->time_access = dw;
+  RtlTimeToSecondsSince1970( (const LARGE_INTEGER *)&fd->ftLastWriteTime, &dw );
+  ft->time_write = dw;
+  ft->size = fd->nFileSizeLow;
+  strcpy(ft->name, fd->cFileName);
+}
 
 /* INTERNAL: Translate WIN32_FIND_DATAW to wfinddatai64_t  */
 static void msvcrt_wfttofdi64( const WIN32_FIND_DATAW *fd, struct MSVCRT__wfinddatai64_t* ft)
@@ -330,6 +349,27 @@ MSVCRT_intptr_t CDECL MSVCRT__findfirst64(const char * fspec, struct MSVCRT__fin
 }
 
 /*********************************************************************
+ *		_findfirst64i32 (MSVCRT.@)
+ *
+ * 64-bit/32-bit version of _findfirst.
+ */
+MSVCRT_intptr_t CDECL MSVCRT__findfirst64i32(const char * fspec, struct MSVCRT__finddata64i32_t* ft)
+{
+  WIN32_FIND_DATAA find_data;
+  HANDLE hfind;
+
+  hfind  = FindFirstFileA(fspec, &find_data);
+  if (hfind == INVALID_HANDLE_VALUE)
+  {
+    msvcrt_set_errno(GetLastError());
+    return -1;
+  }
+  msvcrt_fttofd64i32(&find_data,ft);
+  TRACE(":got handle %p\n",hfind);
+  return (MSVCRT_intptr_t)hfind;
+}
+
+/*********************************************************************
  *		_wfindfirsti64 (MSVCRT.@)
  *
  * Unicode version of _findfirsti64.
@@ -434,6 +474,25 @@ int CDECL MSVCRT__findnext64(long hand, struct MSVCRT__finddata64_t * ft)
   }
 
   msvcrt_fttofd64(&find_data,ft);
+  return 0;
+}
+
+/*********************************************************************
+ *		_findnext64i32 (MSVCRT.@)
+ *
+ * 64-bit/32-bit version of _findnext.
+ */
+int CDECL MSVCRT__findnext64i32(long hand, struct MSVCRT__finddata64i32_t * ft)
+{
+  WIN32_FIND_DATAA find_data;
+
+  if (!FindNextFileA((HANDLE)hand, &find_data))
+  {
+    *MSVCRT__errno() = MSVCRT_ENOENT;
+    return -1;
+  }
+
+  msvcrt_fttofd64i32(&find_data,ft);
   return 0;
 }
 
@@ -1413,6 +1472,78 @@ void CDECL _searchenv(const char* file, const char* env, char *buf)
 }
 
 /*********************************************************************
+ *		_searchenv_s (MSVCRT.@)
+ */
+int CDECL _searchenv_s(const char* file, const char* env, char *buf, MSVCRT_size_t count)
+{
+  char*envVal, *penv;
+  char curPath[MAX_PATH];
+
+  if (!MSVCRT_CHECK_PMT(file != NULL) || !MSVCRT_CHECK_PMT(buf != NULL) ||
+      !MSVCRT_CHECK_PMT(count > 0))
+  {
+      *MSVCRT__errno() = MSVCRT_EINVAL;
+      return MSVCRT_EINVAL;
+  }
+
+  *buf = '\0';
+
+  /* Try CWD first */
+  if (GetFileAttributesA( file ) != INVALID_FILE_ATTRIBUTES)
+  {
+    if (GetFullPathNameA( file, count, buf, NULL )) return 0;
+    msvcrt_set_errno(GetLastError());
+    return 0;
+  }
+
+  /* Search given environment variable */
+  envVal = MSVCRT_getenv(env);
+  if (!envVal)
+  {
+    *MSVCRT__errno() = MSVCRT_ENOENT;
+    return MSVCRT_ENOENT;
+  }
+
+  penv = envVal;
+  TRACE(":searching for %s in paths %s\n", file, envVal);
+
+  do
+  {
+    char *end = penv;
+
+    while(*end && *end != ';') end++; /* Find end of next path */
+    if (penv == end || !*penv)
+    {
+      *MSVCRT__errno() = MSVCRT_ENOENT;
+      return MSVCRT_ENOENT;
+    }
+    memcpy(curPath, penv, end - penv);
+    if (curPath[end - penv] != '/' && curPath[end - penv] != '\\')
+    {
+      curPath[end - penv] = '\\';
+      curPath[end - penv + 1] = '\0';
+    }
+    else
+      curPath[end - penv] = '\0';
+
+    strcat(curPath, file);
+    TRACE("Checking for file %s\n", curPath);
+    if (GetFileAttributesA( curPath ) != INVALID_FILE_ATTRIBUTES)
+    {
+      if (strlen(curPath) + 1 > count)
+      {
+          MSVCRT_INVALID_PMT("buf[count] is too small");
+          *MSVCRT__errno() = MSVCRT_ERANGE;
+          return MSVCRT_ERANGE;
+      }
+      strcpy(buf, curPath);
+      return 0;
+    }
+    penv = *end ? end + 1 : end;
+  } while(1);
+}
+
+/*********************************************************************
  *      _wsearchenv (MSVCRT.@)
  *
  * Unicode version of _searchenv
@@ -1470,6 +1601,78 @@ void CDECL _wsearchenv(const MSVCRT_wchar_t* file, const MSVCRT_wchar_t* env, MS
       strcpyW(buf, curPath);
       msvcrt_set_errno(ERROR_FILE_NOT_FOUND);
       return; /* Found */
+    }
+    penv = *end ? end + 1 : end;
+  } while(1);
+}
+
+/*********************************************************************
+ *		_wsearchenv_s (MSVCRT.@)
+ */
+int CDECL _wsearchenv_s(const MSVCRT_wchar_t* file, const MSVCRT_wchar_t* env,
+                        MSVCRT_wchar_t *buf, MSVCRT_size_t count)
+{
+  MSVCRT_wchar_t*       envVal, *penv;
+  MSVCRT_wchar_t        curPath[MAX_PATH];
+
+  if (!MSVCRT_CHECK_PMT(file != NULL) || !MSVCRT_CHECK_PMT(buf != NULL) ||
+      !MSVCRT_CHECK_PMT(count > 0))
+  {
+      *MSVCRT__errno() = MSVCRT_EINVAL;
+      return MSVCRT_EINVAL;
+  }
+  *buf = '\0';
+
+  /* Try CWD first */
+  if (GetFileAttributesW( file ) != INVALID_FILE_ATTRIBUTES)
+  {
+    if (GetFullPathNameW( file, count, buf, NULL )) return 0;
+    msvcrt_set_errno(GetLastError());
+    return 0;
+  }
+
+  /* Search given environment variable */
+  envVal = _wgetenv(env);
+  if (!envVal)
+  {
+    *MSVCRT__errno() = MSVCRT_ENOENT;
+    return MSVCRT_ENOENT;
+  }
+
+  penv = envVal;
+  TRACE(":searching for %s in paths %s\n", debugstr_w(file), debugstr_w(envVal));
+
+  do
+  {
+    MSVCRT_wchar_t *end = penv;
+
+    while(*end && *end != ';') end++; /* Find end of next path */
+    if (penv == end || !*penv)
+    {
+      *MSVCRT__errno() = MSVCRT_ENOENT;
+      return MSVCRT_ENOENT;
+    }
+    memcpy(curPath, penv, (end - penv) * sizeof(MSVCRT_wchar_t));
+    if (curPath[end - penv] != '/' && curPath[end - penv] != '\\')
+    {
+      curPath[end - penv] = '\\';
+      curPath[end - penv + 1] = '\0';
+    }
+    else
+      curPath[end - penv] = '\0';
+
+    strcatW(curPath, file);
+    TRACE("Checking for file %s\n", debugstr_w(curPath));
+    if (GetFileAttributesW( curPath ) != INVALID_FILE_ATTRIBUTES)
+    {
+      if (strlenW(curPath) + 1 > count)
+      {
+          MSVCRT_INVALID_PMT("buf[count] is too small");
+          *MSVCRT__errno() = MSVCRT_ERANGE;
+          return MSVCRT_ERANGE;
+      }
+      strcpyW(buf, curPath);
+      return 0;
     }
     penv = *end ? end + 1 : end;
   } while(1);

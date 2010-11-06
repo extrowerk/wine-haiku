@@ -1202,6 +1202,12 @@ BOOL WINAPI RedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT flags )
  */
 BOOL WINAPI UpdateWindow( HWND hwnd )
 {
+    if (!hwnd)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+
     return RedrawWindow( hwnd, NULL, 0, RDW_UPDATENOW | RDW_ALLCHILDREN );
 }
 
@@ -1289,8 +1295,6 @@ INT WINAPI GetUpdateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
 
     if ((update_rgn = send_ncpaint( hwnd, NULL, &flags )))
     {
-        POINT offset;
-
         retval = CombineRgn( hrgn, update_rgn, 0, RGN_COPY );
         if (send_erase( hwnd, flags, update_rgn, NULL, NULL ))
         {
@@ -1298,9 +1302,7 @@ INT WINAPI GetUpdateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
             get_update_flags( hwnd, NULL, &flags );
         }
         /* map region to client coordinates */
-        offset.x = offset.y = 0;
-        ScreenToClient( hwnd, &offset );
-        OffsetRgn( hrgn, offset.x, offset.y );
+        map_window_region( 0, hwnd, hrgn );
     }
     return retval;
 }
@@ -1324,8 +1326,10 @@ BOOL WINAPI GetUpdateRect( HWND hwnd, LPRECT rect, BOOL erase )
         if (GetRgnBox( update_rgn, rect ) != NULLREGION)
         {
             HDC hdc = GetDCEx( hwnd, 0, DCX_USESTYLE );
+            DWORD layout = SetLayout( hdc, 0 );  /* MapWindowPoints mirrors already */
             MapWindowPoints( 0, hwnd, (LPPOINT)rect, 2 );
             DPtoLP( hdc, (LPPOINT)rect, 2 );
+            SetLayout( hdc, layout );
             ReleaseDC( hwnd, hdc );
         }
     }

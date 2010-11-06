@@ -708,7 +708,6 @@ static HRESULT WINAPI HlinkFrame_Navigate(IHlinkFrame *iface, DWORD grfHLNF, LPB
         hres = IHlink_GetHlinkSite(pihlNavigate, &site, &site_data);
         ok(hres == S_OK, "GetHlinkSite failed: %08x\n", hres);
         ok(site == NULL, "site = %p\n, expected NULL\n", site);
-        todo_wine
         ok(site_data == 0xdeadbeef, "site_data = %x\n", site_data);
     }
 
@@ -834,8 +833,10 @@ static HRESULT WINAPI PropertyNotifySink_OnChanged(IPropertyNotifySink *iface, D
         CHECK_EXPECT(OnChanged_1012);
         return S_OK;
     case 1030:
+    case 3000028:
     case 3000029:
     case 3000030:
+    case 3000031:
         /* TODO */
         return S_OK;
     }

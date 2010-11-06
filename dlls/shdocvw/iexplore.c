@@ -447,7 +447,7 @@ static void create_rebar(HWND hwnd)
 
     hwndToolbar = CreateWindowExW(TBSTYLE_EX_MIXEDBUTTONS, TOOLBARCLASSNAMEW, NULL, TBSTYLE_FLAT | WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hwndRebar, (HMENU)IDC_BROWSE_TOOLBAR, shdocvw_hinstance, NULL);
 
-    imagelist = ImageList_LoadImageW(shdocvw_hinstance, idb_ietoolbar, 32, 0, RGB(255,0,255), IMAGE_BITMAP, LR_DEFAULTCOLOR);
+    imagelist = ImageList_LoadImageW(shdocvw_hinstance, idb_ietoolbar, 32, 0, CLR_NONE, IMAGE_BITMAP, LR_CREATEDIBSECTION);
 
     SendMessageW(hwndToolbar, TB_SETIMAGELIST, 0, (LPARAM)imagelist);
     SendMessageW(hwndToolbar, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
@@ -585,6 +585,10 @@ static LRESULT iewnd_OnCommand(InternetExplorer *This, HWND hwnd, UINT msg, WPAR
 
         case ID_BROWSE_ABOUT:
             ie_dialog_about(hwnd);
+            break;
+
+        case ID_BROWSE_QUIT:
+            iewnd_OnDestroy(This);
             break;
 
         default:
