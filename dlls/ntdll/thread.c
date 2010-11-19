@@ -237,14 +237,14 @@ HANDLE thread_init(void)
     /* allocate and initialize the initial TEB */
 
     signal_alloc_thread( &teb );
+    
     teb->Peb = peb;
     teb->Tib.StackBase = (void *)~0UL;
     teb->StaticUnicodeString.Buffer = teb->StaticUnicodeBuffer;
     teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
 
     thread_data = (struct ntdll_thread_data *)teb->SpareBytes1;
-    fprintf(stderr,"00 %08x\n",thread_data->fs);
-    fprintf(stderr,"01 %08x\n",thread_data->gs);
+    
     thread_data->request_fd = -1;
     thread_data->reply_fd   = -1;
     thread_data->wait_fd[0] = -1;
@@ -253,6 +253,8 @@ HANDLE thread_init(void)
     InsertHeadList( &tls_links, &teb->TlsLinks );
 
     signal_init_thread( teb );
+    MESSAGE("teb: %08x\n",teb);
+    MESSAGE("NtCurrentTeb: %08x\n",NtCurrentTeb());
     virtual_init_threading();
 
     debug_info.str_pos = debug_info.strings;
@@ -260,10 +262,6 @@ HANDLE thread_init(void)
     debug_init();
 
     /* setup the server connection */
-    fprintf(stderr,"1 %d\n",thread_data);
-    fprintf(stderr,"2 %d\n",thread_data->request_fd);
-    fprintf(stderr,"3 %d\n",ntdll_get_thread_data());
-    fprintf(stderr,"4 %d\n",ntdll_get_thread_data()->request_fd);
     server_init_process();
     info_size = server_init_thread( peb );
 
@@ -273,6 +271,7 @@ HANDLE thread_init(void)
         MESSAGE( "wine: failed to create the process heap\n" );
         exit(1);
     }
+    MESSAGE("peb->ProcessHeap: %08x\n",peb->ProcessHeap);
 
     /* allocate user parameters */
     if (info_size)
