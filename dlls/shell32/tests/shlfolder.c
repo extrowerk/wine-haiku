@@ -41,6 +41,7 @@
 
 #include <initguid.h>
 DEFINE_GUID(IID_IParentAndItem, 0xB3A4B685, 0xB685, 0x4805, 0x99,0xD9, 0x5D,0xEA,0xD2,0x87,0x32,0x36);
+DEFINE_GUID(CLSID_ShellDocObjView, 0xe7e4bc40, 0xe76a, 0x11ce, 0xa9,0xbb, 0x00,0xaa,0x00,0x4a,0xe8,0x37);
 
 static IMalloc *ppM;
 
@@ -69,6 +70,26 @@ static HRESULT (WINAPI *pSHGetItemFromDataObject)(IDataObject*,DATAOBJ_GET_ITEM_
 static HRESULT (WINAPI *pSHGetIDListFromObject)(IUnknown*, PIDLIST_ABSOLUTE*);
 static HRESULT (WINAPI *pSHGetItemFromObject)(IUnknown*,REFIID,void**);
 static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
+
+static WCHAR *make_wstr(const char *str)
+{
+    WCHAR *ret;
+    int len;
+
+    if(!str || strlen(str) == 0)
+        return NULL;
+
+    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
+    if(!len || len < 0)
+        return NULL;
+
+    ret = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+    if(!ret)
+        return NULL;
+
+    MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
+    return ret;
+}
 
 static int strcmp_wa(LPCWSTR strw, const char *stra)
 {
@@ -148,6 +169,26 @@ static void init_function_pointers(void)
 
     hr = SHGetMalloc(&ppM);
     ok(hr == S_OK, "SHGetMalloc failed %08x\n", hr);
+}
+
+/* Based on PathAddBackslashW from dlls/shlwapi/path.c */
+static LPWSTR myPathAddBackslashW( LPWSTR lpszPath )
+{
+  size_t iLen;
+
+  if (!lpszPath || (iLen = lstrlenW(lpszPath)) >= MAX_PATH)
+    return NULL;
+
+  if (iLen)
+  {
+    lpszPath += iLen;
+    if (lpszPath[-1] != '\\')
+    {
+      *lpszPath++ = '\\';
+      *lpszPath = '\0';
+    }
+  }
+  return lpszPath;
 }
 
 static void test_ParseDisplayName(void)
@@ -395,12 +436,19 @@ static void test_BindToObject(void)
     UINT cChars;
     IShellFolder *psfDesktop, *psfChild, *psfMyComputer, *psfSystemDir;
     SHITEMID emptyitem = { 0, { 0 } };
-    LPITEMIDLIST pidlMyComputer, pidlSystemDir, pidlEmpty = (LPITEMIDLIST)&emptyitem;
+    LPITEMIDLIST pidlMyComputer, pidlSystemDir, pidl, pidlEmpty = (LPITEMIDLIST)&emptyitem;
     WCHAR wszSystemDir[MAX_PATH];
     char szSystemDir[MAX_PATH];
+    char buf[MAX_PATH];
+    WCHAR cwd[MAX_PATH];
+    WCHAR path[MAX_PATH];
+    HANDLE hfile;
     WCHAR wszMyComputer[] = { 
         ':',':','{','2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-',
         'A','2','D','8','-','0','8','0','0','2','B','3','0','3','0','9','D','}',0 };
+    static const WCHAR filename_html[] = {'w','i','n','e','t','e','s','t','.','h','t','m','l',0};
+    static const WCHAR filename_txt[] = {'w','i','n','e','t','e','s','t','.','t','x','t',0};
+    static const WCHAR filename_foo[] = {'w','i','n','e','t','e','s','t','.','f','o','o',0};
 
     /* The following tests shows that BindToObject should fail with E_INVALIDARG if called
      * with an empty pidl. This is tested for Desktop, MyComputer and the FS ShellFolder
@@ -472,26 +520,169 @@ if (0)
 }
 
     IShellFolder_Release(psfSystemDir);
-}
 
-/* Based on PathAddBackslashW from dlls/shlwapi/path.c */
-static LPWSTR myPathAddBackslashW( LPWSTR lpszPath )
-{
-  size_t iLen;
-
-  if (!lpszPath || (iLen = lstrlenW(lpszPath)) >= MAX_PATH)
-    return NULL;
-
-  if (iLen)
-  {
-    lpszPath += iLen;
-    if (lpszPath[-1] != '\\')
+    GetCurrentDirectoryA(MAX_PATH, buf);
+    if(!lstrlenA(buf))
     {
-      *lpszPath++ = '\\';
-      *lpszPath = '\0';
+        skip("Failed to get current directory, skipping tests.\n");
+        return;
     }
-  }
-  return lpszPath;
+    MultiByteToWideChar(CP_ACP, 0, buf, -1, cwd, MAX_PATH);
+
+    SHGetDesktopFolder(&psfDesktop);
+
+    /* Attempt BindToObject on files. */
+
+    /* .html */
+    lstrcpyW(path, cwd);
+    myPathAddBackslashW(path);
+    lstrcatW(path, filename_html);
+    hfile = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    if(hfile != (HANDLE)INVALID_FILE_ATTRIBUTES)
+    {
+        CloseHandle(hfile);
+        hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, path, NULL, &pidl, NULL);
+        ok(hr == S_OK ||
+           broken(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) /* Win98SE */ ||
+           broken(hr == E_FAIL) /* Win95 */,
+           "Got 0x%08x\n", hr);
+        if(SUCCEEDED(hr))
+        {
+            hr = IShellFolder_BindToObject(psfDesktop, pidl, NULL, &IID_IShellFolder, (void**)&psfChild);
+            ok(hr == S_OK /* Win 7 */ || hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) /* WinXP */,
+               "Got 0x%08x\n", hr);
+            if(SUCCEEDED(hr))
+            {
+                IPersist *pp;
+                hr = IShellFolder_QueryInterface(psfChild, &IID_IPersist, (void**)&pp);
+                ok(hr == S_OK || broken(hr == E_NOINTERFACE) /* W2K */, "Got 0x%08x\n", hr);
+                if(SUCCEEDED(hr))
+                {
+                    CLSID id;
+                    hr = IPersist_GetClassID(pp, &id);
+                    ok(hr == S_OK, "Got 0x%08x\n", hr);
+                    ok(IsEqualIID(&id, &CLSID_ShellDocObjView), "Unexpected classid\n");
+                    IPersist_Release(pp);
+                }
+
+                IShellFolder_Release(psfChild);
+            }
+            pILFree(pidl);
+        }
+        DeleteFileW(path);
+    }
+    else
+        win_skip("Failed to create .html testfile.\n");
+
+    /* .txt */
+    lstrcpyW(path, cwd);
+    myPathAddBackslashW(path);
+    lstrcatW(path, filename_txt);
+    hfile = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    if(hfile != (HANDLE)INVALID_FILE_ATTRIBUTES)
+    {
+        CloseHandle(hfile);
+        hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, path, NULL, &pidl, NULL);
+        ok(hr == S_OK ||
+           broken(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) /* Win98SE */ ||
+           broken(hr == E_FAIL) /* Win95 */,
+           "Got 0x%08x\n", hr);
+        if(SUCCEEDED(hr))
+        {
+            hr = IShellFolder_BindToObject(psfDesktop, pidl, NULL, &IID_IShellFolder, (void**)&psfChild);
+            ok(hr == E_FAIL || hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)
+               || broken(hr == S_OK) /* W2K */,
+               "Got 0x%08x\n", hr);
+            if(SUCCEEDED(hr)) IShellFolder_Release(psfChild);
+            pILFree(pidl);
+        }
+        DeleteFileW(path);
+    }
+    else
+        win_skip("Failed to create .txt testfile.\n");
+
+    /* .foo */
+    lstrcpyW(path, cwd);
+    myPathAddBackslashW(path);
+    lstrcatW(path, filename_foo);
+    hfile = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    if(hfile != (HANDLE)INVALID_FILE_ATTRIBUTES)
+    {
+        CloseHandle(hfile);
+        hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, path, NULL, &pidl, NULL);
+        ok(hr == S_OK ||
+           broken(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) /* Win98SE */ ||
+           broken(hr == E_FAIL) /* Win95 */,
+           "Got 0x%08x\n", hr);
+        if(SUCCEEDED(hr))
+        {
+            hr = IShellFolder_BindToObject(psfDesktop, pidl, NULL, &IID_IShellFolder, (void**)&psfChild);
+            ok(hr == E_FAIL || hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)
+               || broken(hr == S_OK) /* W2K */,
+               "Got 0x%08x\n", hr);
+            if(SUCCEEDED(hr)) IShellFolder_Release(psfChild);
+            pILFree(pidl);
+        }
+        DeleteFileW(path);
+    }
+    else
+        win_skip("Failed to create .foo testfile.\n");
+
+    /* And on the desktop */
+    if(pSHGetSpecialFolderPathW)
+    {
+
+        pSHGetSpecialFolderPathW(NULL, path, CSIDL_DESKTOP, FALSE);
+        myPathAddBackslashW(path);
+        lstrcatW(path, filename_html);
+        hfile = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+        if(hfile != (HANDLE)INVALID_FILE_ATTRIBUTES)
+        {
+            CloseHandle(hfile);
+            hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, path, NULL, &pidl, NULL);
+            ok(hr == S_OK || broken(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) /* Win98SE */,
+               "Got 0x%08x\n", hr);
+            if(SUCCEEDED(hr))
+            {
+                hr = IShellFolder_BindToObject(psfDesktop, pidl, NULL, &IID_IShellFolder, (void**)&psfChild);
+                ok(hr == S_OK || hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND),
+                   "Got 0x%08x\n", hr);
+                if(SUCCEEDED(hr)) IShellFolder_Release(psfChild);
+                pILFree(pidl);
+            }
+            if(!DeleteFileW(path))
+                trace("Failed to delete: %d\n", GetLastError());
+
+        }
+        else
+            win_skip("Failed to create .html testfile.\n");
+
+        pSHGetSpecialFolderPathW(NULL, path, CSIDL_DESKTOP, FALSE);
+        myPathAddBackslashW(path);
+        lstrcatW(path, filename_foo);
+        hfile = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+        if(hfile != (HANDLE)INVALID_FILE_ATTRIBUTES)
+        {
+            CloseHandle(hfile);
+            hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, path, NULL, &pidl, NULL);
+            ok(hr == S_OK || broken(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) /* Win98SE */,
+               "Got 0x%08x\n", hr);
+            if(SUCCEEDED(hr))
+            {
+                hr = IShellFolder_BindToObject(psfDesktop, pidl, NULL, &IID_IShellFolder, (void**)&psfChild);
+                ok(hr == E_FAIL || hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)
+                   || broken(hr == S_OK) /* W2K */,
+                   "Got 0x%08x\n", hr);
+                if(SUCCEEDED(hr)) IShellFolder_Release(psfChild);
+                pILFree(pidl);
+            }
+            DeleteFileW(path);
+        }
+        else
+            win_skip("Failed to create .foo testfile.\n");
+    }
+
+    IShellFolder_Release(psfDesktop);
 }
 
 static void test_GetDisplayName(void)
@@ -582,7 +773,6 @@ static void test_GetDisplayName(void)
     /* It seems as if we cannot bind to regular files on windows, but only directories. 
      */
     hr = IShellFolder_BindToObject(psfDesktop, pidlTestFile, NULL, &IID_IUnknown, (VOID**)&psfFile);
-    todo_wine
     ok (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) ||
         hr == E_NOTIMPL || /* Vista */
         broken(hr == S_OK), /* Win9x, W2K */
@@ -3871,6 +4061,8 @@ static void test_ParseDisplayNamePBC(void)
     WCHAR wFileSystemBindData[] =
         {'F','i','l','e',' ','S','y','s','t','e','m',' ','B','i','n','d',' ','D','a','t','a',0};
     WCHAR adirW[] = {'C',':','\\','f','s','b','d','d','i','r',0};
+    WCHAR afileW[] = {'C',':','\\','f','s','b','d','d','i','r','\\','f','i','l','e','.','t','x','t',0};
+    WCHAR afile2W[] = {'C',':','\\','f','s','b','d','d','i','r','\\','s','\\','f','i','l','e','.','t','x','t',0};
     const HRESULT exp_err = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
 
     IShellFolder *psf;
@@ -3897,12 +4089,24 @@ static void test_ParseDisplayNamePBC(void)
     hres = IShellFolder_ParseDisplayName(psf, NULL, NULL, adirW, NULL, &pidl, NULL);
     ok(hres == exp_err || broken(hres == E_FAIL) /* NT4 */,
             "ParseDisplayName failed with wrong error: 0x%08x\n", hres);
+    hres = IShellFolder_ParseDisplayName(psf, NULL, NULL, afileW, NULL, &pidl, NULL);
+    ok(hres == exp_err || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed with wrong error: 0x%08x\n", hres);
+    hres = IShellFolder_ParseDisplayName(psf, NULL, NULL, afile2W, NULL, &pidl, NULL);
+    ok(hres == exp_err || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed with wrong error: 0x%08x\n", hres);
 
     /* fails on unknown dir with IBindCtx with no IFileSystemBindData */
     hres = CreateBindCtx(0, &pbc);
     ok(hres == S_OK, "CreateBindCtx failed: 0x%08x\n", hres);
 
     hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, adirW, NULL, &pidl, NULL);
+    ok(hres == exp_err || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed with wrong error: 0x%08x\n", hres);
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afileW, NULL, &pidl, NULL);
+    ok(hres == exp_err || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed with wrong error: 0x%08x\n", hres);
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afile2W, NULL, &pidl, NULL);
     ok(hres == exp_err || broken(hres == E_FAIL) /* NT4 */,
             "ParseDisplayName failed with wrong error: 0x%08x\n", hres);
 
@@ -3921,6 +4125,22 @@ static void test_ParseDisplayNamePBC(void)
         ILFree(pidl);
     }
 
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afileW, NULL, &pidl, NULL);
+    ok(hres == S_OK || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed: 0x%08x\n", hres);
+    if(SUCCEEDED(hres)){
+        verify_pidl(pidl, afileW);
+        ILFree(pidl);
+    }
+
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afile2W, NULL, &pidl, NULL);
+    ok(hres == S_OK || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed: 0x%08x\n", hres);
+    if(SUCCEEDED(hres)){
+        verify_pidl(pidl, afile2W);
+        ILFree(pidl);
+    }
+
     /* set FIND_DATA struct to NULLs */
     pidl = (ITEMIDLIST*)0xdeadbeef;
     fsbdVtbl.GetFindData = fsbd_GetFindData_nul;
@@ -3929,6 +4149,22 @@ static void test_ParseDisplayNamePBC(void)
             "ParseDisplayName failed: 0x%08x\n", hres);
     if(SUCCEEDED(hres)){
         verify_pidl(pidl, adirW);
+        ILFree(pidl);
+    }
+
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afileW, NULL, &pidl, NULL);
+    ok(hres == S_OK || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed: 0x%08x\n", hres);
+    if(SUCCEEDED(hres)){
+        verify_pidl(pidl, afileW);
+        ILFree(pidl);
+    }
+
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afile2W, NULL, &pidl, NULL);
+    ok(hres == S_OK || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed: 0x%08x\n", hres);
+    if(SUCCEEDED(hres)){
+        verify_pidl(pidl, afile2W);
         ILFree(pidl);
     }
 
@@ -3943,6 +4179,22 @@ static void test_ParseDisplayNamePBC(void)
         ILFree(pidl);
     }
 
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afileW, NULL, &pidl, NULL);
+    ok(hres == S_OK || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed: 0x%08x\n", hres);
+    if(SUCCEEDED(hres)){
+        verify_pidl(pidl, afileW);
+        ILFree(pidl);
+    }
+
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afile2W, NULL, &pidl, NULL);
+    ok(hres == S_OK || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed: 0x%08x\n", hres);
+    if(SUCCEEDED(hres)){
+        verify_pidl(pidl, afile2W);
+        ILFree(pidl);
+    }
+
     /* set FIND_DATA struct to invalid data */
     pidl = (ITEMIDLIST*)0xdeadbeef;
     fsbdVtbl.GetFindData = fsbd_GetFindData_invalid;
@@ -3951,6 +4203,22 @@ static void test_ParseDisplayNamePBC(void)
             "ParseDisplayName failed: 0x%08x\n", hres);
     if(SUCCEEDED(hres)){
         verify_pidl(pidl, adirW);
+        ILFree(pidl);
+    }
+
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afileW, NULL, &pidl, NULL);
+    ok(hres == S_OK || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed: 0x%08x\n", hres);
+    if(SUCCEEDED(hres)){
+        verify_pidl(pidl, afileW);
+        ILFree(pidl);
+    }
+
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afile2W, NULL, &pidl, NULL);
+    ok(hres == S_OK || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed: 0x%08x\n", hres);
+    if(SUCCEEDED(hres)){
+        verify_pidl(pidl, afile2W);
         ILFree(pidl);
     }
 
@@ -3965,6 +4233,22 @@ static void test_ParseDisplayNamePBC(void)
         ILFree(pidl);
     }
 
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afileW, NULL, &pidl, NULL);
+    ok(hres == S_OK || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed: 0x%08x\n", hres);
+    if(SUCCEEDED(hres)){
+        verify_pidl(pidl, afileW);
+        ILFree(pidl);
+    }
+
+    hres = IShellFolder_ParseDisplayName(psf, NULL, pbc, afile2W, NULL, &pidl, NULL);
+    ok(hres == S_OK || broken(hres == E_FAIL) /* NT4 */,
+            "ParseDisplayName failed: 0x%08x\n", hres);
+    if(SUCCEEDED(hres)){
+        verify_pidl(pidl, afile2W);
+        ILFree(pidl);
+    }
+
     IBindCtx_Release(pbc);
     IShellFolder_Release(psf);
 }
@@ -3972,13 +4256,20 @@ static void test_ParseDisplayNamePBC(void)
 static const CHAR testwindow_class[] = "testwindow";
 #define WM_USER_NOTIFY (WM_APP+1)
 
-static struct {
-    const char *id;
-    BOOL exp_notify;
+struct ChNotifyTest {
+    const char id[256];
+    const UINT notify_count;
+    UINT missing_events;
     UINT signal;
-    const WCHAR *path_1;
-    const WCHAR *path_2;
-} exp_data;
+    const char path_1[256];
+    const char path_2[256];
+} chnotify_tests[] = {
+    {"MKDIR", 1, 0, SHCNE_MKDIR, "C:\\shell32_cn_test\\test", ""},
+    {"CREATE", 1, 0, SHCNE_CREATE, "C:\\shell32_cn_test\\test\\file.txt", ""},
+    {"RMDIR", 1, 0, SHCNE_RMDIR, "C:\\shell32_cn_test\\test", ""},
+};
+
+struct ChNotifyTest *exp_data;
 
 static LRESULT CALLBACK testwindow_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
@@ -3986,20 +4277,25 @@ static LRESULT CALLBACK testwindow_wndproc(HWND hwnd, UINT msg, WPARAM wparam, L
 
     switch(msg){
     case WM_USER_NOTIFY:
-        if(exp_data.exp_notify){
+        if(exp_data->missing_events > 0){
+            WCHAR *path1, *path2;
             LPCITEMIDLIST *pidls = (LPCITEMIDLIST*)wparam;
 
-            ok(exp_data.signal == signal,
+            ok(exp_data->signal == signal,
                     "%s: expected notification type %x, got: %x\n",
-                    exp_data.id, exp_data.signal, signal);
+                    exp_data->id, exp_data->signal, signal);
 
-            trace("verifying pidls for: %s\n", exp_data.id);
-            verify_pidl(pidls[0], exp_data.path_1);
-            verify_pidl(pidls[1], exp_data.path_2);
+            trace("verifying pidls for: %s\n", exp_data->id);
+            path1 = make_wstr(exp_data->path_1);
+            path2 = make_wstr(exp_data->path_2);
+            verify_pidl(pidls[0], path1);
+            verify_pidl(pidls[1], path2);
+            HeapFree(GetProcessHeap(), 0, path1);
+            HeapFree(GetProcessHeap(), 0, path2);
 
-            exp_data.exp_notify = FALSE;
+            exp_data->missing_events--;
         }else
-            ok(exp_data.exp_notify, "Didn't expect a WM_USER_NOTIFY message (event: %x)\n", signal);
+            ok(0, "Didn't expect a WM_USER_NOTIFY message (event: %x)\n", signal);
         return 0;
     }
     return DefWindowProc(hwnd, msg, wparam, lparam);
@@ -4027,36 +4323,30 @@ static void register_testwindow_class(void)
 static void do_events(void)
 {
     int c = 0;
-    while (exp_data.exp_notify && (c++ < 10)){
+    while (exp_data->missing_events && (c++ < 10)){
         MSG msg;
         while(PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)){
             TranslateMessage(&msg);
             DispatchMessageA(&msg);
         }
-        if(exp_data.exp_notify)
+        if(exp_data->missing_events)
             Sleep(500);
     }
-    trace("%s: took %d tries\n", exp_data.id, c);
+    trace("%s: took %d tries\n", exp_data->id, c);
 }
 
 static void test_SHChangeNotify(void)
 {
     HWND wnd;
-    ULONG notifyID;
+    ULONG notifyID, i;
     HRESULT hr;
     BOOL br, has_unicode;
     SHChangeNotifyEntry entries[1];
     const CHAR root_dirA[] = "C:\\shell32_cn_test";
     const WCHAR root_dirW[] = {'C',':','\\','s','h','e','l','l','3','2','_','c','n','_','t','e','s','t',0};
-    const CHAR test_dirA[] = "C:\\shell32_cn_test\\test";
-    const WCHAR test_dirW[] = {'C',':','\\','s','h','e','l','l','3','2','_','c','n','_','t','e','s','t','\\','t','e','s','t',0};
 
     CreateDirectoryW(NULL, NULL);
     has_unicode = !(GetLastError() == ERROR_CALL_NOT_IMPLEMENTED);
-
-    /* set up the root directory & window */
-    br = CreateDirectoryA(root_dirA, NULL);
-    ok(br == TRUE, "CreateDirectory failed: %d\n", GetLastError());
 
     register_testwindow_class();
 
@@ -4064,6 +4354,9 @@ static void test_SHChangeNotify(void)
             CW_USEDEFAULT, CW_USEDEFAULT, 130, 105,
             NULL, NULL, GetModuleHandleA(NULL), 0);
     ok(wnd != NULL, "Failed to make a window\n");
+
+    br = CreateDirectoryA(root_dirA, NULL);
+    ok(br == TRUE, "CreateDirectory failed: %d\n", GetLastError());
 
     entries[0].pidl = NULL;
     if(has_unicode)
@@ -4077,55 +4370,28 @@ static void test_SHChangeNotify(void)
             SHCNE_ALLEVENTS, WM_USER_NOTIFY, 1, entries);
     ok(notifyID != 0, "Failed to register a window for change notifications\n");
 
-    /* MKDIR */
-    br = CreateDirectoryA(test_dirA, NULL);
-    ok(br == TRUE, "CreateDirectory failed: %d\n", GetLastError());
+    for(i = 0; i < sizeof(chnotify_tests) / sizeof(*chnotify_tests); ++i){
+        exp_data = chnotify_tests + i;
 
-    if(has_unicode){
-        exp_data.id = "MKDIR PATHW";
-        exp_data.signal = SHCNE_MKDIR;
-        exp_data.exp_notify = TRUE;
-        exp_data.path_1 = test_dirW;
-        exp_data.path_2 = NULL;
-        SHChangeNotify(SHCNE_MKDIR, SHCNF_PATHW | SHCNF_FLUSH, test_dirW, NULL);
+        exp_data->missing_events = exp_data->notify_count;
+        SHChangeNotify(exp_data->signal, SHCNF_PATHA | SHCNF_FLUSH,
+                strlen(exp_data->path_1) > 0 ? exp_data->path_1 : NULL,
+                strlen(exp_data->path_2) > 0 ? exp_data->path_2 : NULL);
         do_events();
-        ok(exp_data.exp_notify == FALSE, "Expected wndproc to be called\n");
-    }else
-        win_skip("skipping WCHAR tests\n");
+        ok(exp_data->missing_events == 0, "%s: Expected wndproc to be called\n", exp_data->id);
 
-    exp_data.id = "MKDIR PATHA";
-    exp_data.signal = SHCNE_MKDIR;
-    exp_data.exp_notify = TRUE;
-    exp_data.path_1 = test_dirW;
-    exp_data.path_2 = NULL;
-    SHChangeNotify(SHCNE_MKDIR, SHCNF_PATHA | SHCNF_FLUSH, test_dirA, NULL);
-    do_events();
-    ok(exp_data.exp_notify == FALSE, "Expected wndproc to be called\n");
+        if(has_unicode){
+            WCHAR *path1, *path2;
 
-    /* RMDIR */
-    br = RemoveDirectoryA(test_dirA);
-    ok(br == TRUE, "RemoveDirectory failed: %d\n", GetLastError());
+            path1 = make_wstr(exp_data->path_1);
+            path2 = make_wstr(exp_data->path_2);
 
-    if(has_unicode){
-        exp_data.id = "RMDIR PATHW";
-        exp_data.signal = SHCNE_RMDIR;
-        exp_data.exp_notify = TRUE;
-        exp_data.path_1 = test_dirW;
-        exp_data.path_2 = NULL;
-        SHChangeNotify(SHCNE_RMDIR, SHCNF_PATHW | SHCNF_FLUSH, test_dirW, NULL);
-        do_events();
-        ok(exp_data.exp_notify == FALSE, "Expected wndproc to be called\n");
-    }else
-        win_skip("skipping WCHAR tests\n");
-
-    exp_data.id = "RMDIR PATHA";
-    exp_data.signal = SHCNE_RMDIR;
-    exp_data.exp_notify = TRUE;
-    exp_data.path_1 = test_dirW;
-    exp_data.path_2 = NULL;
-    SHChangeNotify(SHCNE_RMDIR, SHCNF_PATHA | SHCNF_FLUSH, test_dirA, NULL);
-    do_events();
-    ok(exp_data.exp_notify == FALSE, "Expected wndproc to be called\n");
+            exp_data->missing_events = exp_data->notify_count;
+            SHChangeNotify(exp_data->signal, SHCNF_PATHW | SHCNF_FLUSH, path1, path2);
+            do_events();
+            ok(exp_data->missing_events == 0, "%s: Expected wndproc to be called\n", exp_data->id);
+        }
+    }
 
     SHChangeNotifyDeregister(notifyID);
     DestroyWindow(wnd);

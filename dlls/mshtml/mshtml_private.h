@@ -63,92 +63,104 @@ typedef struct ConnectionPoint ConnectionPoint;
 typedef struct BSCallback BSCallback;
 typedef struct event_target_t event_target_t;
 
-/* NOTE: make sure to keep in sync with dispex.c */
+#define TID_LIST \
+    XIID(NULL) \
+    XDIID(DispCEventObj) \
+    XDIID(DispCPlugins) \
+    XDIID(DispDOMChildrenCollection) \
+    XDIID(DispHTMLAnchorElement) \
+    XDIID(DispHTMLBody) \
+    XDIID(DispHTMLCommentElement) \
+    XDIID(DispHTMLCurrentStyle) \
+    XDIID(DispHTMLDocument) \
+    XDIID(DispHTMLDOMTextNode) \
+    XDIID(DispHTMLElementCollection) \
+    XDIID(DispHTMLEmbed) \
+    XDIID(DispHTMLFormElement) \
+    XDIID(DispHTMLGenericElement) \
+    XDIID(DispHTMLFrameElement) \
+    XDIID(DispHTMLIFrame) \
+    XDIID(DispHTMLImg) \
+    XDIID(DispHTMLInputElement) \
+    XDIID(DispHTMLLocation) \
+    XDIID(DispHTMLNavigator) \
+    XDIID(DispHTMLObjectElement) \
+    XDIID(DispHTMLOptionElement) \
+    XDIID(DispHTMLScreen) \
+    XDIID(DispHTMLScriptElement) \
+    XDIID(DispHTMLSelectElement) \
+    XDIID(DispHTMLStyle) \
+    XDIID(DispHTMLStyleElement) \
+    XDIID(DispHTMLStyleSheetsCollection) \
+    XDIID(DispHTMLTable) \
+    XDIID(DispHTMLTableRow) \
+    XDIID(DispHTMLTextAreaElement) \
+    XDIID(DispHTMLUnknownElement) \
+    XDIID(DispHTMLWindow2) \
+    XDIID(HTMLDocumentEvents) \
+    XIID(IHTMLAnchorElement) \
+    XIID(IHTMLBodyElement) \
+    XIID(IHTMLBodyElement2) \
+    XIID(IHTMLCommentElement) \
+    XIID(IHTMLCurrentStyle) \
+    XIID(IHTMLCurrentStyle2) \
+    XIID(IHTMLCurrentStyle3) \
+    XIID(IHTMLCurrentStyle4) \
+    XIID(IHTMLDocument2) \
+    XIID(IHTMLDocument3) \
+    XIID(IHTMLDocument4) \
+    XIID(IHTMLDocument5) \
+    XIID(IHTMLDOMChildrenCollection) \
+    XIID(IHTMLDOMNode) \
+    XIID(IHTMLDOMNode2) \
+    XIID(IHTMLDOMTextNode) \
+    XIID(IHTMLElement) \
+    XIID(IHTMLElement2) \
+    XIID(IHTMLElement3) \
+    XIID(IHTMLElement4) \
+    XIID(IHTMLElementCollection) \
+    XIID(IHTMLEmbedElement) \
+    XIID(IHTMLEventObj) \
+    XIID(IHTMLFiltersCollection) \
+    XIID(IHTMLFormElement) \
+    XIID(IHTMLFrameBase) \
+    XIID(IHTMLFrameBase2) \
+    XIID(IHTMLFrameElement3) \
+    XIID(IHTMLGenericElement) \
+    XIID(IHTMLIFrameElement) \
+    XIID(IHTMLImageElementFactory) \
+    XIID(IHTMLImgElement) \
+    XIID(IHTMLInputElement) \
+    XIID(IHTMLLocation) \
+    XIID(IHTMLObjectElement) \
+    XIID(IHTMLOptionElement) \
+    XIID(IHTMLPluginsCollection) \
+    XIID(IHTMLRect) \
+    XIID(IHTMLScreen) \
+    XIID(IHTMLScriptElement) \
+    XIID(IHTMLSelectElement) \
+    XIID(IHTMLStyle) \
+    XIID(IHTMLStyle2) \
+    XIID(IHTMLStyle3) \
+    XIID(IHTMLStyle4) \
+    XIID(IHTMLStyleElement) \
+    XIID(IHTMLStyleSheetsCollection) \
+    XIID(IHTMLTable) \
+    XIID(IHTMLTableRow) \
+    XIID(IHTMLTextAreaElement) \
+    XIID(IHTMLTextContainer) \
+    XIID(IHTMLUniqueName) \
+    XIID(IHTMLWindow2) \
+    XIID(IHTMLWindow3) \
+    XIID(IHTMLWindow4) \
+    XIID(IOmNavigator)
+
 typedef enum {
-    NULL_tid,
-    DispCEventObj_tid,
-    DispDOMChildrenCollection_tid,
-    DispHTMLAnchorElement_tid,
-    DispHTMLBody_tid,
-    DispHTMLCommentElement_tid,
-    DispHTMLCurrentStyle_tid,
-    DispHTMLDocument_tid,
-    DispHTMLDOMTextNode_tid,
-    DispHTMLElementCollection_tid,
-    DispHTMLEmbed_tid,
-    DispHTMLFormElement_tid,
-    DispHTMLGenericElement_tid,
-    DispHTMLFrameElement_tid,
-    DispHTMLIFrame_tid,
-    DispHTMLImg_tid,
-    DispHTMLInputElement_tid,
-    DispHTMLLocation_tid,
-    DispHTMLNavigator_tid,
-    DispHTMLObjectElement_tid,
-    DispHTMLOptionElement_tid,
-    DispHTMLScreen_tid,
-    DispHTMLScriptElement_tid,
-    DispHTMLSelectElement_tid,
-    DispHTMLStyle_tid,
-    DispHTMLTable_tid,
-    DispHTMLTableRow_tid,
-    DispHTMLTextAreaElement_tid,
-    DispHTMLUnknownElement_tid,
-    DispHTMLWindow2_tid,
-    HTMLDocumentEvents_tid,
-    IHTMLAnchorElement_tid,
-    IHTMLBodyElement_tid,
-    IHTMLBodyElement2_tid,
-    IHTMLCommentElement_tid,
-    IHTMLCurrentStyle_tid,
-    IHTMLCurrentStyle2_tid,
-    IHTMLCurrentStyle3_tid,
-    IHTMLCurrentStyle4_tid,
-    IHTMLDocument2_tid,
-    IHTMLDocument3_tid,
-    IHTMLDocument4_tid,
-    IHTMLDocument5_tid,
-    IHTMLDOMChildrenCollection_tid,
-    IHTMLDOMNode_tid,
-    IHTMLDOMNode2_tid,
-    IHTMLDOMTextNode_tid,
-    IHTMLElement_tid,
-    IHTMLElement2_tid,
-    IHTMLElement3_tid,
-    IHTMLElement4_tid,
-    IHTMLElementCollection_tid,
-    IHTMLEmbedElement_tid,
-    IHTMLEventObj_tid,
-    IHTMLFiltersCollection_tid,
-    IHTMLFormElement_tid,
-    IHTMLFrameBase_tid,
-    IHTMLFrameBase2_tid,
-    IHTMLFrameElement3_tid,
-    IHTMLGenericElement_tid,
-    IHTMLIFrameElement_tid,
-    IHTMLImageElementFactory_tid,
-    IHTMLImgElement_tid,
-    IHTMLInputElement_tid,
-    IHTMLLocation_tid,
-    IHTMLObjectElement_tid,
-    IHTMLOptionElement_tid,
-    IHTMLRect_tid,
-    IHTMLScreen_tid,
-    IHTMLScriptElement_tid,
-    IHTMLSelectElement_tid,
-    IHTMLStyle_tid,
-    IHTMLStyle2_tid,
-    IHTMLStyle3_tid,
-    IHTMLStyle4_tid,
-    IHTMLTable_tid,
-    IHTMLTableRow_tid,
-    IHTMLTextAreaElement_tid,
-    IHTMLTextContainer_tid,
-    IHTMLUniqueName_tid,
-    IHTMLWindow2_tid,
-    IHTMLWindow3_tid,
-    IHTMLWindow4_tid,
-    IOmNavigator_tid,
+#define XIID(iface) iface ## _tid,
+#define XDIID(iface) iface ## _tid,
+TID_LIST
+#undef XIID
+#undef XDIID
     LAST_tid
 } tid_t;
 
@@ -252,7 +264,8 @@ struct HTMLWindow {
     const IHTMLWindow3Vtbl *lpHTMLWindow3Vtbl;
     const IHTMLWindow4Vtbl *lpHTMLWindow4Vtbl;
     const IHTMLPrivateWindowVtbl *lpIHTMLPrivateWindowVtbl;
-    const IDispatchExVtbl  *lpIDispatchExVtbl;
+    const IDispatchExVtbl         *lpIDispatchExVtbl;
+    const IServiceProviderVtbl    *lpServiceProviderVtbl;
 
     LONG ref;
 
@@ -500,6 +513,7 @@ HRESULT set_http_header(struct list*,const WCHAR*,int,const WCHAR*,int);
 typedef struct {
     HRESULT (*qi)(HTMLDOMNode*,REFIID,void**);
     void (*destructor)(HTMLDOMNode*);
+    HRESULT (*clone)(HTMLDOMNode*,nsIDOMNode*,HTMLDOMNode**);
     event_target_t **(*get_event_target)(HTMLDOMNode*);
     HRESULT (*call_event)(HTMLDOMNode*,DWORD,BOOL*);
     HRESULT (*put_disabled)(HTMLDOMNode*,VARIANT_BOOL);
@@ -687,6 +701,7 @@ struct HTMLDocumentNode {
 HRESULT HTMLDocument_Create(IUnknown*,REFIID,void**);
 HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
 HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument*,HTMLDocumentObj*,HTMLWindow*,HTMLDocumentNode**);
+HRESULT create_document_fragment(nsIDOMNode*,HTMLDocumentNode*,HTMLDocumentNode**);
 
 HRESULT HTMLWindow_Create(HTMLDocumentObj*,nsIDOMWindow*,HTMLWindow*,HTMLWindow**);
 void update_window_doc(HTMLWindow*);
@@ -812,6 +827,7 @@ HTMLElement *HTMLEmbedElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLFormElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLFrameElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLIFrame_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
+HTMLElement *HTMLStyleElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLImgElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLInputElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
 HTMLElement *HTMLObjectElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*);
@@ -835,6 +851,7 @@ void HTMLDOMNode_destructor(HTMLDOMNode*);
 
 HRESULT HTMLElement_QI(HTMLDOMNode*,REFIID,void**);
 void HTMLElement_destructor(HTMLDOMNode*);
+HRESULT HTMLElement_clone(HTMLDOMNode*,nsIDOMNode*,HTMLDOMNode**);
 
 HRESULT HTMLFrameBase_QI(HTMLFrameBase*,REFIID,void**);
 void HTMLFrameBase_destructor(HTMLFrameBase*);
@@ -846,6 +863,7 @@ void release_script_hosts(HTMLWindow*);
 void connect_scripts(HTMLWindow*);
 void doc_insert_script(HTMLWindow*,nsIDOMHTMLScriptElement*);
 IDispatch *script_parse_event(HTMLWindow*,LPCWSTR);
+HRESULT exec_script(HTMLWindow*,const WCHAR*,const WCHAR*,VARIANT*);
 void set_script_mode(HTMLWindow*,SCRIPTMODE);
 BOOL find_global_prop(HTMLWindow*,BSTR,DWORD,ScriptHost**,DISPID*);
 IDispatch *get_script_disp(ScriptHost*);

@@ -194,6 +194,36 @@ HRESULT WINAPI EnumMediaTypes_Construct(BasePin *iface, BasePin_GetMediaType enu
 
 HRESULT WINAPI EnumPins_Construct(BaseFilter *base,  BaseFilter_GetPin receive_pin, BaseFilter_GetPinCount receive_pincount, BaseFilter_GetPinVersion receive_version, IEnumPins ** ppEnum);
 
+/* Quality Control */
+typedef struct QualityControlImpl {
+    const IQualityControlVtbl *lpVtbl;
+    IPin *input;
+    IBaseFilter *self;
+    IQualityControl *tonotify;
+
+    /* Render stuff */
+    IReferenceClock *clock;
+    REFERENCE_TIME last_in_time, last_left, avg_duration, avg_pt, avg_render, start, stop;
+    REFERENCE_TIME current_jitter, current_rstart, current_rstop, clockstart;
+    double avg_rate;
+    LONG64 rendered, dropped;
+    BOOL qos_handled, is_dropped;
+} QualityControlImpl;
+
+void QualityControlImpl_init(QualityControlImpl *This, IPin *input, IBaseFilter *self);
+HRESULT WINAPI QualityControlImpl_QueryInterface(IQualityControl *iface, REFIID riid, void **ppv);
+ULONG WINAPI QualityControlImpl_AddRef(IQualityControl *iface);
+ULONG WINAPI QualityControlImpl_Release(IQualityControl *iface);
+HRESULT WINAPI QualityControlImpl_Notify(IQualityControl *iface, IBaseFilter *sender, Quality qm);
+HRESULT WINAPI QualityControlImpl_SetSink(IQualityControl *iface, IQualityControl *tonotify);
+
+void QualityControlRender_Start(QualityControlImpl *This, REFERENCE_TIME tStart);
+void QualityControlRender_SetClock(QualityControlImpl *This, IReferenceClock *clock);
+HRESULT QualityControlRender_WaitFor(QualityControlImpl *This, IMediaSample *sample, HANDLE ev);
+void QualityControlRender_DoQOS(QualityControlImpl *priv);
+void QualityControlRender_BeginRender(QualityControlImpl *This);
+void QualityControlRender_EndRender(QualityControlImpl *This);
+
 /* Transform Filter */
 typedef struct TransformFilter
 {
@@ -204,6 +234,7 @@ typedef struct TransformFilter
 	AM_MEDIA_TYPE pmt;
 
 	const struct TransformFilterFuncTable * pFuncsTable;
+	QualityControlImpl qcimpl;
 } TransformFilter;
 
 typedef HRESULT (WINAPI *TransformFilter_DecideBufferSize) (TransformFilter *iface, IMemAllocator *pAlloc, ALLOCATOR_PROPERTIES *ppropInputRequest);
@@ -219,6 +250,7 @@ typedef HRESULT (WINAPI *TransformFilter_BeginFlush) (TransformFilter *iface);
 typedef HRESULT (WINAPI *TransformFilter_EndFlush) (TransformFilter *iface);
 typedef HRESULT (WINAPI *TransformFilter_NewSegment) (TransformFilter *iface,
 REFERENCE_TIME tStart, REFERENCE_TIME tStop, double dRate);
+typedef HRESULT (WINAPI *TransformFilter_Notify) (TransformFilter *iface, IBaseFilter *sender, Quality qm);
 
 typedef struct TransformFilterFuncTable {
 	/* Required */
@@ -235,6 +267,7 @@ typedef struct TransformFilterFuncTable {
 	TransformFilter_BeginFlush pfnBeginFlush;
 	TransformFilter_EndFlush pfnEndFlush;
 	TransformFilter_NewSegment pfnNewSegment;
+	TransformFilter_Notify pfnNotify;
 } TransformFilterFuncTable;
 
 HRESULT WINAPI TransformFilterImpl_QueryInterface(IBaseFilter * iface, REFIID riid, LPVOID * ppv);

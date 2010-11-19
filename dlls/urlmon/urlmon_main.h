@@ -66,7 +66,7 @@ static inline void URLMON_UnlockModule(void) { InterlockedDecrement( &URLMON_ref
 #define DEFINE_THIS(cls,ifc,iface) DEFINE_THIS2(cls,lp ## ifc ## Vtbl,iface)
 
 IInternetProtocolInfo *get_protocol_info(LPCWSTR);
-HRESULT get_protocol_handler(LPCWSTR,CLSID*,BOOL*,IClassFactory**);
+HRESULT get_protocol_handler(IUri*,CLSID*,BOOL*,IClassFactory**);
 IInternetProtocol *get_mime_filter(LPCWSTR);
 BOOL is_registered_protocol(LPCWSTR);
 void register_urlmon_namespace(IClassFactory*,REFIID,LPCWSTR,BOOL);
@@ -74,12 +74,12 @@ HINTERNET get_internet_session(IInternetBindInfo*);
 LPWSTR get_useragent(void);
 void free_session(void);
 
-HRESULT bind_to_storage(LPCWSTR url, IBindCtx *pbc, REFIID riid, void **ppv);
-HRESULT bind_to_object(IMoniker *mon, LPCWSTR url, IBindCtx *pbc, REFIID riid, void **ppv);
+HRESULT bind_to_storage(IUri*,IBindCtx*,REFIID,void**);
+HRESULT bind_to_object(IMoniker*,IUri*,IBindCtx*,REFIID,void**ppv);
 
-HRESULT create_binding_protocol(LPCWSTR url, BOOL from_urlmon, IInternetProtocol **protocol);
-void set_binding_sink(IInternetProtocol *bind_protocol, IInternetProtocolSink *sink, IInternetBindInfo *bind_info);
-IWinInetInfo *get_wininet_info(IInternetProtocol*);
+HRESULT create_binding_protocol(BOOL,IInternetProtocolEx**);
+void set_binding_sink(IInternetProtocolEx*,IInternetProtocolSink*,IInternetBindInfo*);
+IWinInetInfo *get_wininet_info(IInternetProtocolEx*);
 HRESULT create_default_callback(IBindStatusCallback**);
 HRESULT wrap_callback(IBindStatusCallback*,IBindStatusCallback**);
 

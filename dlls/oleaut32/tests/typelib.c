@@ -121,6 +121,7 @@ static void test_TypeComp(void)
     static WCHAR wszClone[] = {'C','l','o','n','e',0};
     static WCHAR wszclone[] = {'c','l','o','n','e',0};
     static WCHAR wszJunk[] = {'J','u','n','k',0};
+    static WCHAR wszAddRef[] = {'A','d','d','R','e','f',0};
 
     hr = LoadTypeLib(wszStdOle2, &pTypeLib);
     ok_ole_success(hr, LoadTypeLib);
@@ -306,6 +307,19 @@ static void test_TypeComp(void)
     ok(desckind == DESCKIND_NONE, "desckind should have been DESCKIND_NONE, was: %d\n", desckind);
     ok(pTypeInfo == NULL, "pTypeInfo should have been NULL, was: %p\n", pTypeInfo);
     ok(bindptr.lptcomp == NULL, "bindptr should have been NULL, was: %p\n", bindptr.lptcomp);
+
+    /* tests inherited members */
+    desckind = 0xdeadbeef;
+    bindptr.lpfuncdesc = NULL;
+    pTypeInfo = NULL;
+    ulHash = LHashValOfNameSys(SYS_WIN32, LOCALE_NEUTRAL, wszAddRef);
+    hr = ITypeComp_Bind(pTypeComp, wszAddRef, ulHash, 0, &pTypeInfo, &desckind, &bindptr);
+    ok_ole_success(hr, ITypeComp_Bind);
+    ok(desckind == DESCKIND_FUNCDESC, "desckind should have been DESCKIND_FUNCDESC, was: %d\n", desckind);
+    ok(pTypeInfo != NULL, "pTypeInfo should not have been NULL, was: %p\n", pTypeInfo);
+    ok(bindptr.lpfuncdesc != NULL, "bindptr should not have been NULL, was: %p\n", bindptr.lpfuncdesc);
+    ITypeInfo_ReleaseFuncDesc(pTypeInfo, bindptr.lpfuncdesc);
+    ITypeInfo_Release(pTypeInfo);
 
     ITypeComp_Release(pTypeComp);
     ITypeInfo_Release(pFontTypeInfo);
@@ -2799,6 +2813,17 @@ static void test_register_typelib(BOOL system_registration)
     DeleteFileA( filenameA );
 }
 
+static void test_LoadTypeLib(void)
+{
+    ITypeLib *tl;
+    HRESULT hres;
+
+    static const WCHAR kernel32_dllW[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
+
+    hres = LoadTypeLib(kernel32_dllW, &tl);
+    ok(hres == TYPE_E_CANTLOADLIBRARY, "LoadTypeLib returned: %08x, expected TYPE_E_CANTLOADLIBRARY\n", hres);
+}
+
 START_TEST(typelib)
 {
     const char *filename;
@@ -2825,5 +2850,5 @@ START_TEST(typelib)
     test_register_typelib(TRUE);
     test_register_typelib(FALSE);
     test_create_typelibs();
-
+    test_LoadTypeLib();
 }

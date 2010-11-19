@@ -502,6 +502,7 @@ extern BOOL X11DRV_IsSolidColor(COLORREF color);
 
 extern COLORREF X11DRV_PALETTE_ToLogical(X11DRV_PDEVICE *physDev, int pixel);
 extern int X11DRV_PALETTE_ToPhysical(X11DRV_PDEVICE *physDev, COLORREF color);
+extern COLORREF X11DRV_PALETTE_GetColor( X11DRV_PDEVICE *physDev, COLORREF color );
 extern int X11DRV_PALETTE_LookupPixel(ColorShifts *shifts, COLORREF color);
 extern void X11DRV_PALETTE_ComputeColorShifts(ColorShifts *shifts, unsigned long redMask, unsigned long greenMask, unsigned long blueMask);
 
@@ -783,6 +784,7 @@ extern void update_user_time( Time time );
 extern void update_net_wm_states( Display *display, struct x11drv_win_data *data );
 extern void make_window_embedded( Display *display, struct x11drv_win_data *data );
 extern void change_systray_owner( Display *display, Window systray_window );
+extern HWND create_foreign_window( Display *display, Window window );
 
 static inline void mirror_rect( const RECT *window_rect, RECT *rect )
 {

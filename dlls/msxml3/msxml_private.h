@@ -68,6 +68,51 @@ typedef enum tid_t {
     LAST_tid
 } tid_t;
 
+/* The XDR datatypes (urn:schemas-microsoft-com:datatypes)
+ * These are actually valid for XSD schemas as well
+ * See datatypes.xsd
+ */
+typedef enum _XDR_DT {
+    DT_INVALID = -1,
+    DT_BIN_BASE64,
+    DT_BIN_HEX,
+    DT_BOOLEAN,
+    DT_CHAR,
+    DT_DATE,
+    DT_DATE_TZ,
+    DT_DATETIME,
+    DT_DATETIME_TZ,
+    DT_ENTITY,
+    DT_ENTITIES,
+    DT_ENUMERATION,
+    DT_FIXED_14_4,
+    DT_FLOAT,
+    DT_I1,
+    DT_I2,
+    DT_I4,
+    DT_I8,
+    DT_ID,
+    DT_IDREF,
+    DT_IDREFS,
+    DT_INT,
+    DT_NMTOKEN,
+    DT_NMTOKENS,
+    DT_NOTATION,
+    DT_NUMBER,
+    DT_R4,
+    DT_R8,
+    DT_STRING,
+    DT_TIME,
+    DT_TIME_TZ,
+    DT_UI1,
+    DT_UI2,
+    DT_UI4,
+    DT_UI8,
+    DT_URI,
+    DT_UUID
+} XDR_DT;
+#define DT__N_TYPES  (DT_UUID+1)
+
 extern HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo);
 extern void release_typelib(void);
 
@@ -98,6 +143,8 @@ typedef struct {
     dispex_dynamic_data_t *dynamic_data;
 } DispatchEx;
 
+extern HINSTANCE MSXML_hInstance;
+
 void init_dispex(DispatchEx*,IUnknown*,dispex_static_data_t*);
 BOOL dispex_query_interface(DispatchEx*,REFIID,void**);
 
@@ -108,7 +155,23 @@ BOOL dispex_query_interface(DispatchEx*,REFIID,void**);
 #endif
 
 
+
 #include <libxml/xmlerror.h>
+
+extern void schemasInit(void);
+extern void schemasCleanup(void);
+
+#ifndef HAVE_XMLFIRSTELEMENTCHILD
+    static inline xmlNodePtr xmlFirstElementChild(xmlNodePtr parent)
+    {
+    xmlNodePtr child;
+    for (child = parent->children; child != NULL; child = child->next)
+        if (child->type == XML_ELEMENT_NODE)
+            break;
+
+    return child;
+}
+#endif
 
 /* constructors */
 extern IUnknown         *create_domdoc( xmlNodePtr document );
@@ -146,6 +209,7 @@ extern xmlNodePtr xmldoc_unlink_xmldecl(xmlDocPtr doc);
 extern HRESULT XMLElement_create( IUnknown *pUnkOuter, xmlNodePtr node, LPVOID *ppObj, BOOL own );
 
 extern void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, va_list ap);
+extern void wineXmlCallbackError(char const* caller, xmlErrorPtr err);
 
 #define LIBXML2_LOG_CALLBACK __WINE_PRINTF_ATTR(2,3)
 
@@ -158,8 +222,7 @@ extern void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const
 #define LIBXML2_CALLBACK_ERR(caller, msg, ap) \
         wineXmlCallbackLog(#caller, XML_ERR_ERROR, msg, ap)
 
-#define LIBXML2_CALLBACK_SERROR(caller, err) \
-        wineXmlCallbackLog(#caller, err->level, err->message, NULL)
+#define LIBXML2_CALLBACK_SERROR(caller, err) wineXmlCallbackError(#caller, err)
 
 extern BOOL is_preserving_whitespace(xmlNodePtr node);
 
@@ -203,6 +266,12 @@ extern HRESULT node_get_base_name(xmlnode*,BSTR*);
 
 extern HRESULT DOMDocument_create_from_xmldoc(xmlDocPtr xmldoc, IXMLDOMDocument3 **document);
 extern HRESULT SchemaCache_validate_tree(IXMLDOMSchemaCollection2* iface, xmlNodePtr tree);
+extern XDR_DT  SchemaCache_get_node_dt(IXMLDOMSchemaCollection2* iface, xmlNodePtr node);
+
+extern XDR_DT dt_get_type(xmlChar const* str, int len /* calculated if -1 */);
+extern xmlChar const* dt_get_str(XDR_DT dt);
+
+extern BSTR EnsureCorrectEOL(BSTR);
 
 static inline BSTR bstr_from_xmlChar(const xmlChar *str)
 {

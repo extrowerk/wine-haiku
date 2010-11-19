@@ -1346,12 +1346,15 @@ enum wined3d_pci_device
     CARD_ATI_RADEON_HD4850          = 0x9442,
     CARD_ATI_RADEON_HD4870          = 0x9440,
     CARD_ATI_RADEON_HD4890          = 0x9460,
+    CARD_ATI_RADEON_HD5400          = 0x68f9,
+    CARD_ATI_RADEON_HD5600          = 0x68d8,
     CARD_ATI_RADEON_HD5700          = 0x68BE, /* Picked HD5750 */
     CARD_ATI_RADEON_HD5750          = 0x68BE,
     CARD_ATI_RADEON_HD5770          = 0x68B8,
     CARD_ATI_RADEON_HD5800          = 0x6898, /* Picked HD5850 */
     CARD_ATI_RADEON_HD5850          = 0x6898,
     CARD_ATI_RADEON_HD5870          = 0x6899,
+    CARD_ATI_RADEON_HD5900          = 0x689c,
 
     CARD_NVIDIA_RIVA_128            = 0x0018,
     CARD_NVIDIA_RIVA_TNT            = 0x0020,
@@ -1407,6 +1410,7 @@ enum wined3d_pci_device
     CARD_INTEL_I915GM               = 0x2592,
     CARD_INTEL_I945GM               = 0x27a2, /* Same as GMA 950? */
     CARD_INTEL_X3100                = 0x2a02, /* Found in Macs. Same as GM965/GL960 */
+    CARD_INTEL_GM45                 = 0x2a42,
 };
 
 struct wined3d_fbo_ops
@@ -2102,8 +2106,7 @@ struct IWineD3DSurfaceImpl
     IWineD3DPaletteImpl       *palette; /* D3D7 style palette handling */
     PALETTEENTRY              *palette9; /* D3D8/9 style palette handling */
 
-    /* TODO: move this off into a management class(maybe!) */
-    DWORD                      Flags;
+    DWORD flags;
 
     UINT                      pow2Width;
     UINT                      pow2Height;
@@ -2638,8 +2641,6 @@ HRESULT WINAPI IWineD3DBaseSwapChainImpl_GetGammaRamp(IWineD3DSwapChain *iface,
 struct wined3d_context *swapchain_create_context_for_thread(IWineD3DSwapChain *iface) DECLSPEC_HIDDEN;
 HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface_type,
         IWineD3DDeviceImpl *device, WINED3DPRESENT_PARAMETERS *present_parameters, void *parent) DECLSPEC_HIDDEN;
-void swapchain_restore_fullscreen_window(IWineD3DSwapChainImpl *swapchain) DECLSPEC_HIDDEN;
-void swapchain_setup_fullscreen_window(IWineD3DSwapChainImpl *swapchain, UINT w, UINT h) DECLSPEC_HIDDEN;
 
 #define DEFAULT_REFRESH_RATE 0
 
@@ -2977,7 +2978,7 @@ struct IWineD3DPaletteImpl {
     PALETTEENTRY               palents[256];   /*|               */
     /* This is to store the palette in 'screen format' */
     int                        screen_palents[256];
-    DWORD                      Flags;
+    DWORD flags;
 };
 
 HRESULT wined3d_palette_init(IWineD3DPaletteImpl *palette, IWineD3DDeviceImpl *device,
@@ -3038,7 +3039,7 @@ struct wined3d_format
     GLint glFormat;
     GLint glType;
     UINT  conv_byte_count;
-    unsigned int Flags;
+    unsigned int flags;
     float heightscale;
     struct color_fixup_desc color_fixup;
     void (*convert)(const BYTE *src, BYTE *dst, UINT pitch, UINT width, UINT height);

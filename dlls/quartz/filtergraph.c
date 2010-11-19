@@ -203,7 +203,6 @@ typedef struct _IFilterGraphImpl {
     GUID timeformatseek;
     REFERENCE_TIME start_time;
     REFERENCE_TIME pause_time;
-    LONGLONG position;
     LONGLONG stop_position;
     LONG recursioncount;
 } IFilterGraphImpl;
@@ -1830,21 +1829,7 @@ static HRESULT ExploreGraph(IFilterGraphImpl* pGraph, IPin* pOutputPin, fnFoundF
 
 static HRESULT WINAPI SendRun(IBaseFilter *pFilter, DWORD_PTR data)
 {
-    LONGLONG time = 0;
-    IReferenceClock *clock = NULL;
-
-    IBaseFilter_GetSyncSource(pFilter, &clock);
-    if (clock)
-    {
-        IReferenceClock_GetTime(clock, &time);
-        if (time)
-            /* Add 50 ms */
-            time += 500000;
-        if (time < 0)
-            time = 0;
-        IReferenceClock_Release(clock);
-    }
-
+    REFERENCE_TIME time = *(REFERENCE_TIME*)data;
     return IBaseFilter_Run(pFilter, time);
 }
 
@@ -1941,7 +1926,6 @@ static HRESULT WINAPI MediaControl_Run(IMediaControl *iface) {
     ICOM_THIS_MULTI(IFilterGraphImpl, IMediaControl_vtbl, iface);
     TRACE("(%p/%p)->()\n", This, iface);
 
-
     EnterCriticalSection(&This->cs);
     if (This->state == State_Running)
         goto out;
@@ -1953,12 +1937,14 @@ static HRESULT WINAPI MediaControl_Run(IMediaControl *iface) {
         IReferenceClock_GetTime(This->refClock, &now);
         if (This->state == State_Stopped)
             This->start_time = now + 500000;
-        else
+        else if (This->pause_time >= 0)
             This->start_time += now - This->pause_time;
+        else
+            This->start_time = now;
     }
-    else This->position = This->start_time = 0;
+    else This->start_time = 0;
 
-    SendFilterMessage(iface, SendRun, 0);
+    SendFilterMessage(iface, SendRun, (DWORD_PTR)&This->start_time);
     This->state = State_Running;
 out:
     LeaveCriticalSection(&This->cs);
@@ -1973,8 +1959,10 @@ static HRESULT WINAPI MediaControl_Pause(IMediaControl *iface) {
     if (This->state == State_Paused)
         goto out;
 
-    if (This->state == State_Running && This->refClock)
+    if (This->state == State_Running && This->refClock && This->start_time >= 0)
         IReferenceClock_GetTime(This->refClock, &This->pause_time);
+    else
+        This->pause_time = -1;
 
     SendFilterMessage(iface, SendPause, 0);
     This->state = State_Paused;
@@ -1990,13 +1978,6 @@ static HRESULT WINAPI MediaControl_Stop(IMediaControl *iface) {
     if (This->state == State_Stopped) return S_OK;
 
     EnterCriticalSection(&This->cs);
-    if (This->state == State_Running && This->refClock)
-    {
-        LONGLONG time = This->start_time;
-        IReferenceClock_GetTime(This->refClock, &time);
-        This->position += time - This->start_time;
-    }
-
     if (This->state == State_Running) SendFilterMessage(iface, SendPause, 0);
     SendFilterMessage(iface, SendStop, 0);
     This->state = State_Stopped;
@@ -2319,10 +2300,8 @@ static HRESULT WINAPI FoundDuration(IFilterGraphImpl *This, IMediaSeeking *seek,
     if (FAILED(hr))
         return hr;
 
-    /* FIXME: Minimum or maximum duration? Assuming minimum */
-    if (duration > 0 && *pdur < duration)
+    if (*pdur < duration)
         *pdur = duration;
-
     return hr;
 }
 
@@ -2337,7 +2316,7 @@ static HRESULT WINAPI MediaSeeking_GetDuration(IMediaSeeking *iface,
         return E_POINTER;
 
     EnterCriticalSection(&This->cs);
-    *pDuration = -1;
+    *pDuration = 0;
     hr = all_renderers_seek(This, FoundDuration, (DWORD_PTR)pDuration);
     LeaveCriticalSection(&This->cs);
 
@@ -2361,37 +2340,45 @@ static HRESULT WINAPI MediaSeeking_GetStopPosition(IMediaSeeking *iface,
         hr = IMediaSeeking_GetDuration(iface, pStop);
     else
         *pStop = This->stop_position;
-
     LeaveCriticalSection(&This->cs);
 
+    return hr;
+}
+
+static HRESULT WINAPI FoundCurrentPosition(IFilterGraphImpl *This, IMediaSeeking *seek, DWORD_PTR pposition)
+{
+    HRESULT hr;
+    LONGLONG pos = 0, *ppos = (LONGLONG*)pposition;
+
+    hr = IMediaSeeking_GetCurrentPosition(seek, &pos);
+    if (FAILED(hr))
+        return hr;
+
+    if (*ppos < 0 || pos < *ppos)
+        *ppos = pos;
     return hr;
 }
 
 static HRESULT WINAPI MediaSeeking_GetCurrentPosition(IMediaSeeking *iface,
 						      LONGLONG *pCurrent) {
     ICOM_THIS_MULTI(IFilterGraphImpl, IMediaSeeking_vtbl, iface);
-    LONGLONG time = 0;
+    HRESULT hr;
 
     if (!pCurrent)
         return E_POINTER;
 
     EnterCriticalSection(&This->cs);
-    if (This->state == State_Running && This->refClock)
-    {
-        IReferenceClock_GetTime(This->refClock, &time);
-        if (time)
-            time += This->position - This->start_time;
-        if (time < This->position)
-            time = This->position;
-        *pCurrent = time;
+    *pCurrent = -1;
+    hr = all_renderers_seek(This, FoundCurrentPosition, (DWORD_PTR)pCurrent);
+    if (hr == E_NOTIMPL) {
+        *pCurrent = 0;
+        hr = S_OK;
     }
-    else
-        *pCurrent = This->position;
     LeaveCriticalSection(&This->cs);
 
     TRACE("Time: %u.%03u\n", (DWORD)(*pCurrent / 10000000), (DWORD)((*pCurrent / 10000)%1000));
 
-    return S_OK;
+    return hr;
 }
 
 static HRESULT WINAPI MediaSeeking_ConvertTimeFormat(IMediaSeeking *iface,
@@ -2435,11 +2422,8 @@ static HRESULT WINAPI MediaSeeking_SetPositions(IMediaSeeking *iface,
     state = This->state;
     TRACE("State: %s\n", state == State_Running ? "Running" : (state == State_Paused ? "Paused" : (state == State_Stopped ? "Stopped" : "UNKNOWN")));
 
-    if ((dwCurrentFlags & 0x7) == AM_SEEKING_AbsolutePositioning)
-    {
-        This->position = *pCurrent;
-    }
-    else if ((dwCurrentFlags & 0x7) != AM_SEEKING_NoPositioning)
+    if ((dwCurrentFlags & 0x7) != AM_SEEKING_AbsolutePositioning &&
+        (dwCurrentFlags & 0x7) != AM_SEEKING_NoPositioning)
         FIXME("Adjust method %x not handled yet!\n", dwCurrentFlags & 0x7);
 
     if ((dwStopFlags & 0x7) == AM_SEEKING_AbsolutePositioning)
@@ -2453,10 +2437,10 @@ static HRESULT WINAPI MediaSeeking_SetPositions(IMediaSeeking *iface,
     args.stopflags = dwStopFlags;
     hr = all_renderers_seek(This, found_setposition, (DWORD_PTR)&args);
 
-    if (This->refClock && ((dwCurrentFlags & 0x7) != AM_SEEKING_NoPositioning))
-    {
-        /* Update start time, prevents weird jumps */
-        IReferenceClock_GetTime(This->refClock, &This->start_time);
+    if ((dwCurrentFlags & 0x7) != AM_SEEKING_NoPositioning) {
+        if (This->state == State_Running)
+            FIXME("Seeking while graph is running is not properly supported!\n");
+        This->pause_time = This->start_time = -1;
     }
     LeaveCriticalSection(&This->cs);
 
@@ -5477,7 +5461,7 @@ HRESULT FilterGraph_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     fimpl->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IFilterGraphImpl.cs");
     fimpl->nItfCacheEntries = 0;
     memcpy(&fimpl->timeformatseek, &TIME_FORMAT_MEDIA_TIME, sizeof(GUID));
-    fimpl->start_time = fimpl->position = 0;
+    fimpl->start_time = fimpl->pause_time = 0;
     fimpl->stop_position = -1;
     fimpl->punkFilterMapper2 = NULL;
     fimpl->recursioncount = 0;

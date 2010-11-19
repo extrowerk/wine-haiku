@@ -403,7 +403,7 @@
 @ cdecl _ctime64(ptr) msvcrt._ctime64
 @ stub _ctime64_s
 @ cdecl _cwait(ptr long long) msvcrt._cwait
-@ stub _cwprintf
+@ varargs _cwprintf(wstr) msvcrt._cwprintf
 @ stub _cwprintf_l
 @ stub _cwprintf_p
 @ stub _cwprintf_p_l
@@ -578,9 +578,9 @@
 @ cdecl _hypot(double double) msvcrt._hypot
 @ cdecl _hypotf(float float) msvcrt._hypotf
 @ cdecl _i64toa(int64 ptr long) msvcrt._i64toa
-@ stub _i64toa_s
+@ cdecl _i64toa_s(int64 ptr long long) msvcrt._i64toa_s
 @ cdecl _i64tow(int64 ptr long) msvcrt._i64tow
-@ stub _i64tow_s
+@ cdecl _i64tow_s(int64 ptr long long) msvcrt._i64tow_s
 @ stub _initptd
 @ cdecl _initterm(ptr ptr) msvcrt._initterm
 @ cdecl _initterm_e(ptr ptr) msvcr90._initterm_e
@@ -708,9 +708,9 @@
 @ cdecl _lseek(long long long) msvcrt._lseek
 @ cdecl -ret64 _lseeki64(long int64 long) msvcrt._lseeki64
 @ cdecl _ltoa(long ptr long) msvcrt._ltoa
-@ stub _ltoa_s
+@ cdecl _ltoa_s(long ptr long long) msvcrt._ltoa_s
 @ cdecl _ltow(long ptr long) msvcrt._ltow
-@ stub _ltow_s
+@ cdecl _ltow_s(long ptr long long) msvcrt._ltow_s
 @ cdecl _makepath(ptr str str str str) msvcrt._makepath
 @ cdecl _makepath_s(ptr long str str str str) msvcrt._makepath_s
 @ cdecl _malloc_crt(long) msvcrt.malloc
@@ -1069,13 +1069,13 @@
 @ cdecl _unlock_file(ptr) msvcrt._unlock_file
 @ cdecl _utime32(str ptr) msvcrt._utime32
 @ cdecl _utime64(str ptr) msvcrt._utime64
-@ stub _vcprintf
+@ cdecl _vcprintf(str ptr) msvcrt._vcprintf
 @ stub _vcprintf_l
 @ stub _vcprintf_p
 @ stub _vcprintf_p_l
 @ stub _vcprintf_s
 @ stub _vcprintf_s_l
-@ stub _vcwprintf
+@ cdecl _vcwprintf(wstr ptr) msvcrt._vcwprintf
 @ stub _vcwprintf_l
 @ stub _vcwprintf_p
 @ stub _vcwprintf_p_l
@@ -1209,7 +1209,7 @@
 @ cdecl _wgetdcwd(long wstr long) msvcrt._wgetdcwd
 @ stub _wgetdcwd_nolock
 @ cdecl _wgetenv(wstr) msvcrt._wgetenv
-@ stub _wgetenv_s
+@ cdecl _wgetenv_s(ptr ptr long wstr) msvcrt._wgetenv_s
 @ extern _winmajor msvcrt._winmajor
 @ extern _winminor msvcrt._winminor
 @ extern _winver msvcrt._winver
@@ -1339,7 +1339,7 @@
 @ cdecl getc(ptr) msvcrt.getc
 @ cdecl getchar() msvcrt.getchar
 @ cdecl getenv(str) msvcrt.getenv
-@ stub getenv_s
+@ cdecl getenv_s(ptr ptr long str) msvcrt.getenv_s
 @ cdecl gets(str) msvcrt.gets
 @ stub gets_s
 @ cdecl getwc(ptr) msvcrt.getwc
@@ -1404,7 +1404,7 @@
 @ cdecl putwc(long ptr) msvcrt.putwc
 @ cdecl putwchar(long) msvcrt.putwchar
 @ cdecl qsort(ptr long long ptr) msvcrt.qsort
-@ stub qsort_s
+@ cdecl qsort_s(ptr long long ptr ptr) msvcrt.qsort_s
 @ cdecl raise(long) msvcrt.raise
 @ cdecl rand() msvcrt.rand
 @ cdecl rand_s(ptr) msvcrt.rand_s
@@ -1439,7 +1439,7 @@
 @ cdecl strftime(str long str ptr) msvcrt.strftime
 @ cdecl strlen(str) msvcrt.strlen
 @ cdecl strncat(str str long) msvcrt.strncat
-@ stub strncat_s
+@ cdecl strncat_s(str long str long) msvcrt.strncat_s
 @ cdecl strncmp(str str long) msvcrt.strncmp
 @ cdecl strncpy(ptr str long) msvcrt.strncpy
 @ cdecl strncpy_s(ptr long str long) msvcrt.strncpy_s

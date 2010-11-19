@@ -20,7 +20,11 @@
 #ifndef __MSCOREE_PRIVATE__
 #define __MSCOREE_PRIVATE__
 
-extern IUnknown* create_corruntimehost(void);
+extern LONG dll_refs;
+static inline void MSCOREE_LockModule(void) { InterlockedIncrement(&dll_refs); }
+static inline void MSCOREE_UnlockModule(void) { InterlockedDecrement(&dll_refs); }
+
+extern char *WtoA(LPCWSTR wstr);
 
 extern HRESULT CLRMetaHost_CreateInstance(REFIID riid, void **ppobj);
 
@@ -50,22 +54,70 @@ extern HRESULT get_runtime_info(LPCWSTR exefile, LPCWSTR version, LPCWSTR config
 
 extern HRESULT force_get_runtime_info(ICLRRuntimeInfo **result);
 
-/* Mono 2.6 embedding */
+extern HRESULT ICLRRuntimeInfo_GetRuntimeHost(ICLRRuntimeInfo *iface, RuntimeHost **result);
+
+extern HRESULT MetaDataDispenser_CreateInstance(IUnknown **ppUnk);
+
+typedef struct parsed_config_file
+{
+    struct list supported_runtimes;
+} parsed_config_file;
+
+typedef struct supported_runtime
+{
+    struct list entry;
+    LPWSTR version;
+} supported_runtime;
+
+extern HRESULT parse_config_file(LPCWSTR filename, parsed_config_file *result);
+
+extern void free_parsed_config_file(parsed_config_file *file);
+
+/* Mono embedding */
 typedef struct _MonoDomain MonoDomain;
 typedef struct _MonoAssembly MonoAssembly;
+typedef struct _MonoAssemblyName MonoAssemblyName;
+typedef struct _MonoType MonoType;
+typedef struct _MonoImage MonoImage;
+typedef struct _MonoClass MonoClass;
+typedef struct _MonoObject MonoObject;
+typedef struct _MonoMethod MonoMethod;
 
-extern HMODULE mono_handle;
+typedef enum {
+	MONO_IMAGE_OK,
+	MONO_IMAGE_ERROR_ERRNO,
+	MONO_IMAGE_MISSING_ASSEMBLYREF,
+	MONO_IMAGE_IMAGE_INVALID
+} MonoImageOpenStatus;
 
-extern void (*mono_config_parse)(const char *filename);
-extern MonoAssembly* (*mono_domain_assembly_open) (MonoDomain *domain, const char *name);
-extern void (*mono_jit_cleanup)(MonoDomain *domain);
-extern int (*mono_jit_exec)(MonoDomain *domain, MonoAssembly *assembly, int argc, char *argv[]);
-extern MonoDomain* (*mono_jit_init)(const char *file);
-extern int (*mono_jit_set_trace_options)(const char* options);
-extern void (*mono_set_dirs)(const char *assembly_dir, const char *config_dir);
+typedef MonoAssembly* (*MonoAssemblyPreLoadFunc)(MonoAssemblyName *aname, char **assemblies_path, void *user_data);
 
 typedef struct loaded_mono
 {
+    HMODULE mono_handle;
+    HMODULE glib_handle;
+
+    MonoImage* (*mono_assembly_get_image)(MonoAssembly *assembly);
+    MonoAssembly* (*mono_assembly_open)(const char *filename, MonoImageOpenStatus *status);
+    MonoClass* (*mono_class_from_mono_type)(MonoType *type);
+    MonoClass* (*mono_class_from_name)(MonoImage *image, const char* name_space, const char *name);
+    MonoMethod* (*mono_class_get_method_from_name)(MonoClass *klass, const char *name, int param_count);
+    void (*mono_config_parse)(const char *filename);
+    MonoAssembly* (*mono_domain_assembly_open) (MonoDomain *domain, const char *name);
+    void (*mono_free)(void *);
+    void (*mono_install_assembly_preload_hook)(MonoAssemblyPreLoadFunc func, void *user_data);
+    void (*mono_jit_cleanup)(MonoDomain *domain);
+    int (*mono_jit_exec)(MonoDomain *domain, MonoAssembly *assembly, int argc, char *argv[]);
+    MonoDomain* (*mono_jit_init)(const char *file);
+    int (*mono_jit_set_trace_options)(const char* options);
+    MonoDomain* (*mono_object_get_domain)(MonoObject *obj);
+    MonoObject* (*mono_object_new)(MonoDomain *domain, MonoClass *klass);
+    void* (*mono_object_unbox)(MonoObject *obj);
+    MonoType* (*mono_reflection_type_from_name)(char *name, MonoImage *image);
+    MonoObject* (*mono_runtime_invoke)(MonoMethod *method, void *obj, void **params, MonoObject **exc);
+    void (*mono_runtime_object_init)(MonoObject *this_obj);
+    void (*mono_set_dirs)(const char *assembly_dir, const char *config_dir);
+    char* (*mono_stringify_assembly_name)(MonoAssemblyName *aname);
 } loaded_mono;
 
 /* loaded runtime interfaces */
@@ -75,6 +127,11 @@ extern HRESULT RuntimeHost_Construct(const CLRRuntimeInfo *runtime_version,
     const loaded_mono *loaded_mono, RuntimeHost** result);
 
 extern HRESULT RuntimeHost_GetInterface(RuntimeHost *This, REFCLSID clsid, REFIID riid, void **ppv);
+
+extern HRESULT RuntimeHost_GetIUnknownForObject(RuntimeHost *This, MonoObject *obj, IUnknown **ppUnk);
+
+extern HRESULT RuntimeHost_CreateManagedInstance(RuntimeHost *This, LPCWSTR name,
+    MonoDomain *domain, MonoObject **result);
 
 extern HRESULT RuntimeHost_Destroy(RuntimeHost *This);
 

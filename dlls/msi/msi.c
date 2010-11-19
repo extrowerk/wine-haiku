@@ -351,7 +351,7 @@ static UINT MSI_ApplyPatchW(LPCWSTR szPatchPackage, LPCWSTR szProductCode, LPCWS
     LPWSTR beg, end, cmd, codes = NULL;
     BOOL succeeded = FALSE;
 
-    static const WCHAR patcheq[] = {'P','A','T','C','H','=',0};
+    static const WCHAR fmt[] = {'%','s',' ','P','A','T','C','H','=','"','%','s','"',0};
     static WCHAR empty[] = {0};
 
     if (!szPatchPackage || !szPatchPackage[0])
@@ -363,18 +363,14 @@ static UINT MSI_ApplyPatchW(LPCWSTR szPatchPackage, LPCWSTR szProductCode, LPCWS
     if (!szCommandLine)
         cmd_ptr = empty;
 
-    size = lstrlenW(cmd_ptr) + lstrlenW(patcheq) + lstrlenW(szPatchPackage) + 1;
+    size = strlenW(cmd_ptr) + strlenW(fmt) + strlenW(szPatchPackage) + 1;
     cmd = msi_alloc(size * sizeof(WCHAR));
     if (!cmd)
     {
         msi_free(codes);
         return ERROR_OUTOFMEMORY;
     }
-
-    lstrcpyW(cmd, cmd_ptr);
-    if (szCommandLine) lstrcatW(cmd, szSpace);
-    lstrcatW(cmd, patcheq);
-    lstrcatW(cmd, szPatchPackage);
+    sprintfW(cmd, fmt, cmd_ptr, szPatchPackage);
 
     if (szProductCode)
         r = MsiConfigureProductExW(szProductCode, INSTALLLEVEL_DEFAULT, INSTALLSTATE_DEFAULT, cmd);
@@ -2713,17 +2709,17 @@ INSTALLSTATE WINAPI MsiQueryFeatureStateW(LPCWSTR szProduct, LPCWSTR szFeature)
 
         msi_free(path);
     }
-
-    TRACE("%s %s -> %d\n", debugstr_w(szProduct), debugstr_w(szFeature), r);
     msi_free(components);
 
     if (missing)
-        return INSTALLSTATE_ADVERTISED;
+        r = INSTALLSTATE_ADVERTISED;
+    else if (source)
+        r = INSTALLSTATE_SOURCE;
+    else
+        r = INSTALLSTATE_LOCAL;
 
-    if (source)
-        return INSTALLSTATE_SOURCE;
-
-    return INSTALLSTATE_LOCAL;
+    TRACE("%s %s -> %d\n", debugstr_w(szProduct), debugstr_w(szFeature), r);
+    return r;
 }
 
 /******************************************************************
@@ -3545,8 +3541,8 @@ UINT WINAPI MsiReinstallFeatureW( LPCWSTR szProduct, LPCWSTR szFeature,
     LPWSTR ptr;
     DWORD sz;
 
-    FIXME("%s %s %i\n", debugstr_w(szProduct), debugstr_w(szFeature),
-                           dwReinstallMode);
+    FIXME("%s %s 0x%08x\n",
+          debugstr_w(szProduct), debugstr_w(szFeature), dwReinstallMode);
 
     ptr = reinstallmode;
 
@@ -3771,6 +3767,31 @@ UINT WINAPI MsiSetExternalUIRecord( INSTALLUI_HANDLER_RECORD handler,
     gUIContext       = context;
 
     return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ * MsiInstallMissingComponentA     [MSI.@]
+ */
+UINT WINAPI MsiInstallMissingComponentA( LPCSTR product, LPCSTR component, INSTALLSTATE state )
+{
+    UINT r;
+    WCHAR *productW = NULL, *componentW = NULL;
+
+    TRACE("%s, %s, %d\n", debugstr_a(product), debugstr_a(component), state);
+
+    if (product && !(productW = strdupAtoW( product )))
+        return ERROR_OUTOFMEMORY;
+
+    if (component && !(componentW = strdupAtoW( component )))
+    {
+        msi_free( productW );
+        return ERROR_OUTOFMEMORY;
+    }
+
+    r = MsiInstallMissingComponentW( productW, componentW, state );
+    msi_free( productW );
+    msi_free( componentW );
+    return r;
 }
 
 /***********************************************************************

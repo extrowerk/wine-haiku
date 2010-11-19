@@ -6175,6 +6175,30 @@ interface IHTMLStyleSheetsCollection : IDispatch
 }
 
 /*****************************************************************************
+ *    DispHTMLStyleSheetsCollection dispinterface
+ */
+[
+    hidden,
+    uuid(3050f547-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispHTMLStyleSheetsCollection
+{
+properties:
+methods:
+    [propget, id(DISPID_IHTMLSTYLESHEETSCOLLECTION_LENGTH)]
+    long length();
+
+    [propget, id(DISPID_IHTMLSTYLESHEETSCOLLECTION__NEWENUM), hidden, restricted]
+    IUnknown *_newEnum();
+
+    [id(DISPID_IHTMLSTYLESHEETSCOLLECTION_ITEM)]
+    VARIANT item([in] VARIANT *pvarIndex);
+
+    [propget, id(DISPID_IHTMLDOMCONSTRUCTOR_CONSTRUCTOR), hidden]
+    IDispatch *constructor();
+}
+
+/*****************************************************************************
  *    IHTMLTxtRange interface
  */
 [
@@ -9146,12 +9170,32 @@ interface IHTMLPluginsCollection : IDispatch
 }
 
 [
+    hidden,
+    uuid(3050f54a-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispCPlugins
+{
+ properties:
+methods:
+    [propget, id(DISPID_IHTMLPLUGINSCOLLECTION_LENGTH)]
+    long length();
+
+    [id(DISPID_IHTMLPLUGINSCOLLECTION_REFRESH)]
+    void refresh([defaultvalue(0), in] VARIANT_BOOL reload);
+
+    [propget, id(DISPID_IHTMLDOMCONSTRUCTOR_CONSTRUCTOR), hidden]
+    IDispatch *constructor();
+}
+
+[
     noncreatable,
     uuid(3050f3ff-98b5-11cf-bb82-00aa00bdce0b)
 ]
 coclass CPlugins
 {
-    [default]           interface IHTMLPluginsCollection;
+    [default]  dispinterface DispCPlugins;
+               interface IHTMLPluginsCollection;
+               interface IHTMLDOMConstructor;
 }
 
 /*****************************************************************************
@@ -15527,6 +15571,101 @@ methods:
 
     [propget, id(DISPID_IHTMLIFRAMEELEMENT2_WIDTH)]
     VARIANT width();
+}
+
+/*****************************************************************************
+ *    IHTMLStyleElement interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(3050f375-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLStyleElement : IDispatch
+{
+    [propput, id(DISPID_IHTMLSTYLEELEMENT_TYPE), displaybind, bindable]
+    HRESULT type([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_TYPE), displaybind, bindable]
+    HRESULT type([retval, out] BSTR *p);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_READYSTATE)]
+    HRESULT readyState([retval, out] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLEELEMENT_ONREADYSTATECHANGE), displaybind, bindable]
+    HRESULT onreadystatechange([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_ONREADYSTATECHANGE), displaybind, bindable]
+    HRESULT onreadystatechange([retval, out] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLSTYLEELEMENT_ONLOAD), displaybind, bindable]
+    HRESULT onload([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_ONLOAD), displaybind, bindable]
+    HRESULT onload([retval, out] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLSTYLEELEMENT_ONERROR), displaybind, bindable]
+    HRESULT onerror([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_ONERROR), displaybind, bindable]
+    HRESULT onerror([retval, out] VARIANT *p);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_STYLESHEET)]
+    HRESULT styleSheet([retval, out] IHTMLStyleSheet **p);
+
+    [propput, id(DISPID_IHTMLSTYLEELEMENT_DISABLED), displaybind, bindable]
+    HRESULT disabled([in] VARIANT_BOOL v);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_DISABLED), displaybind, bindable]
+    HRESULT disabled([retval, out] VARIANT_BOOL *p);
+
+    [propput, id(DISPID_IHTMLSTYLEELEMENT_MEDIA), displaybind, bindable]
+    HRESULT media([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_MEDIA), displaybind, bindable]
+    HRESULT media([retval, out] BSTR *p);
+}
+
+/*****************************************************************************
+ *    DispHTMLStyleElement dispinterface
+ */
+[
+    hidden,
+    uuid(3050f511-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispHTMLStyleElement
+{
+properties:
+methods:
+    WINE_HTMLELEMENT_DISPINTERFACE_DECL;
+
+    [propput, id(DISPID_IHTMLSTYLEELEMENT_TYPE), displaybind, bindable]
+    void type(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_TYPE), displaybind, bindable]
+    BSTR type();
+
+    [propput, id(DISPID_IHTMLSTYLEELEMENT_ONLOAD), displaybind, bindable]
+    void onload(VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_ONLOAD), displaybind, bindable]
+    VARIANT onload();
+
+    [propput, id(DISPID_IHTMLSTYLEELEMENT_ONERROR), displaybind, bindable]
+    void onerror(VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_ONERROR), displaybind, bindable]
+    VARIANT onerror();
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_STYLESHEET)]
+    IHTMLStyleSheet *styleSheet();
+
+    [propput, id(DISPID_IHTMLSTYLEELEMENT_MEDIA), displaybind, bindable]
+    void media(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLEELEMENT_MEDIA), displaybind, bindable]
+    BSTR media();
 }
 
 /*****************************************************************************

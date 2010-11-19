@@ -44,21 +44,19 @@ typedef struct
 {
     struct list                 entry;
     PVECTORED_EXCEPTION_HANDLER func;
+    ULONG                       count;
 } VECTORED_HANDLER;
 
 static struct list vectored_handlers = LIST_INIT(vectored_handlers);
 
-static RTL_RWLOCK vectored_handlers_lock;
-
-/**********************************************************************
- *           exceptions_init
- *
- * Initialize read/write lock used by the vectored exception handling.
- */
-void exceptions_init(void)
+static RTL_CRITICAL_SECTION vectored_handlers_section;
+static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 {
-    RtlInitializeResource(&vectored_handlers_lock);
-}
+    0, 0, &vectored_handlers_section,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": vectored_handlers_section") }
+};
+static RTL_CRITICAL_SECTION vectored_handlers_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 /**********************************************************************
  *           wait_suspend
@@ -161,21 +159,37 @@ LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
     struct list *ptr;
     LONG ret = EXCEPTION_CONTINUE_SEARCH;
     EXCEPTION_POINTERS except_ptrs;
+    VECTORED_HANDLER *handler, *to_free = NULL;
 
     except_ptrs.ExceptionRecord = rec;
     except_ptrs.ContextRecord = context;
 
-    RtlAcquireResourceShared( &vectored_handlers_lock, TRUE );
-    LIST_FOR_EACH( ptr, &vectored_handlers )
+    RtlEnterCriticalSection( &vectored_handlers_section );
+    ptr = list_head( &vectored_handlers );
+    while (ptr)
     {
-        VECTORED_HANDLER *handler = LIST_ENTRY( ptr, VECTORED_HANDLER, entry );
+        handler = LIST_ENTRY( ptr, VECTORED_HANDLER, entry );
+        handler->count++;
+        RtlLeaveCriticalSection( &vectored_handlers_section );
+        RtlFreeHeap( GetProcessHeap(), 0, to_free );
+        to_free = NULL;
+
         TRACE( "calling handler at %p code=%x flags=%x\n",
                handler->func, rec->ExceptionCode, rec->ExceptionFlags );
         ret = handler->func( &except_ptrs );
         TRACE( "handler at %p returned %x\n", handler->func, ret );
+
+        RtlEnterCriticalSection( &vectored_handlers_section );
+        ptr = list_next( &vectored_handlers, ptr );
+        if (!--handler->count)  /* removed during execution */
+        {
+            list_remove( &handler->entry );
+            to_free = handler;
+        }
         if (ret == EXCEPTION_CONTINUE_EXECUTION) break;
     }
-    RtlReleaseResource( &vectored_handlers_lock );
+    RtlLeaveCriticalSection( &vectored_handlers_section );
+    RtlFreeHeap( GetProcessHeap(), 0, to_free );
     return ret;
 }
 
@@ -217,10 +231,11 @@ PVOID WINAPI RtlAddVectoredExceptionHandler( ULONG first, PVECTORED_EXCEPTION_HA
     if (handler)
     {
         handler->func = func;
-        RtlAcquireResourceExclusive( &vectored_handlers_lock, TRUE );
+        handler->count = 1;
+        RtlEnterCriticalSection( &vectored_handlers_section );
         if (first) list_add_head( &vectored_handlers, &handler->entry );
         else list_add_tail( &vectored_handlers, &handler->entry );
-        RtlReleaseResource( &vectored_handlers_lock );
+        RtlLeaveCriticalSection( &vectored_handlers_section );
     }
     return handler;
 }
@@ -234,18 +249,19 @@ ULONG WINAPI RtlRemoveVectoredExceptionHandler( PVOID handler )
     struct list *ptr;
     ULONG ret = FALSE;
 
-    RtlAcquireResourceExclusive( &vectored_handlers_lock, TRUE );
+    RtlEnterCriticalSection( &vectored_handlers_section );
     LIST_FOR_EACH( ptr, &vectored_handlers )
     {
         VECTORED_HANDLER *curr_handler = LIST_ENTRY( ptr, VECTORED_HANDLER, entry );
         if (curr_handler == handler)
         {
-            list_remove( ptr );
+            if (!--curr_handler->count) list_remove( ptr );
+            else handler = NULL;  /* don't free it yet */
             ret = TRUE;
             break;
         }
     }
-    RtlReleaseResource( &vectored_handlers_lock );
+    RtlLeaveCriticalSection( &vectored_handlers_section );
     if (ret) RtlFreeHeap( GetProcessHeap(), 0, handler );
     return ret;
 }

@@ -393,6 +393,44 @@ int CDECL MSVCRT_strcat_s( char* dst, MSVCRT_size_t elem, const char* src )
 }
 
 /*********************************************************************
+ *      strncat_s (MSVCRT.@)
+ */
+int CDECL MSVCRT_strncat_s( char* dst, MSVCRT_size_t elem, const char* src, MSVCRT_size_t count )
+{
+    MSVCRT_size_t i, j;
+    if(!MSVCRT_CHECK_PMT(dst != 0) || !MSVCRT_CHECK_PMT(elem != 0))
+        return MSVCRT_EINVAL;
+    if(!MSVCRT_CHECK_PMT(src != 0))
+    {
+        dst[0] = '\0';
+        return MSVCRT_EINVAL;
+    }
+
+    for(i = 0; i < elem; i++)
+    {
+        if(dst[i] == '\0')
+        {
+            for(j = 0; (j + i) < elem; j++)
+            {
+                if(count == MSVCRT__TRUNCATE && j + i == elem - 1)
+                {
+                    dst[j + i] = '\0';
+                    return MSVCRT_STRUNCATE;
+                }
+                if(j == count || (dst[j + i] = src[j]) == '\0')
+                {
+                    dst[j + i] = '\0';
+                    return 0;
+                }
+            }
+        }
+    }
+    /* Set the first element to 0, not the first element after the skipped part */
+    dst[0] = '\0';
+    return MSVCRT_ERANGE;
+}
+
+/*********************************************************************
  *		strxfrm (MSVCRT.@)
  */
 MSVCRT_size_t CDECL MSVCRT_strxfrm( char *dest, const char *src, MSVCRT_size_t len )
@@ -671,16 +709,18 @@ unsigned __int64 CDECL MSVCRT_strtoui64(const char *nptr, char **endptr, int bas
 }
 
 /*********************************************************************
- *  _itoa_s (MSVCRT.@)
+ *  _ltoa_s (MSVCRT.@)
  */
-int CDECL _itoa_s(int value, char *str, MSVCRT_size_t size, int radix)
+int CDECL _ltoa_s(MSVCRT_long value, char *str, MSVCRT_size_t size, int radix)
 {
-    unsigned int val, digit;
+    MSVCRT_ulong val;
+    unsigned int digit;
     int is_negative;
     char buffer[33], *pos;
     size_t len;
 
-    if (!str || !size || radix < 2 || radix > 36)
+    if (!MSVCRT_CHECK_PMT(str != NULL) || !MSVCRT_CHECK_PMT(size > 0) ||
+        !MSVCRT_CHECK_PMT(radix >= 2) || !MSVCRT_CHECK_PMT(radix <= 36))
     {
         if (str && size)
             str[0] = '\0';
@@ -737,6 +777,7 @@ int CDECL _itoa_s(int value, char *str, MSVCRT_size_t size, int radix)
             *p++ = *pos--;
 
         str[0] = '\0';
+        MSVCRT_INVALID_PMT("str[size] is too small");
         *MSVCRT__errno() = MSVCRT_ERANGE;
         return MSVCRT_ERANGE;
     }
@@ -746,11 +787,12 @@ int CDECL _itoa_s(int value, char *str, MSVCRT_size_t size, int radix)
 }
 
 /*********************************************************************
- *  _itow_s (MSVCRT.@)
+ *  _ltow_s (MSVCRT.@)
  */
-int CDECL _itow_s(int value, MSVCRT_wchar_t *str, MSVCRT_size_t size, int radix)
+int CDECL _ltow_s(MSVCRT_long value, MSVCRT_wchar_t *str, MSVCRT_size_t size, int radix)
 {
-    unsigned int val, digit;
+    MSVCRT_ulong val;
+    unsigned int digit;
     int is_negative;
     MSVCRT_wchar_t buffer[33], *pos;
     size_t len;
@@ -823,6 +865,22 @@ int CDECL _itow_s(int value, MSVCRT_wchar_t *str, MSVCRT_size_t size, int radix)
 }
 
 /*********************************************************************
+ *  _itoa_s (MSVCRT.@)
+ */
+int CDECL _itoa_s(int value, char *str, MSVCRT_size_t size, int radix)
+{
+    return _ltoa_s(value, str, size, radix);
+}
+
+/*********************************************************************
+ *  _itow_s (MSVCRT.@)
+ */
+int CDECL _itow_s(int value, MSVCRT_wchar_t *str, MSVCRT_size_t size, int radix)
+{
+    return _ltow_s(value, str, size, radix);
+}
+
+/*********************************************************************
  *  _ui64toa_s (MSVCRT.@)
  */
 int CDECL MSVCRT__ui64toa_s(unsigned __int64 value, char *str,
@@ -831,8 +889,8 @@ int CDECL MSVCRT__ui64toa_s(unsigned __int64 value, char *str,
     char buffer[65], *pos;
     int digit;
 
-    if(!str || radix<2 || radix>36) {
-        MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
+    if (!MSVCRT_CHECK_PMT(str != NULL) || !MSVCRT_CHECK_PMT(size > 0) ||
+        !MSVCRT_CHECK_PMT(radix>=2) || !MSVCRT_CHECK_PMT(radix<=36)) {
         *MSVCRT__errno() = MSVCRT_EINVAL;
         return MSVCRT_EINVAL;
     }
@@ -851,7 +909,7 @@ int CDECL MSVCRT__ui64toa_s(unsigned __int64 value, char *str,
     }while(value != 0);
 
     if(buffer-pos+65 > size) {
-        MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
+        MSVCRT_INVALID_PMT("str[size] is too small");
         *MSVCRT__errno() = MSVCRT_EINVAL;
         return MSVCRT_EINVAL;
     }
@@ -911,6 +969,162 @@ int CDECL _ultoa_s(MSVCRT_ulong value, char *str, MSVCRT_size_t size, int radix)
     }
 
     memcpy(str, pos, len);
+    return 0;
+}
+
+/*********************************************************************
+ *  _i64toa_s (MSVCRT.@)
+ */
+int CDECL _i64toa_s(__int64 value, char *str, MSVCRT_size_t size, int radix)
+{
+    unsigned __int64 val;
+    unsigned int digit;
+    int is_negative;
+    char buffer[65], *pos;
+    size_t len;
+
+    if (!MSVCRT_CHECK_PMT(str != NULL) || !MSVCRT_CHECK_PMT(size > 0) ||
+        !MSVCRT_CHECK_PMT(radix >= 2) || !MSVCRT_CHECK_PMT(radix <= 36))
+    {
+        if (str && size)
+            str[0] = '\0';
+
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    if (value < 0 && radix == 10)
+    {
+        is_negative = 1;
+        val = -value;
+    }
+    else
+    {
+        is_negative = 0;
+        val = value;
+    }
+
+    pos = buffer + 64;
+    *pos = '\0';
+
+    do
+    {
+        digit = val % radix;
+        val /= radix;
+
+        if (digit < 10)
+            *--pos = '0' + digit;
+        else
+            *--pos = 'a' + digit - 10;
+    }
+    while (val != 0);
+
+    if (is_negative)
+        *--pos = '-';
+
+    len = buffer + 65 - pos;
+    if (len > size)
+    {
+        size_t i;
+        char *p = str;
+
+        /* Copy the temporary buffer backwards up to the available number of
+         * characters. Don't copy the negative sign if present. */
+
+        if (is_negative)
+        {
+            p++;
+            size--;
+        }
+
+        for (pos = buffer + 63, i = 0; i < size; i++)
+            *p++ = *pos--;
+
+        str[0] = '\0';
+        MSVCRT_INVALID_PMT("str[size] is too small");
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return MSVCRT_ERANGE;
+    }
+
+    memcpy(str, pos, len);
+    return 0;
+}
+
+/*********************************************************************
+ *  _i64tow_s (MSVCRT.@)
+ */
+int CDECL _i64tow_s(__int64 value, MSVCRT_wchar_t *str, MSVCRT_size_t size, int radix)
+{
+    unsigned __int64 val;
+    unsigned int digit;
+    int is_negative;
+    MSVCRT_wchar_t buffer[65], *pos;
+    size_t len;
+
+    if (!MSVCRT_CHECK_PMT(str != NULL) || !MSVCRT_CHECK_PMT(size > 0) ||
+        !MSVCRT_CHECK_PMT(radix >= 2) || !MSVCRT_CHECK_PMT(radix <= 36))
+    {
+        if (str && size)
+            str[0] = '\0';
+
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    if (value < 0 && radix == 10)
+    {
+        is_negative = 1;
+        val = -value;
+    }
+    else
+    {
+        is_negative = 0;
+        val = value;
+    }
+
+    pos = buffer + 64;
+    *pos = '\0';
+
+    do
+    {
+        digit = val % radix;
+        val /= radix;
+
+        if (digit < 10)
+            *--pos = '0' + digit;
+        else
+            *--pos = 'a' + digit - 10;
+    }
+    while (val != 0);
+
+    if (is_negative)
+        *--pos = '-';
+
+    len = buffer + 65 - pos;
+    if (len > size)
+    {
+        size_t i;
+        MSVCRT_wchar_t *p = str;
+
+        /* Copy the temporary buffer backwards up to the available number of
+         * characters. Don't copy the negative sign if present. */
+
+        if (is_negative)
+        {
+            p++;
+            size--;
+        }
+
+        for (pos = buffer + 63, i = 0; i < size; i++)
+            *p++ = *pos--;
+
+        MSVCRT_INVALID_PMT("str[size] is too small");
+        str[0] = '\0';
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return MSVCRT_ERANGE;
+    }
+
+    memcpy(str, pos, len * sizeof(MSVCRT_wchar_t));
     return 0;
 }
 

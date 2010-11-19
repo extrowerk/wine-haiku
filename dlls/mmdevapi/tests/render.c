@@ -165,7 +165,9 @@ static void test_audioclient(IAudioClient *ac)
         ok(pwfx2 == NULL, "pwfx2 non-null on exclusive IsFormatSupported\n");
 
         hr = IAudioClient_IsFormatSupported(ac, 0xffffffff, pwfx, NULL);
-        ok(hr == E_INVALIDARG, "IsFormatSupported(0xffffffff) call returns %08x\n", hr);
+        ok(hr == E_INVALIDARG ||
+           hr == AUDCLNT_E_UNSUPPORTED_FORMAT,
+           "IsFormatSupported(0xffffffff) call returns %08x\n", hr);
     }
 
     test_uninitialized(ac);
@@ -208,8 +210,9 @@ static void test_audioclient(IAudioClient *ac)
 
     hr = IAudioClient_SetEventHandle(ac, handle);
     ok(hr == AUDCLNT_E_EVENTHANDLE_NOT_EXPECTED ||
-       hr == HRESULT_FROM_WIN32(ERROR_INVALID_NAME) ||
-       hr == HRESULT_FROM_WIN32(ERROR_BAD_PATHNAME) /* Some Vista */
+       broken(hr == HRESULT_FROM_WIN32(ERROR_INVALID_NAME)) ||
+       broken(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) /* Some 2k8 */ ||
+       broken(hr == HRESULT_FROM_WIN32(ERROR_BAD_PATHNAME)) /* Some Vista */
        , "SetEventHandle returns %08x\n", hr);
 
     hr = IAudioClient_Reset(ac);

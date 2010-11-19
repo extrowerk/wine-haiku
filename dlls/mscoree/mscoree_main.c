@@ -32,158 +32,38 @@
 #include "ole2.h"
 #include "ocidl.h"
 #include "shellapi.h"
+#include "xmldom.h"
+#include "xmldso.h"
 
 #include "initguid.h"
+#include "msxml2.h"
 #include "cor.h"
 #include "corerror.h"
 #include "mscoree.h"
+#include "fusion.h"
 #include "metahost.h"
+#include "wine/list.h"
 #include "mscoree_private.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL( mscoree );
 
-static BOOL find_mono_dll(LPCWSTR path, LPWSTR dll_path, int* abi_version)
+LONG dll_refs = 0;
+
+char *WtoA(LPCWSTR wstr)
 {
-    static const WCHAR mono_dll[] = {'\\','b','i','n','\\','m','o','n','o','.','d','l','l',0};
-    static const WCHAR libmono_dll[] = {'\\','b','i','n','\\','l','i','b','m','o','n','o','.','d','l','l',0};
-    DWORD attributes;
+    int length;
+    char *result;
 
-    strcpyW(dll_path, path);
-    strcatW(dll_path, mono_dll);
-    attributes = GetFileAttributesW(dll_path);
+    length = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
 
-    if (attributes == INVALID_FILE_ATTRIBUTES)
-    {
-        strcpyW(dll_path, path);
-        strcatW(dll_path, libmono_dll);
-        attributes = GetFileAttributesW(dll_path);
-    }
+    result = HeapAlloc(GetProcessHeap(), 0, length);
 
-    if (attributes != INVALID_FILE_ATTRIBUTES)
-    {
-        /* FIXME: Test for appropriate architecture. */
-        *abi_version = 1;
-        return TRUE;
-    }
+    if (result)
+        WideCharToMultiByte(CP_UTF8, 0, wstr, -1, result, length, NULL, NULL);
 
-    return FALSE;
-}
-
-static BOOL get_mono_path_from_registry(LPWSTR path)
-{
-    static const WCHAR mono_key[] = {'S','o','f','t','w','a','r','e','\\','N','o','v','e','l','l','\\','M','o','n','o',0};
-    static const WCHAR defaul_clr[] = {'D','e','f','a','u','l','t','C','L','R',0};
-    static const WCHAR install_root[] = {'S','d','k','I','n','s','t','a','l','l','R','o','o','t',0};
-    static const WCHAR slash[] = {'\\',0};
-
-    WCHAR version[64], version_key[MAX_PATH];
-    DWORD len;
-    HKEY key;
-    WCHAR dll_path[MAX_PATH];
-    int abi_version;
-
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, mono_key, 0, KEY_READ, &key))
-        return FALSE;
-
-    len = sizeof(version);
-    if (RegQueryValueExW(key, defaul_clr, 0, NULL, (LPBYTE)version, &len))
-    {
-        RegCloseKey(key);
-        return FALSE;
-    }
-    RegCloseKey(key);
-
-    lstrcpyW(version_key, mono_key);
-    lstrcatW(version_key, slash);
-    lstrcatW(version_key, version);
-
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, version_key, 0, KEY_READ, &key))
-        return FALSE;
-
-    len = sizeof(WCHAR) * MAX_PATH;
-    if (RegQueryValueExW(key, install_root, 0, NULL, (LPBYTE)path, &len))
-    {
-        RegCloseKey(key);
-        return FALSE;
-    }
-    RegCloseKey(key);
-
-    return find_mono_dll(path, dll_path, &abi_version);
-}
-
-static BOOL get_mono_path_from_folder(LPCWSTR folder, LPWSTR mono_path)
-{
-    static const WCHAR mono_one_dot_zero[] = {'\\','m','o','n','o','-','1','.','0', 0};
-    WCHAR mono_dll_path[MAX_PATH];
-    int abi_version;
-    BOOL found = FALSE;
-
-    strcpyW(mono_path, folder);
-    strcatW(mono_path, mono_one_dot_zero);
-
-    found = find_mono_dll(mono_path, mono_dll_path, &abi_version);
-
-    if (found && abi_version != 1)
-    {
-        ERR("found wrong ABI in %s\n", debugstr_w(mono_path));
-        found = FALSE;
-    }
-
-    return found;
-}
-
-static BOOL get_mono_path(LPWSTR path)
-{
-    static const WCHAR subdir_mono[] = {'\\','m','o','n','o',0};
-    static const WCHAR sibling_mono[] = {'\\','.','.','\\','m','o','n','o',0};
-    WCHAR base_path[MAX_PATH];
-    const char *unix_data_dir;
-    WCHAR *dos_data_dir;
-    int build_tree=0;
-    static WCHAR* (CDECL *wine_get_dos_file_name)(const char*);
-
-    /* First try c:\windows\mono */
-    GetWindowsDirectoryW(base_path, MAX_PATH);
-    strcatW(base_path, subdir_mono);
-
-    if (get_mono_path_from_folder(base_path, path))
-        return TRUE;
-
-    /* Next: /usr/share/wine/mono */
-    unix_data_dir = wine_get_data_dir();
-
-    if (!unix_data_dir)
-    {
-        unix_data_dir = wine_get_build_dir();
-        build_tree = 1;
-    }
-
-    if (unix_data_dir)
-    {
-        if (!wine_get_dos_file_name)
-            wine_get_dos_file_name = (void*)GetProcAddress(GetModuleHandleA("kernel32"), "wine_get_dos_file_name");
-
-        if (wine_get_dos_file_name)
-        {
-            dos_data_dir = wine_get_dos_file_name(unix_data_dir);
-
-            if (dos_data_dir)
-            {
-                strcpyW(base_path, dos_data_dir);
-                strcatW(base_path, build_tree ? sibling_mono : subdir_mono);
-
-                HeapFree(GetProcessHeap(), 0, dos_data_dir);
-
-                if (get_mono_path_from_folder(base_path, path))
-                    return TRUE;
-            }
-        }
-    }
-
-    /* Last: the registry */
-    return get_mono_path_from_registry(path);
+    return result;
 }
 
 static BOOL get_install_root(LPWSTR install_dir)
@@ -208,128 +88,30 @@ static BOOL get_install_root(LPWSTR install_dir)
     return TRUE;
 }
 
-static CRITICAL_SECTION mono_lib_cs;
-static CRITICAL_SECTION_DEBUG mono_lib_cs_debug =
-{
-    0, 0, &mono_lib_cs,
-    { &mono_lib_cs_debug.ProcessLocksList,
-      &mono_lib_cs_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": mono_lib_cs") }
-};
-static CRITICAL_SECTION mono_lib_cs = { &mono_lib_cs_debug, -1, 0, 0, 0, 0 };
-
-HMODULE mono_handle;
-
-void (*mono_config_parse)(const char *filename);
-MonoAssembly* (*mono_domain_assembly_open) (MonoDomain *domain, const char *name);
-void (*mono_jit_cleanup)(MonoDomain *domain);
-int (*mono_jit_exec)(MonoDomain *domain, MonoAssembly *assembly, int argc, char *argv[]);
-MonoDomain* (*mono_jit_init)(const char *file);
-int (*mono_jit_set_trace_options)(const char* options);
-void (*mono_set_dirs)(const char *assembly_dir, const char *config_dir);
-
-static void set_environment(LPCWSTR bin_path)
-{
-    WCHAR path_env[MAX_PATH];
-    int len;
-
-    static const WCHAR pathW[] = {'P','A','T','H',0};
-
-    /* We have to modify PATH as Mono loads other DLLs from this directory. */
-    GetEnvironmentVariableW(pathW, path_env, sizeof(path_env)/sizeof(WCHAR));
-    len = strlenW(path_env);
-    path_env[len++] = ';';
-    strcpyW(path_env+len, bin_path);
-    SetEnvironmentVariableW(pathW, path_env);
-}
-
-static HMODULE load_mono(void)
-{
-    static const WCHAR bin[] = {'\\','b','i','n',0};
-    static const WCHAR lib[] = {'\\','l','i','b',0};
-    static const WCHAR etc[] = {'\\','e','t','c',0};
-    HMODULE result;
-    WCHAR mono_path[MAX_PATH], mono_dll_path[MAX_PATH+16], mono_bin_path[MAX_PATH+4];
-    WCHAR mono_lib_path[MAX_PATH+4], mono_etc_path[MAX_PATH+4];
-    char mono_lib_path_a[MAX_PATH], mono_etc_path_a[MAX_PATH];
-    int abi_version;
-
-    EnterCriticalSection(&mono_lib_cs);
-
-    if (!mono_handle)
-    {
-        if (!get_mono_path(mono_path)) goto end;
-
-        strcpyW(mono_bin_path, mono_path);
-        strcatW(mono_bin_path, bin);
-        set_environment(mono_bin_path);
-
-        strcpyW(mono_lib_path, mono_path);
-        strcatW(mono_lib_path, lib);
-        WideCharToMultiByte(CP_UTF8, 0, mono_lib_path, -1, mono_lib_path_a, MAX_PATH, NULL, NULL);
-
-        strcpyW(mono_etc_path, mono_path);
-        strcatW(mono_etc_path, etc);
-        WideCharToMultiByte(CP_UTF8, 0, mono_etc_path, -1, mono_etc_path_a, MAX_PATH, NULL, NULL);
-
-        if (!find_mono_dll(mono_path, mono_dll_path, &abi_version)) goto end;
-
-        if (abi_version != 1) goto end;
-
-        mono_handle = LoadLibraryW(mono_dll_path);
-
-        if (!mono_handle) goto end;
-
-#define LOAD_MONO_FUNCTION(x) do { \
-    x = (void*)GetProcAddress(mono_handle, #x); \
-    if (!x) { \
-        mono_handle = NULL; \
-        goto end; \
-    } \
-} while (0);
-
-        LOAD_MONO_FUNCTION(mono_config_parse);
-        LOAD_MONO_FUNCTION(mono_domain_assembly_open);
-        LOAD_MONO_FUNCTION(mono_jit_cleanup);
-        LOAD_MONO_FUNCTION(mono_jit_exec);
-        LOAD_MONO_FUNCTION(mono_jit_init);
-        LOAD_MONO_FUNCTION(mono_jit_set_trace_options);
-        LOAD_MONO_FUNCTION(mono_set_dirs);
-
-#undef LOAD_MONO_FUNCTION
-
-        mono_set_dirs(mono_lib_path_a, mono_etc_path_a);
-
-        mono_config_parse(NULL);
-    }
-
-end:
-    result = mono_handle;
-
-    LeaveCriticalSection(&mono_lib_cs);
-
-    if (!result)
-        MESSAGE("wine: Install the Windows version of Mono to run .NET executables\n");
-
-    return result;
-}
-
 HRESULT WINAPI CorBindToRuntimeHost(LPCWSTR pwszVersion, LPCWSTR pwszBuildFlavor,
                                     LPCWSTR pwszHostConfigFile, VOID *pReserved,
                                     DWORD startupFlags, REFCLSID rclsid,
                                     REFIID riid, LPVOID *ppv)
 {
-    FIXME("(%s, %s, %s, %p, %d, %s, %s, %p): semi-stub!\n", debugstr_w(pwszVersion),
+    HRESULT ret;
+    ICLRRuntimeInfo *info;
+
+    TRACE("(%s, %s, %s, %p, %d, %s, %s, %p)\n", debugstr_w(pwszVersion),
           debugstr_w(pwszBuildFlavor), debugstr_w(pwszHostConfigFile), pReserved,
           startupFlags, debugstr_guid(rclsid), debugstr_guid(riid), ppv);
 
-    if (!get_mono_path(NULL))
+    *ppv = NULL;
+
+    ret = get_runtime_info(NULL, pwszVersion, pwszHostConfigFile, startupFlags, 0, TRUE, &info);
+
+    if (SUCCEEDED(ret))
     {
-        MESSAGE("wine: Install the Windows version of Mono to run .NET executables\n");
-        return E_FAIL;
+        ret = ICLRRuntimeInfo_GetInterface(info, rclsid, riid, ppv);
+
+        ICLRRuntimeInfo_Release(info);
     }
 
-    return S_OK;
+    return ret;
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
@@ -365,75 +147,6 @@ BOOL WINAPI _CorDllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     return TRUE;
 }
 
-static void get_utf8_args(int *argc, char ***argv)
-{
-    WCHAR **argvw;
-    int size=0, i;
-    char *current_arg;
-
-    argvw = CommandLineToArgvW(GetCommandLineW(), argc);
-
-    for (i=0; i<*argc; i++)
-    {
-        size += sizeof(char*);
-        size += WideCharToMultiByte(CP_UTF8, 0, argvw[i], -1, NULL, 0, NULL, NULL);
-    }
-    size += sizeof(char*);
-
-    *argv = HeapAlloc(GetProcessHeap(), 0, size);
-    current_arg = (char*)(*argv + *argc + 1);
-
-    for (i=0; i<*argc; i++)
-    {
-        (*argv)[i] = current_arg;
-        current_arg += WideCharToMultiByte(CP_UTF8, 0, argvw[i], -1, current_arg, size, NULL, NULL);
-    }
-
-    (*argv)[*argc] = NULL;
-
-    HeapFree(GetProcessHeap(), 0, argvw);
-}
-
-__int32 WINAPI _CorExeMain(void)
-{
-    int exit_code;
-    int trace_size;
-    char trace_setting[256];
-    int argc;
-    char **argv;
-    MonoDomain *domain;
-    MonoAssembly *assembly;
-    char filename[MAX_PATH];
-
-    if (!load_mono())
-    {
-        return -1;
-    }
-
-    get_utf8_args(&argc, &argv);
-
-    trace_size = GetEnvironmentVariableA("WINE_MONO_TRACE", trace_setting, sizeof(trace_setting));
-
-    if (trace_size)
-    {
-        mono_jit_set_trace_options(trace_setting);
-    }
-
-    GetModuleFileNameA(NULL, filename, MAX_PATH);
-
-    domain = mono_jit_init(filename);
-
-    assembly = mono_domain_assembly_open(domain, filename);
-
-    exit_code = mono_jit_exec(domain, assembly, argc, argv);
-
-    mono_jit_cleanup(domain);
-
-    HeapFree(GetProcessHeap(), 0, argv);
-
-    return exit_code;
-}
-
 __int32 WINAPI _CorExeMain2(PBYTE ptrMemory, DWORD cntMemory, LPWSTR imageName, LPWSTR loaderName, LPWSTR cmdLine)
 {
     TRACE("(%p, %u, %s, %s, %s)\n", ptrMemory, cntMemory, debugstr_w(imageName), debugstr_w(loaderName), debugstr_w(cmdLine));
@@ -460,56 +173,48 @@ HRESULT WINAPI _CorValidateImage(PVOID* imageBase, LPCWSTR imageName)
 
 HRESULT WINAPI GetCORSystemDirectory(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
 {
-    static const WCHAR slash[] = {'\\',0};
-    WCHAR system_dir[MAX_PATH];
-    WCHAR version[MAX_PATH];
+    ICLRRuntimeInfo *info;
+    HRESULT ret;
 
-    FIXME("(%p, %d, %p): semi-stub!\n", pbuffer, cchBuffer, dwLength);
-
-    if (!dwLength)
-        return E_POINTER;
-
-    if (!pbuffer)
-        return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
-
-    if (!get_install_root(system_dir))
-    {
-        ERR("error reading registry key for installroot, returning empty path\n");
-        *dwLength = 0;
-    }
-    else
-    {
-        GetCORVersion(version, MAX_PATH, dwLength);
-        lstrcatW(system_dir, version);
-        lstrcatW(system_dir, slash);
-        *dwLength = lstrlenW(system_dir) + 1;
-
-        if (cchBuffer < *dwLength)
-            return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
-
-        lstrcpyW(pbuffer, system_dir);
-    }
-
-    return S_OK;
-}
-
-HRESULT WINAPI GetCORVersion(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
-{
-    static const WCHAR version[] = {'v','2','.','0','.','5','0','7','2','7',0};
-
-    FIXME("(%p, %d, %p): semi-stub!\n", pbuffer, cchBuffer, dwLength);
+    TRACE("(%p, %d, %p)!\n", pbuffer, cchBuffer, dwLength);
 
     if (!dwLength || !pbuffer)
         return E_POINTER;
 
-    *dwLength = lstrlenW(version) + 1;
+    ret = get_runtime_info(NULL, NULL, NULL, 0, RUNTIME_INFO_UPGRADE_VERSION, TRUE, &info);
 
-    if (cchBuffer < *dwLength)
-        return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+    if (SUCCEEDED(ret))
+    {
+        *dwLength = cchBuffer;
+        ret = ICLRRuntimeInfo_GetRuntimeDirectory(info, pbuffer, dwLength);
 
-    lstrcpyW(pbuffer, version);
+        ICLRRuntimeInfo_Release(info);
+    }
 
-    return S_OK;
+    return ret;
+}
+
+HRESULT WINAPI GetCORVersion(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
+{
+    ICLRRuntimeInfo *info;
+    HRESULT ret;
+
+    TRACE("(%p, %d, %p)!\n", pbuffer, cchBuffer, dwLength);
+
+    if (!dwLength || !pbuffer)
+        return E_POINTER;
+
+    ret = get_runtime_info(NULL, NULL, NULL, 0, RUNTIME_INFO_UPGRADE_VERSION, TRUE, &info);
+
+    if (SUCCEEDED(ret))
+    {
+        *dwLength = cchBuffer;
+        ret = ICLRRuntimeInfo_GetVersionString(info, pbuffer, dwLength);
+
+        ICLRRuntimeInfo_Release(info);
+    }
+
+    return ret;
 }
 
 HRESULT WINAPI GetRequestedRuntimeInfo(LPCWSTR pExe, LPCWSTR pwszVersion, LPCWSTR pConfigurationFile,
@@ -636,16 +341,24 @@ HRESULT WINAPI LoadStringRC(UINT resId, LPWSTR pBuffer, int iBufLen, int bQuiet)
 HRESULT WINAPI CorBindToRuntimeEx(LPWSTR szVersion, LPWSTR szBuildFlavor, DWORD nflags, REFCLSID rslsid,
                                   REFIID riid, LPVOID *ppv)
 {
-    FIXME("%s %s %d %s %s %p\n", debugstr_w(szVersion), debugstr_w(szBuildFlavor), nflags, debugstr_guid( rslsid ),
+    HRESULT ret;
+    ICLRRuntimeInfo *info;
+
+    TRACE("%s %s %d %s %s %p\n", debugstr_w(szVersion), debugstr_w(szBuildFlavor), nflags, debugstr_guid( rslsid ),
           debugstr_guid( riid ), ppv);
 
-    if(IsEqualGUID( riid, &IID_ICorRuntimeHost ))
-    {
-        *ppv = create_corruntimehost();
-        return S_OK;
-    }
     *ppv = NULL;
-    return E_NOTIMPL;
+
+    ret = get_runtime_info(NULL, szVersion, NULL, nflags, 0, TRUE, &info);
+
+    if (SUCCEEDED(ret))
+    {
+        ret = ICLRRuntimeInfo_GetInterface(info, rslsid, riid, ppv);
+
+        ICLRRuntimeInfo_Release(info);
+    }
+
+    return ret;
 }
 
 HRESULT WINAPI CorBindToCurrentRuntime(LPCWSTR filename, REFCLSID rclsid, REFIID riid, LPVOID *ppv)
@@ -656,8 +369,37 @@ HRESULT WINAPI CorBindToCurrentRuntime(LPCWSTR filename, REFCLSID rclsid, REFIID
 
 STDAPI ClrCreateManagedInstance(LPCWSTR pTypeName, REFIID riid, void **ppObject)
 {
-    FIXME("(%s,%s,%p)\n", debugstr_w(pTypeName), debugstr_guid(riid), ppObject);
-    return E_NOTIMPL;
+    HRESULT ret;
+    ICLRRuntimeInfo *info;
+    RuntimeHost *host;
+    MonoObject *obj;
+    IUnknown *unk;
+
+    TRACE("(%s,%s,%p)\n", debugstr_w(pTypeName), debugstr_guid(riid), ppObject);
+
+    /* FIXME: How to determine which runtime version to use? */
+    ret = get_runtime_info(NULL, NULL, NULL, 0, RUNTIME_INFO_UPGRADE_VERSION, TRUE, &info);
+
+    if (SUCCEEDED(ret))
+    {
+        ret = ICLRRuntimeInfo_GetRuntimeHost(info, &host);
+
+        ICLRRuntimeInfo_Release(info);
+    }
+
+    if (SUCCEEDED(ret))
+        ret = RuntimeHost_CreateManagedInstance(host, pTypeName, NULL, &obj);
+
+    if (SUCCEEDED(ret))
+        ret = RuntimeHost_GetIUnknownForObject(host, obj, &unk);
+
+    if (SUCCEEDED(ret))
+    {
+        ret = IUnknown_QueryInterface(unk, riid, ppObject);
+        IUnknown_Release(unk);
+    }
+
+    return ret;
 }
 
 BOOL WINAPI StrongNameSignatureVerification(LPCWSTR filename, DWORD inFlags, DWORD* pOutFlags)
@@ -707,7 +449,10 @@ HRESULT WINAPI DllUnregisterServer(void)
 
 HRESULT WINAPI DllCanUnloadNow(VOID)
 {
-    return S_OK;
+    if (dll_refs)
+        return S_FALSE;
+    else
+        return S_OK;
 }
 
 INT WINAPI ND_RU1( const void *ptr, INT offset )

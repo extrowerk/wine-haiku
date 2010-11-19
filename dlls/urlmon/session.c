@@ -236,23 +236,22 @@ IInternetProtocolInfo *get_protocol_info(LPCWSTR url)
     return ret;
 }
 
-HRESULT get_protocol_handler(LPCWSTR url, CLSID *clsid, BOOL *urlmon_protocol, IClassFactory **ret)
+HRESULT get_protocol_handler(IUri *uri, CLSID *clsid, BOOL *urlmon_protocol, IClassFactory **ret)
 {
     name_space *ns;
-    WCHAR schema[64];
-    DWORD schema_len;
+    BSTR scheme;
     HRESULT hres;
 
     *ret = NULL;
 
-    hres = CoInternetParseUrl(url, PARSE_SCHEMA, 0, schema, sizeof(schema)/sizeof(schema[0]),
-            &schema_len, 0);
-    if(FAILED(hres) || !schema_len)
-        return schema_len ? hres : MK_E_SYNTAX;
+    /* FIXME: Avoid GetSchemeName call for known schemes */
+    hres = IUri_GetSchemeName(uri, &scheme);
+    if(FAILED(hres))
+        return hres;
 
     EnterCriticalSection(&session_cs);
 
-    ns = find_name_space(schema);
+    ns = find_name_space(scheme);
     if(ns) {
         *ret = ns->cf;
         IClassFactory_AddRef(*ret);
@@ -264,12 +263,16 @@ HRESULT get_protocol_handler(LPCWSTR url, CLSID *clsid, BOOL *urlmon_protocol, I
 
     LeaveCriticalSection(&session_cs);
 
-    if(*ret)
-        return S_OK;
+    if(*ret) {
+        hres = S_OK;
+    }else {
+        if(urlmon_protocol)
+            *urlmon_protocol = FALSE;
+        hres = get_protocol_cf(scheme, SysStringLen(scheme), clsid, ret);
+    }
 
-    if(urlmon_protocol)
-        *urlmon_protocol = FALSE;
-    return get_protocol_cf(schema, schema_len, clsid, ret);
+    SysFreeString(scheme);
+    return hres;
 }
 
 IInternetProtocol *get_mime_filter(LPCWSTR mime)
@@ -421,13 +424,21 @@ static HRESULT WINAPI InternetSession_CreateBinding(IInternetSession *iface,
         LPBC pBC, LPCWSTR szUrl, IUnknown *pUnkOuter, IUnknown **ppUnk,
         IInternetProtocol **ppOInetProt, DWORD dwOption)
 {
+    IInternetProtocolEx *protocol;
+    HRESULT hres;
+
     TRACE("(%p %s %p %p %p %08x)\n", pBC, debugstr_w(szUrl), pUnkOuter, ppUnk,
             ppOInetProt, dwOption);
 
     if(pBC || pUnkOuter || ppUnk || dwOption)
         FIXME("Unsupported arguments\n");
 
-    return create_binding_protocol(szUrl, FALSE, ppOInetProt);
+    hres = create_binding_protocol(FALSE, &protocol);
+    if(FAILED(hres))
+        return hres;
+
+    *ppOInetProt = (IInternetProtocol*)protocol;
+    return S_OK;
 }
 
 static HRESULT WINAPI InternetSession_SetSessionOption(IInternetSession *iface,

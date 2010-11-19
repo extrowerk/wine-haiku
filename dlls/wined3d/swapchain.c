@@ -154,7 +154,7 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
         context2 = context_acquire(This->device, This->back_buffers[0]);
         context_apply_blit_state(context2, device);
 
-        if(backbuffer->Flags & SFLAG_NORMCOORD)
+        if (backbuffer->flags & SFLAG_NORMCOORD)
         {
             tex_left /= src_w;
             tex_right /= src_w;
@@ -273,7 +273,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         cursor.pow2Width = cursor.currentDesc.Width;
         cursor.pow2Height = cursor.currentDesc.Height;
         /* The surface is in the texture */
-        cursor.Flags |= SFLAG_INTEXTURE;
+        cursor.flags |= SFLAG_INTEXTURE;
         /* DDBLT_KEYSRC will cause BltOverride to enable the alpha test with GL_NOTEQUAL, 0.0,
          * which is exactly what we want :-)
          */
@@ -394,8 +394,8 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
                 WINED3DCLEAR_TARGET, 0xff00ffff, 1.0f, 0);
     }
 
-    if (!This->render_to_fbo && ((This->front_buffer->Flags & SFLAG_INSYSMEM)
-            || (This->back_buffers[0]->Flags & SFLAG_INSYSMEM)))
+    if (!This->render_to_fbo && ((This->front_buffer->flags & SFLAG_INSYSMEM)
+            || (This->back_buffers[0]->flags & SFLAG_INSYSMEM)))
     {
         /* Both memory copies of the surfaces are ok, flip them around too instead of dirtifying
          * Doesn't work with render_to_fbo because we're not flipping
@@ -409,11 +409,10 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
 
             /* Tell the front buffer surface that is has been modified. However,
              * the other locations were preserved during that, so keep the flags.
-             * This serves to update the emulated overlay, if any
-             */
-            fbflags = front->Flags;
+             * This serves to update the emulated overlay, if any. */
+            fbflags = front->flags;
             surface_modify_location(front, SFLAG_INDRAWABLE, TRUE);
-            front->Flags = fbflags;
+            front->flags = fbflags;
         }
         else
         {
@@ -438,7 +437,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
     if (This->device->depth_stencil)
     {
         if (This->presentParms.Flags & WINED3DPRESENTFLAG_DISCARD_DEPTHSTENCIL
-                || This->device->depth_stencil->Flags & SFLAG_DISCARD)
+                || This->device->depth_stencil->flags & SFLAG_DISCARD)
         {
             surface_modify_ds_location(This->device->depth_stencil, SFLAG_DS_DISCARDED,
                     This->device->depth_stencil->currentDesc.Width,
@@ -532,94 +531,6 @@ static const IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl =
     IWineD3DBaseSwapChainImpl_GetGammaRamp
 };
 
-static LONG fullscreen_style(LONG style)
-{
-    /* Make sure the window is managed, otherwise we won't get keyboard input. */
-    style |= WS_POPUP | WS_SYSMENU;
-    style &= ~(WS_CAPTION | WS_THICKFRAME);
-
-    return style;
-}
-
-static LONG fullscreen_exstyle(LONG exstyle)
-{
-    /* Filter out window decorations. */
-    exstyle &= ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE);
-
-    return exstyle;
-}
-
-void swapchain_setup_fullscreen_window(IWineD3DSwapChainImpl *swapchain, UINT w, UINT h)
-{
-    IWineD3DDeviceImpl *device = swapchain->device;
-    HWND window = swapchain->device_window;
-    BOOL filter_messages;
-    LONG style, exstyle;
-
-    TRACE("Setting up window %p for fullscreen mode.\n", window);
-
-    if (device->style || device->exStyle)
-    {
-        ERR("Changing the window style for window %p, but another style (%08x, %08x) is already stored.\n",
-                window, device->style, device->exStyle);
-    }
-
-    device->style = GetWindowLongW(window, GWL_STYLE);
-    device->exStyle = GetWindowLongW(window, GWL_EXSTYLE);
-
-    style = fullscreen_style(device->style);
-    exstyle = fullscreen_exstyle(device->exStyle);
-
-    TRACE("Old style was %08x, %08x, setting to %08x, %08x.\n",
-            device->style, device->exStyle, style, exstyle);
-
-    filter_messages = device->filter_messages;
-    device->filter_messages = TRUE;
-
-    SetWindowLongW(window, GWL_STYLE, style);
-    SetWindowLongW(window, GWL_EXSTYLE, exstyle);
-    SetWindowPos(window, HWND_TOP, 0, 0, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
-
-    device->filter_messages = filter_messages;
-}
-
-void swapchain_restore_fullscreen_window(IWineD3DSwapChainImpl *swapchain)
-{
-    IWineD3DDeviceImpl *device = swapchain->device;
-    HWND window = swapchain->device_window;
-    BOOL filter_messages;
-    LONG style, exstyle;
-
-    if (!device->style && !device->exStyle) return;
-
-    TRACE("Restoring window style of window %p to %08x, %08x.\n",
-            window, device->style, device->exStyle);
-
-    style = GetWindowLongW(window, GWL_STYLE);
-    exstyle = GetWindowLongW(window, GWL_EXSTYLE);
-
-    filter_messages = device->filter_messages;
-    device->filter_messages = TRUE;
-
-    /* Only restore the style if the application didn't modify it during the
-     * fullscreen phase. Some applications change it before calling Reset()
-     * when switching between windowed and fullscreen modes (HL2), some
-     * depend on the original style (Eve Online). */
-    if (style == fullscreen_style(device->style) && exstyle == fullscreen_exstyle(device->exStyle))
-    {
-        SetWindowLongW(window, GWL_STYLE, device->style);
-        SetWindowLongW(window, GWL_EXSTYLE, device->exStyle);
-    }
-    SetWindowPos(window, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-
-    device->filter_messages = filter_messages;
-
-    /* Delete the old values. */
-    device->style = 0;
-    device->exStyle = 0;
-}
-
-
 /* Do not call while under the GL lock. */
 HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface_type,
         IWineD3DDeviceImpl *device, WINED3DPRESENT_PARAMETERS *present_parameters, void *parent)
@@ -668,12 +579,6 @@ HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface
     swapchain->ref = 1;
     swapchain->win_handle = window;
     swapchain->device_window = window;
-
-    if (!present_parameters->Windowed && window)
-    {
-        swapchain_setup_fullscreen_window(swapchain, present_parameters->BackBufferWidth,
-                present_parameters->BackBufferHeight);
-    }
 
     IWineD3D_GetAdapterDisplayMode(device->wined3d, adapter->ordinal, &mode);
     swapchain->orig_width = mode.Width;

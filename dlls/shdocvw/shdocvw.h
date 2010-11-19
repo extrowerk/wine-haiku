@@ -59,7 +59,7 @@ typedef struct ConnectionPoint ConnectionPoint;
 typedef struct DocHost DocHost;
 
 typedef struct {
-    const IConnectionPointContainerVtbl *lpConnectionPointContainerVtbl;
+    IConnectionPointContainer IConnectionPointContainer_iface;
 
     ConnectionPoint *wbe2;
     ConnectionPoint *wbe;
@@ -69,8 +69,8 @@ typedef struct {
 } ConnectionPointContainer;
 
 typedef struct {
-    const IHlinkFrameVtbl    *lpIHlinkFrameVtbl;
-    const ITargetFrame2Vtbl  *lpITargetFrame2Vtbl;
+    IHlinkFrame    IHlinkFrame_iface;
+    ITargetFrame2  ITargetFrame2_iface;
 
     IUnknown *outer;
     DocHost *doc_host;
@@ -89,20 +89,22 @@ typedef struct _IDocHostContainerVtbl
     void (WINAPI* GetDocObjRect)(DocHost*,RECT*);
     HRESULT (WINAPI* SetStatusText)(DocHost*,LPCWSTR);
     void (WINAPI* SetURL)(DocHost*,LPCWSTR);
+    HRESULT (*exec)(DocHost*,const GUID*,DWORD,DWORD,VARIANT*,VARIANT*);
 } IDocHostContainerVtbl;
 
 struct DocHost {
-    const IOleClientSiteVtbl      *lpOleClientSiteVtbl;
-    const IOleInPlaceSiteVtbl     *lpOleInPlaceSiteVtbl;
-    const IDocHostUIHandler2Vtbl  *lpDocHostUIHandlerVtbl;
-    const IOleDocumentSiteVtbl    *lpOleDocumentSiteVtbl;
-    const IOleCommandTargetVtbl   *lpOleCommandTargetVtbl;
-    const IDispatchVtbl           *lpDispatchVtbl;
-    const IPropertyNotifySinkVtbl *lpIPropertyNotifySinkVtbl;
-    const IServiceProviderVtbl    *lpServiceProviderVtbl;
+    IOleClientSite      IOleClientSite_iface;
+    IOleInPlaceSite     IOleInPlaceSite_iface;
+    IDocHostUIHandler2  IDocHostUIHandler2_iface;
+    IOleDocumentSite    IOleDocumentSite_iface;
+    IOleControlSite     IOleControlSite_iface;
+    IOleCommandTarget   IOleCommandTarget_iface;
+    IDispatch           IDispatch_iface;
+    IPropertyNotifySink IPropertyNotifySink_iface;
+    IServiceProvider    IServiceProvider_iface;
 
     /* Interfaces of InPlaceFrame object */
-    const IOleInPlaceFrameVtbl          *lpOleInPlaceFrameVtbl;
+    IOleInPlaceFrame  IOleInPlaceFrame_iface;
 
     IDispatch *disp;
 
@@ -134,21 +136,19 @@ struct DocHost {
 };
 
 struct WebBrowser {
-    /* Interfaces available via WebBrowser object */
-
-    const IWebBrowser2Vtbl              *lpWebBrowser2Vtbl;
-    const IOleObjectVtbl                *lpOleObjectVtbl;
-    const IOleInPlaceObjectVtbl         *lpOleInPlaceObjectVtbl;
-    const IOleControlVtbl               *lpOleControlVtbl;
-    const IPersistStorageVtbl           *lpPersistStorageVtbl;
-    const IPersistMemoryVtbl            *lpPersistMemoryVtbl;
-    const IPersistStreamInitVtbl        *lpPersistStreamInitVtbl;
-    const IProvideClassInfo2Vtbl        *lpProvideClassInfoVtbl;
-    const IViewObject2Vtbl              *lpViewObjectVtbl;
-    const IOleInPlaceActiveObjectVtbl   *lpOleInPlaceActiveObjectVtbl;
-    const IOleCommandTargetVtbl         *lpOleCommandTargetVtbl;
-    const IServiceProviderVtbl          *lpServiceProviderVtbl;
-    const IDataObjectVtbl               *lpDataObjectVtbl;
+    IWebBrowser2             IWebBrowser2_iface;
+    IOleObject               IOleObject_iface;
+    IOleInPlaceObject        IOleInPlaceObject_iface;
+    IOleControl              IOleControl_iface;
+    IPersistStorage          IPersistStorage_iface;
+    IPersistMemory           IPersistMemory_iface;
+    IPersistStreamInit       IPersistStreamInit_iface;
+    IProvideClassInfo2       IProvideClassInfo2_iface;
+    IViewObject2             IViewObject2_iface;
+    IOleInPlaceActiveObject  IOleInPlaceActiveObject_iface;
+    IOleCommandTarget        IOleCommandTarget_iface;
+    IServiceProvider         IServiceProvider_iface;
+    IDataObject              IDataObject_iface;
     HlinkFrame hlink_frame;
 
     LONG ref;
@@ -183,7 +183,7 @@ struct WebBrowser {
 };
 
 struct InternetExplorer {
-    const IWebBrowser2Vtbl *lpWebBrowser2Vtbl;
+    IWebBrowser2 IWebBrowser2_iface;
     HlinkFrame hlink_frame;
 
     LONG ref;
@@ -195,39 +195,8 @@ struct InternetExplorer {
     DocHost doc_host;
 };
 
-#define WEBBROWSER(x)   ((IWebBrowser*)                 &(x)->lpWebBrowser2Vtbl)
-#define WEBBROWSER2(x)  ((IWebBrowser2*)                &(x)->lpWebBrowser2Vtbl)
-#define OLEOBJ(x)       ((IOleObject*)                  &(x)->lpOleObjectVtbl)
-#define INPLACEOBJ(x)   ((IOleInPlaceObject*)           &(x)->lpOleInPlaceObjectVtbl)
-#define CONTROL(x)      ((IOleControl*)                 &(x)->lpOleControlVtbl)
-#define PERSTORAGE(x)   ((IPersistStorage*)             &(x)->lpPersistStorageVtbl)
-#define PERMEMORY(x)    ((IPersistMemory*)              &(x)->lpPersistMemoryVtbl)
-#define PERSTRINIT(x)   ((IPersistStreamInit*)          &(x)->lpPersistStreamInitVtbl)
-#define CLASSINFO(x)    ((IProvideClassInfo2*)          &(x)->lpProvideClassInfoVtbl)
-#define CONPTCONT(x)    ((IConnectionPointContainer*)   &(x)->lpConnectionPointContainerVtbl)
-#define VIEWOBJ(x)      ((IViewObject*)                 &(x)->lpViewObjectVtbl);
-#define VIEWOBJ2(x)     ((IViewObject2*)                &(x)->lpViewObjectVtbl);
-#define ACTIVEOBJ(x)    ((IOleInPlaceActiveObject*)     &(x)->lpOleInPlaceActiveObjectVtbl)
-#define OLECMD(x)       ((IOleCommandTarget*)           &(x)->lpOleCommandTargetVtbl)
-#define DATAOBJECT(x)   ((IDataObject*)                 &(x)->lpDataObjectVtbl)
-
-#define CLIENTSITE(x)   ((IOleClientSite*)              &(x)->lpOleClientSiteVtbl)
-#define INPLACESITE(x)  ((IOleInPlaceSite*)             &(x)->lpOleInPlaceSiteVtbl)
-#define DOCHOSTUI(x)    ((IDocHostUIHandler*)           &(x)->lpDocHostUIHandlerVtbl)
-#define DOCHOSTUI2(x)   ((IDocHostUIHandler2*)          &(x)->lpDocHostUIHandlerVtbl)
-#define DOCSITE(x)      ((IOleDocumentSite*)            &(x)->lpOleDocumentSiteVtbl)
-#define CLDISP(x)       ((IDispatch*)                   &(x)->lpDispatchVtbl)
-#define PROPNOTIF(x)    ((IPropertyNotifySink*)         &(x)->lpIPropertyNotifySinkVtbl)
-#define SERVPROV(x)     ((IServiceProvider*)            &(x)->lpServiceProviderVtbl)
-
-#define INPLACEFRAME(x) ((IOleInPlaceFrame*)            &(x)->lpOleInPlaceFrameVtbl)
-
-#define HLINKFRAME(x)   ((IHlinkFrame*)                 &(x)->lpIHlinkFrameVtbl)
-#define TARGETFRAME2(x) ((ITargetFrame2*)               &(x)->lpITargetFrame2Vtbl)
-
 void WebBrowser_OleObject_Init(WebBrowser*);
 void WebBrowser_ViewObject_Init(WebBrowser*);
-void WebBrowser_DataObject_Init(WebBrowser*);
 void WebBrowser_Persist_Init(WebBrowser*);
 void WebBrowser_ClassInfo_Init(WebBrowser*);
 
@@ -270,9 +239,6 @@ HRESULT CUrlHistory_Create(IUnknown*,REFIID,void**);
 HRESULT InternetShortcut_Create(IUnknown*,REFIID,void**);
 
 HRESULT TaskbarList_Create(IUnknown*,REFIID,void**);
-
-#define DEFINE_THIS2(cls,ifc,iface) ((cls*)((BYTE*)(iface)-offsetof(cls,ifc)))
-#define DEFINE_THIS(cls,ifc,iface) DEFINE_THIS2(cls,lp ## ifc ## Vtbl,iface)
 
 /**********************************************************************
  * Dll lifetime tracking declaration for shdocvw.dll

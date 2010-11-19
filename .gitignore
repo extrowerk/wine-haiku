@@ -43,7 +43,6 @@ dlls/actxprxy/actxprxy_urlhist.h
 dlls/actxprxy/actxprxy_urlhist_p.c
 dlls/advapi32/svcctl.h
 dlls/advapi32/svcctl_c.c
-dlls/atl/atliface.h
 dlls/d3dcompiler_43/asmshader.tab.c
 dlls/d3dcompiler_43/asmshader.tab.h
 dlls/d3dcompiler_43/asmshader.yy.c
@@ -95,6 +94,7 @@ dlls/msxml3/msxml3_v1.tlb
 dlls/msxml3/xslpattern.tab.c
 dlls/msxml3/xslpattern.tab.h
 dlls/msxml3/xslpattern.yy.c
+dlls/msxml6/msxml6_tlb.tlb
 dlls/ole32/dcom.h
 dlls/ole32/dcom_p.c
 dlls/ole32/irot.h
@@ -134,6 +134,7 @@ dlls/rpcrt4/tests/server.h
 dlls/rpcrt4/tests/server_c.c
 dlls/rpcrt4/tests/server_s.c
 dlls/shdocvw/shdocvw_v1.tlb
+dlls/shell32/AUTHORS
 dlls/stdole2.tlb/std_ole_v2.tlb
 dlls/stdole32.tlb/std_ole_v1.tlb
 dlls/sti/sti_wia.h
@@ -148,6 +149,7 @@ include/activscp.h
 include/amstream.h
 include/amvideo.h
 include/asptlb.h
+include/atliface.h
 include/audioclient.h
 include/audiopolicy.h
 include/austream.h
@@ -157,6 +159,7 @@ include/comcat.h
 include/commoncontrols.h
 include/config.h
 include/control.h
+include/cor.h
 include/ctfutb.h
 include/ctxtcall.h
 include/d3d10.h
@@ -257,6 +260,7 @@ loader/wine.fr.man
 loader/wine.man
 loader/wine64
 programs/Makeprog.rules
+programs/msiexec/msiexec.man
 programs/rpcss/epm.h
 programs/rpcss/epm_s.c
 programs/rpcss/irot.h

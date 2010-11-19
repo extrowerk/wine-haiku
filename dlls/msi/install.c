@@ -549,16 +549,16 @@ UINT MSI_SetTargetPathW(MSIPACKAGE *package, LPCWSTR szFolder,
         LIST_FOR_EACH_ENTRY( file, &package->files, MSIFILE, entry )
         {
             MSICOMPONENT *comp = file->Component;
-            LPWSTR p;
+            LPWSTR dir;
 
-            if (!comp)
+            if (!comp->Enabled || (comp->assembly && !comp->assembly->application))
                 continue;
 
-            p = resolve_folder(package, comp->Directory, FALSE, FALSE, FALSE, NULL);
+            dir = resolve_folder(package, comp->Directory, FALSE, FALSE, FALSE, NULL);
             msi_free(file->TargetPath);
 
-            file->TargetPath = build_directory_name(2, p, file->FileName);
-            msi_free(p);
+            file->TargetPath = build_directory_name(2, dir, file->FileName);
+            msi_free(dir);
         }
     }
     msi_free(path);
@@ -821,7 +821,7 @@ UINT WINAPI MSI_SetFeatureStateW(MSIPACKAGE* package, LPCWSTR szFeature,
         feature->Attributes & msidbFeatureAttributesDisallowAdvertise)
         return ERROR_FUNCTION_FAILED;
 
-    msi_feature_set_state(package, feature, iState);
+    feature->ActionRequest = iState;
 
     ACTION_UpdateComponentStates(package,szFeature);
 
@@ -917,9 +917,9 @@ UINT MSI_GetFeatureStateW(MSIPACKAGE *package, LPCWSTR szFeature,
         *piInstalled = feature->Installed;
 
     if (piAction)
-        *piAction = feature->Action;
+        *piAction = feature->ActionRequest;
 
-    TRACE("returning %i %i\n", feature->Installed, feature->Action);
+    TRACE("returning %i %i\n", feature->Installed, feature->ActionRequest);
 
     return ERROR_SUCCESS;
 }

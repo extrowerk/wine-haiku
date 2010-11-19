@@ -36,9 +36,11 @@ typedef struct {
     HTMLElement element;
 
     const IHTMLObjectElementVtbl *lpIHTMLObjectElementVtbl;
+
+    nsIDOMHTMLObjectElement *nsobject;
 } HTMLObjectElement;
 
-#define HTMLOBJECT(x)  (&(x)->lpIHTMLObjectElementVtbl)
+#define HTMLOBJECT(x)  ((IHTMLObjectElement*)  &(x)->lpIHTMLObjectElementVtbl)
 
 #define HTMLOBJECT_THIS(iface) DEFINE_THIS(HTMLObjectElement, IHTMLObjectElement, iface)
 
@@ -314,8 +316,19 @@ static HRESULT WINAPI HTMLObjectElement_put_vspace(IHTMLObjectElement *iface, LO
 static HRESULT WINAPI HTMLObjectElement_get_vspace(IHTMLObjectElement *iface, LONG *p)
 {
     HTMLObjectElement *This = HTMLOBJECT_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    PRInt32 vspace;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsres = nsIDOMHTMLObjectElement_GetVspace(This->nsobject, &vspace);
+    if(NS_FAILED(nsres)) {
+        ERR("GetVspace failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    *p = vspace;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLObjectElement_put_hspace(IHTMLObjectElement *iface, LONG v)
@@ -405,14 +418,31 @@ static void HTMLObjectElement_destructor(HTMLDOMNode *iface)
 {
     HTMLObjectElement *This = HTMLOBJECT_NODE_THIS(iface);
 
+    if(This->nsobject)
+        nsIDOMHTMLObjectElement_Release(This->nsobject);
+
     HTMLElement_destructor(&This->element.node);
+}
+
+static HRESULT HTMLObjectElement_get_readystate(HTMLDOMNode *iface, BSTR *p)
+{
+    HTMLObjectElement *This = HTMLOBJECT_NODE_THIS(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
 }
 
 #undef HTMLOBJECT_NODE_THIS
 
 static const NodeImplVtbl HTMLObjectElementImplVtbl = {
     HTMLObjectElement_QI,
-    HTMLObjectElement_destructor
+    HTMLObjectElement_destructor,
+    HTMLElement_clone,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    HTMLObjectElement_get_readystate
 };
 
 static const tid_t HTMLObjectElement_iface_tids[] = {
@@ -430,10 +460,16 @@ static dispex_static_data_t HTMLObjectElement_dispex = {
 HTMLElement *HTMLObjectElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem)
 {
     HTMLObjectElement *ret = heap_alloc_zero(sizeof(*ret));
+    nsresult nsres;
 
     ret->lpIHTMLObjectElementVtbl = &HTMLObjectElementVtbl;
     ret->element.node.vtbl = &HTMLObjectElementImplVtbl;
 
     HTMLElement_Init(&ret->element, doc, nselem, &HTMLObjectElement_dispex);
+
+    nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLObjectElement, (void**)&ret->nsobject);
+    if(NS_FAILED(nsres))
+        ERR("Could not get nsIDOMHTMLObjectElement iface: %08x\n", nsres);
+
     return &ret->element;
 }

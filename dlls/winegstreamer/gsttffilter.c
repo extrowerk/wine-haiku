@@ -141,8 +141,8 @@ static HRESULT WINAPI Gstreamer_transform_DecideBufferSize(TransformFilter *tf, 
 
     ppropInputRequest->cbBuffer = This->cbBuffer;
 
-    if (!ppropInputRequest->cBuffers)
-        ppropInputRequest->cBuffers = 1;
+    if (ppropInputRequest->cBuffers < 2)
+        ppropInputRequest->cBuffers = 2;
 
     return IMemAllocator_SetProperties(pAlloc, ppropInputRequest, &actual);
 }
@@ -166,6 +166,14 @@ static GstFlowReturn got_data(GstPad *pad, GstBuffer *buf) {
     }
     else
         IMediaSample_SetTime(sample, NULL, NULL);
+    if (GST_BUFFER_OFFSET_IS_VALID(buf) &&
+        GST_BUFFER_OFFSET_END_IS_VALID(buf)) {
+        tStart = buf->offset / 100;
+        tStop = buf->offset_end / 100;
+        IMediaSample_SetMediaTime(sample, &tStart, &tStop);
+    }
+    else
+        IMediaSample_SetMediaTime(sample, NULL, NULL);
 
     IMediaSample_SetDiscontinuity(sample, GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_DISCONT));
     IMediaSample_SetPreroll(sample, GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_PREROLL));
@@ -232,6 +240,10 @@ static HRESULT WINAPI Gstreamer_transform_ProcessData(TransformFilter *iface, IM
         if (hr == S_OK)
             buf->duration = (tStop - tStart)*100;
     }
+    if (IMediaSample_GetMediaTime(sample, &tStart, &tStop) == S_OK) {
+        buf->offset = tStart * 100;
+        buf->offset_end = tStop * 100;
+    }
     if (IMediaSample_IsDiscontinuity(sample) == S_OK)
         GST_BUFFER_FLAG_SET(buf, GST_BUFFER_FLAG_DISCONT);
     if (IMediaSample_IsPreroll(sample) == S_OK)
@@ -255,7 +267,9 @@ static HRESULT WINAPI Gstreamer_transform_ProcessEnd(TransformFilter *iface) {
     GstTfImpl *This = (GstTfImpl*)iface;
     int ret;
 
-    ret = gst_element_set_state(This->filter, GST_STATE_PAUSED);
+    LeaveCriticalSection(&This->tf.filter.csFilter);
+    ret = gst_element_set_state(This->filter, GST_STATE_READY);
+    EnterCriticalSection(&This->tf.filter.csFilter);
     TRACE("Returned: %i\n", ret);
     return S_OK;
 }
@@ -417,8 +431,14 @@ static HRESULT WINAPI Gstreamer_transform_NewSegment(TransformFilter *iface, REF
     TRACE("%p\n", This);
 
     gst_pad_push_event(This->my_src, gst_event_new_new_segment_full(1,
-                       1.0, dRate, GST_FORMAT_TIME, tStart*100, tStop <= tStart ? -1 : tStop * 100, tStart*100));
+                       1.0, dRate, GST_FORMAT_TIME, 0, tStop <= tStart ? -1 : tStop * 100, tStart*100));
     return S_OK;
+}
+
+static HRESULT WINAPI Gstreamer_transform_QOS(TransformFilter *iface, IBaseFilter *sender, Quality qm) {
+    GstTfImpl *This = (GstTfImpl*)iface;
+    gst_pad_push_event(This->my_sink, gst_event_new_qos(1000. / qm.Proportion, qm.Late * 100, qm.TimeStamp * 100));
+    return QualityControlImpl_Notify((IQualityControl*)&iface->qcimpl, sender, qm);
 }
 
 static HRESULT Gstreamer_transform_create(IUnknown *punkout, const CLSID *clsid, const char *name, const TransformFilterFuncTable *vtbl, void **obj)
@@ -544,7 +564,8 @@ static const TransformFilterFuncTable Gstreamer_Mp3_vtbl = {
     Gstreamer_transform_EndOfStream,
     Gstreamer_transform_BeginFlush,
     Gstreamer_transform_EndFlush,
-    Gstreamer_transform_NewSegment
+    Gstreamer_transform_NewSegment,
+    Gstreamer_transform_QOS
 };
 
 IUnknown * CALLBACK Gstreamer_Mp3_create(IUnknown *punkout, HRESULT *phr)
@@ -675,7 +696,8 @@ static const TransformFilterFuncTable Gstreamer_YUV_vtbl = {
     Gstreamer_transform_EndOfStream,
     Gstreamer_transform_BeginFlush,
     Gstreamer_transform_EndFlush,
-    Gstreamer_transform_NewSegment
+    Gstreamer_transform_NewSegment,
+    Gstreamer_transform_QOS
 };
 
 IUnknown * CALLBACK Gstreamer_YUV_create(IUnknown *punkout, HRESULT *phr)
@@ -788,7 +810,8 @@ static const TransformFilterFuncTable Gstreamer_AudioConvert_vtbl = {
     Gstreamer_transform_EndOfStream,
     Gstreamer_transform_BeginFlush,
     Gstreamer_transform_EndFlush,
-    Gstreamer_transform_NewSegment
+    Gstreamer_transform_NewSegment,
+    Gstreamer_transform_QOS
 };
 
 IUnknown * CALLBACK Gstreamer_AudioConvert_create(IUnknown *punkout, HRESULT *phr)

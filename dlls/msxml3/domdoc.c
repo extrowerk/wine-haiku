@@ -70,11 +70,13 @@ static const WCHAR PropertyNewParserW[] = {'N','e','w','P','a','r','s','e','r',0
 static const WCHAR PropValueXPathW[] = {'X','P','a','t','h',0};
 static const WCHAR PropValueXSLPatternW[] = {'X','S','L','P','a','t','t','e','r','n',0};
 
-/* Data used by domdoc_getProperty()/domdoc_setProperty().
+/* Anything that passes the test_get_ownerDocument()
+ * tests can go here (data shared between all instances).
  * We need to preserve this when reloading a document,
  * and also need access to it from the libxml backend. */
 typedef struct _domdoc_properties {
     VARIANT_BOOL preserving;
+    IXMLDOMSchemaCollection2* schemaCache;
     struct list selectNsList;
     xmlChar const* selectNsStr;
     LONG selectNsStr_len;
@@ -116,7 +118,6 @@ struct domdoc
     VARIANT_BOOL validating;
     VARIANT_BOOL resolving;
     domdoc_properties* properties;
-    IXMLDOMSchemaCollection2* schema;
     bsc_t *bsc;
     HRESULT error;
 
@@ -245,15 +246,19 @@ static domdoc_properties * create_properties(const GUID *clsid)
 
     list_init( &properties->selectNsList );
     properties->preserving = VARIANT_FALSE;
+    properties->schemaCache = NULL;
     properties->selectNsStr = heap_alloc_zero(sizeof(xmlChar));
     properties->selectNsStr_len = 0;
-    properties->XPath = FALSE;
 
     /* properties that are dependent on object versions */
     if (IsEqualCLSID( clsid, &CLSID_DOMDocument40 ) ||
         IsEqualCLSID( clsid, &CLSID_DOMDocument60 ))
     {
         properties->XPath = TRUE;
+    }
+    else
+    {
+        properties->XPath = FALSE;
     }
 
     return properties;
@@ -270,6 +275,7 @@ static domdoc_properties* copy_properties(domdoc_properties const* properties)
     if (pcopy)
     {
         pcopy->preserving = properties->preserving;
+        pcopy->schemaCache = properties->schemaCache;
         pcopy->XPath = properties->XPath;
         pcopy->selectNsStr_len = properties->selectNsStr_len;
         list_init( &pcopy->selectNsList );
@@ -295,10 +301,17 @@ static void free_properties(domdoc_properties* properties)
 {
     if (properties)
     {
+        if (properties->schemaCache)
+            IXMLDOMSchemaCollection2_Release(properties->schemaCache);
         clear_selectNsList(&properties->selectNsList);
         heap_free((xmlChar*)properties->selectNsStr);
         heap_free(properties);
     }
+}
+
+static BOOL xmldoc_has_decl(xmlDocPtr doc)
+{
+    return doc->children && (xmlStrEqual(doc->children->name, (xmlChar*)"xml") == 1);
 }
 
 /* links a "<?xml" node as a first child */
@@ -859,8 +872,9 @@ static ULONG WINAPI domdoc_AddRef(
      IXMLDOMDocument3 *iface )
 {
     domdoc *This = impl_from_IXMLDOMDocument3( iface );
-    TRACE("%p\n", This );
-    return InterlockedIncrement( &This->ref );
+    ULONG ref = InterlockedIncrement( &This->ref );
+    TRACE("(%p)->(%d)\n", This, ref );
+    return ref;
 }
 
 
@@ -868,11 +882,10 @@ static ULONG WINAPI domdoc_Release(
      IXMLDOMDocument3 *iface )
 {
     domdoc *This = impl_from_IXMLDOMDocument3( iface );
-    LONG ref;
+    LONG ref = InterlockedDecrement( &This->ref );
 
-    TRACE("%p\n", This );
+    TRACE("(%p)->(%d)\n", This, ref );
 
-    ref = InterlockedDecrement( &This->ref );
     if ( ref == 0 )
     {
         if(This->bsc)
@@ -881,9 +894,9 @@ static ULONG WINAPI domdoc_Release(
         if (This->site)
             IUnknown_Release( This->site );
         destroy_xmlnode(&This->node);
-        if(This->schema) IXMLDOMSchemaCollection2_Release(This->schema);
-        if (This->stream) IStream_Release(This->stream);
-        HeapFree( GetProcessHeap(), 0, This );
+        if (This->stream)
+            IStream_Release(This->stream);
+        heap_free(This);
     }
 
     return ref;
@@ -1190,10 +1203,14 @@ static HRESULT WINAPI domdoc_cloneNode(
 
 static HRESULT WINAPI domdoc_get_nodeTypeString(
     IXMLDOMDocument3 *iface,
-    BSTR* nodeType )
+    BSTR *p)
 {
     domdoc *This = impl_from_IXMLDOMDocument3( iface );
-    return IXMLDOMNode_get_nodeTypeString( IXMLDOMNode_from_impl(&This->node), nodeType );
+    static const WCHAR documentW[] = {'d','o','c','u','m','e','n','t',0};
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return return_bstr(documentW, p);
 }
 
 
@@ -1272,16 +1289,64 @@ static HRESULT WINAPI domdoc_put_dataType(
     return IXMLDOMNode_put_dataType( IXMLDOMNode_from_impl(&This->node), dataTypeName );
 }
 
+static int XMLCALL domdoc_get_xml_writecallback(void *ctx, const char *data, int len)
+{
+    return xmlBufferAdd((xmlBufferPtr)ctx, (xmlChar*)data, len) == 0 ? len : 0;
+}
 
 static HRESULT WINAPI domdoc_get_xml(
     IXMLDOMDocument3 *iface,
     BSTR* p)
 {
     domdoc *This = impl_from_IXMLDOMDocument3( iface );
+    xmlSaveCtxtPtr ctxt;
+    xmlBufferPtr buf;
+    int options;
+    long ret;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    return node_get_xml(&This->node, TRUE, TRUE, p);
+    if(!p)
+        return E_INVALIDARG;
+
+    *p = NULL;
+
+    buf = xmlBufferCreate();
+    if(!buf)
+        return E_OUTOFMEMORY;
+
+    options  = xmldoc_has_decl(get_doc(This)) ? XML_SAVE_NO_DECL : 0;
+    options |= XML_SAVE_FORMAT;
+    ctxt = xmlSaveToIO(domdoc_get_xml_writecallback, NULL, buf, "UTF-8", options);
+
+    if(!ctxt)
+    {
+        xmlBufferFree(buf);
+        return E_OUTOFMEMORY;
+    }
+
+    ret = xmlSaveDoc(ctxt, get_doc(This));
+    /* flushes on close */
+    xmlSaveClose(ctxt);
+
+    TRACE("%ld, len=%d\n", ret, xmlBufferLength(buf));
+    if(ret != -1 && xmlBufferLength(buf) > 0)
+    {
+        BSTR content;
+
+        content = bstr_from_xmlChar(xmlBufferContent(buf));
+        content = EnsureCorrectEOL(content);
+
+        *p = content;
+    }
+    else
+    {
+        *p = SysAllocStringLen(NULL, 0);
+    }
+
+    xmlBufferFree(buf);
+
+    return *p ? S_OK : E_OUTOFMEMORY;
 }
 
 
@@ -2397,7 +2462,7 @@ static HRESULT WINAPI domdoc_get_schemas(
 {
     domdoc *This = impl_from_IXMLDOMDocument3( iface );
     HRESULT hr = S_FALSE;
-    IXMLDOMSchemaCollection2* cur_schema = This->schema;
+    IXMLDOMSchemaCollection2* cur_schema = This->properties->schemaCache;
 
     TRACE("(%p)->(%p)\n", This, var1);
 
@@ -2443,7 +2508,7 @@ static HRESULT WINAPI domdoc_putref_schemas(
 
     if(SUCCEEDED(hr))
     {
-        IXMLDOMSchemaCollection2* old_schema = InterlockedExchangePointer((void**)&This->schema, new_schema);
+        IXMLDOMSchemaCollection2* old_schema = InterlockedExchangePointer((void**)&This->properties->schemaCache, new_schema);
         if(old_schema) IXMLDOMSchemaCollection2_Release(old_schema);
     }
 
@@ -2558,10 +2623,10 @@ static HRESULT WINAPI domdoc_validateNode(
     }
 
     /* Schema validation */
-    if (hr == S_OK && This->schema != NULL)
+    if (hr == S_OK && This->properties->schemaCache != NULL)
     {
 
-        hr = SchemaCache_validate_tree(This->schema, get_node_obj(node)->node);
+        hr = SchemaCache_validate_tree(This->properties->schemaCache, get_node_obj(node)->node);
         if (!FAILED(hr))
         {
             ++validated;
@@ -3275,7 +3340,6 @@ HRESULT DOMDocument_create_from_xmldoc(xmlDocPtr xmldoc, IXMLDOMDocument3 **docu
     doc->resolving = 0;
     doc->properties = properties_from_xmlDocPtr(xmldoc);
     doc->error = S_OK;
-    doc->schema = NULL;
     doc->stream = NULL;
     doc->site = NULL;
     doc->safeopt = 0;

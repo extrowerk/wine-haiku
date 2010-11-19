@@ -361,7 +361,7 @@
 # stub _ctime64_s
 @ extern _ctype MSVCRT__ctype
 @ cdecl _cwait(ptr long long)
-# stub _cwprintf
+@ varargs _cwprintf(wstr)
 # stub _cwprintf_l
 # stub _cwprintf_p
 # stub _cwprintf_p_l
@@ -434,7 +434,6 @@
 # stub _free_dbg
 # stub _freea
 # stub _freea_s
-# stub _fscanf_l
 @ varargs _fscanf_l(ptr str ptr) MSVCRT__fscanf_l
 @ varargs _fscanf_s_l(ptr str ptr) MSVCRT__fscanf_s_l
 @ cdecl _fseeki64(ptr int64 long) MSVCRT__fseeki64
@@ -515,11 +514,11 @@
 @ cdecl _hypot(double double)
 @ cdecl _hypotf(float float)
 @ cdecl _i64toa(int64 ptr long) ntdll._i64toa
-# stub _i64toa_s
+@ cdecl _i64toa_s(int64 ptr long long) _i64toa_s
 @ cdecl _i64tow(int64 ptr long) ntdll._i64tow
-# stub _i64tow_s
+@ cdecl _i64tow_s(int64 ptr long long) _i64tow_s
 @ cdecl _initterm(ptr ptr)
-# stub _initterm_e
+@ cdecl _initterm_e(ptr ptr)
 @ stub _inp #(long) -i386
 @ stub _inpd #(long) -i386
 @ stub _inpw #(long) -i386
@@ -639,9 +638,9 @@
 @ cdecl _lseek(long long long) MSVCRT__lseek
 @ cdecl -ret64 _lseeki64(long int64 long) MSVCRT__lseeki64
 @ cdecl _ltoa(long ptr long) ntdll._ltoa
-# stub _ltoa_s
+@ cdecl _ltoa_s(long ptr long long)
 @ cdecl _ltow(long ptr long) ntdll._ltow
-# stub _ltow_s
+@ cdecl _ltow_s(long ptr long long)
 @ cdecl _makepath(ptr str str str str)
 @ cdecl _makepath_s(ptr long str str str str)
 # stub _malloc_dbg
@@ -992,13 +991,13 @@
 @ cdecl _unlock_file(ptr) MSVCRT__unlock_file
 @ cdecl _utime32(str ptr)
 @ cdecl _utime64(str ptr)
-# stub _vcprintf
+@ cdecl _vcprintf(str ptr)
 # stub _vcprintf_l
 # stub _vcprintf_p
 # stub _vcprintf_p_l
 # stub _vcprintf_s
 # stub _vcprintf_s_l
-# stub _vcwprintf
+@ cdecl _vcwprintf(wstr ptr)
 # stub _vcwprintf_l
 # stub _vcwprintf_p
 # stub _vcwprintf_p_l
@@ -1128,7 +1127,7 @@
 @ cdecl _wgetcwd(wstr long)
 @ cdecl _wgetdcwd(long wstr long)
 @ cdecl _wgetenv(wstr)
-# stub _wgetenv_s
+@ cdecl _wgetenv_s(ptr ptr long wstr)
 @ extern _winmajor MSVCRT__winmajor
 @ extern _winminor MSVCRT__winminor
 # stub _winput_s
@@ -1273,7 +1272,7 @@
 @ cdecl getc(ptr) MSVCRT_getc
 @ cdecl getchar() MSVCRT_getchar
 @ cdecl getenv(str) MSVCRT_getenv
-# stub getenv_s
+@ cdecl getenv_s(ptr ptr long str)
 @ cdecl gets(str) MSVCRT_gets
 @ cdecl getwc(ptr) MSVCRT_getwc
 @ cdecl getwchar() MSVCRT_getwchar
@@ -1345,7 +1344,7 @@
 @ cdecl putwc(long ptr) MSVCRT_fputwc
 @ cdecl putwchar(long) _fputwchar
 @ cdecl qsort(ptr long long ptr) ntdll.qsort
-# stub qsort_s
+@ cdecl qsort_s(ptr long long ptr ptr) MSVCRT_qsort_s
 @ cdecl raise(long) MSVCRT_raise
 @ cdecl rand() MSVCRT_rand
 @ cdecl rand_s(ptr) MSVCRT_rand_s
@@ -1384,7 +1383,7 @@
 @ cdecl strftime(str long str ptr) MSVCRT_strftime
 @ cdecl strlen(str) ntdll.strlen
 @ cdecl strncat(str str long) ntdll.strncat
-# stub strncat_s
+@ cdecl strncat_s(str long str long) MSVCRT_strncat_s
 @ cdecl strncmp(str str long) ntdll.strncmp
 @ cdecl strncpy(ptr str long) ntdll.strncpy
 @ cdecl strncpy_s(ptr long str long)

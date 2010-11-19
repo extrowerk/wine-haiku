@@ -9,7 +9,7 @@
  * Copyright 2006-2008 Stefan Dösinger for CodeWeavers
  * Copyright 2006-2008 Henri Verbeet
  * Copyright 2007 Andrew Riedi
- * Copyright 2009 Henri Verbeet for CodeWeavers
+ * Copyright 2009-2010 Henri Verbeet for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -609,7 +609,7 @@ static void prepare_ds_clear(IWineD3DSurfaceImpl *ds, struct wined3d_context *co
 {
     RECT current_rect, r;
 
-    if (ds->Flags & location)
+    if (ds->flags & location)
         SetRect(&current_rect, 0, 0,
                 ds->ds_current_size.cx,
                 ds->ds_current_size.cy);
@@ -1748,6 +1748,91 @@ static void destroy_dummy_textures(IWineD3DDeviceImpl *device, const struct wine
     LEAVE_GL();
 
     memset(device->dummyTextureName, 0, gl_info->limits.textures * sizeof(*device->dummyTextureName));
+}
+
+static LONG fullscreen_style(LONG style)
+{
+    /* Make sure the window is managed, otherwise we won't get keyboard input. */
+    style |= WS_POPUP | WS_SYSMENU;
+    style &= ~(WS_CAPTION | WS_THICKFRAME);
+
+    return style;
+}
+
+static LONG fullscreen_exstyle(LONG exstyle)
+{
+    /* Filter out window decorations. */
+    exstyle &= ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE);
+
+    return exstyle;
+}
+
+static void WINAPI IWineD3DDeviceImpl_SetupFullscreenWindow(IWineD3DDevice *iface, HWND window, UINT w, UINT h)
+{
+    IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *)iface;
+    BOOL filter_messages;
+    LONG style, exstyle;
+
+    TRACE("Setting up window %p for fullscreen mode.\n", window);
+
+    if (device->style || device->exStyle)
+    {
+        ERR("Changing the window style for window %p, but another style (%08x, %08x) is already stored.\n",
+                window, device->style, device->exStyle);
+    }
+
+    device->style = GetWindowLongW(window, GWL_STYLE);
+    device->exStyle = GetWindowLongW(window, GWL_EXSTYLE);
+
+    style = fullscreen_style(device->style);
+    exstyle = fullscreen_exstyle(device->exStyle);
+
+    TRACE("Old style was %08x, %08x, setting to %08x, %08x.\n",
+            device->style, device->exStyle, style, exstyle);
+
+    filter_messages = device->filter_messages;
+    device->filter_messages = TRUE;
+
+    SetWindowLongW(window, GWL_STYLE, style);
+    SetWindowLongW(window, GWL_EXSTYLE, exstyle);
+    SetWindowPos(window, HWND_TOP, 0, 0, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+
+    device->filter_messages = filter_messages;
+}
+
+static void WINAPI IWineD3DDeviceImpl_RestoreFullscreenWindow(IWineD3DDevice *iface, HWND window)
+{
+    IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *)iface;
+    BOOL filter_messages;
+    LONG style, exstyle;
+
+    if (!device->style && !device->exStyle) return;
+
+    TRACE("Restoring window style of window %p to %08x, %08x.\n",
+            window, device->style, device->exStyle);
+
+    style = GetWindowLongW(window, GWL_STYLE);
+    exstyle = GetWindowLongW(window, GWL_EXSTYLE);
+
+    filter_messages = device->filter_messages;
+    device->filter_messages = TRUE;
+
+    /* Only restore the style if the application didn't modify it during the
+     * fullscreen phase. Some applications change it before calling Reset()
+     * when switching between windowed and fullscreen modes (HL2), some
+     * depend on the original style (Eve Online). */
+    if (style == fullscreen_style(device->style) && exstyle == fullscreen_exstyle(device->exStyle))
+    {
+        SetWindowLongW(window, GWL_STYLE, device->style);
+        SetWindowLongW(window, GWL_EXSTYLE, device->exStyle);
+    }
+    SetWindowPos(window, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+    device->filter_messages = filter_messages;
+
+    /* Delete the old values. */
+    device->style = 0;
+    device->exStyle = 0;
 }
 
 static HRESULT WINAPI IWineD3DDeviceImpl_AcquireFocusWindow(IWineD3DDevice *iface, HWND window)
@@ -5093,7 +5178,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_ValidateDevice(IWineD3DDevice *iface,
         }
 
         texture = This->stateBlock->state.textures[i];
-        if (!texture || texture->resource.format->Flags & WINED3DFMT_FLAG_FILTERING) continue;
+        if (!texture || texture->resource.format->flags & WINED3DFMT_FLAG_FILTERING) continue;
 
         if (This->stateBlock->state.sampler_states[i][WINED3DSAMP_MAGFILTER] != WINED3DTEXF_POINT)
         {
@@ -5381,7 +5466,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface,
 
     ENTER_GL();
 
-    if (dst_format->Flags & WINED3DFMT_FLAG_COMPRESSED)
+    if (dst_format->flags & WINED3DFMT_FLAG_COMPRESSED)
     {
         UINT row_length = wined3d_format_calculate_size(src_format, 1, update_w, 1);
         UINT row_count = (update_h + src_format->block_height - 1) / src_format->block_height;
@@ -5735,7 +5820,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetDepthStencilSurface(IWineD3DDevice *
     if (This->depth_stencil)
     {
         if (((IWineD3DSwapChainImpl *)This->swapchains[0])->presentParms.Flags & WINED3DPRESENTFLAG_DISCARD_DEPTHSTENCIL
-                || This->depth_stencil->Flags & SFLAG_DISCARD)
+                || This->depth_stencil->flags & SFLAG_DISCARD)
         {
             surface_modify_ds_location(This->depth_stencil, SFLAG_DS_DISCARDED,
                     This->depth_stencil->currentDesc.Width,
@@ -5993,7 +6078,8 @@ static HRESULT updateSurfaceDesc(IWineD3DSurfaceImpl *surface, const WINED3DPRES
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
 
     /* Reallocate proper memory for the front and back buffer and adjust their sizes */
-    if(surface->Flags & SFLAG_DIBSECTION) {
+    if (surface->flags & SFLAG_DIBSECTION)
+    {
         /* Release the DC */
         SelectObject(surface->hDC, surface->dib.holdbitmap);
         DeleteDC(surface->hDC);
@@ -6001,7 +6087,7 @@ static HRESULT updateSurfaceDesc(IWineD3DSurfaceImpl *surface, const WINED3DPRES
         DeleteObject(surface->dib.DIBsection);
         surface->dib.bitmap_data = NULL;
         surface->resource.allocatedMemory = NULL;
-        surface->Flags &= ~SFLAG_DIBSECTION;
+        surface->flags &= ~SFLAG_DIBSECTION;
     }
     surface->currentDesc.Width = pPresentationParameters->BackBufferWidth;
     surface->currentDesc.Height = pPresentationParameters->BackBufferHeight;
@@ -6024,13 +6110,16 @@ static HRESULT updateSurfaceDesc(IWineD3DSurfaceImpl *surface, const WINED3DPRES
         LEAVE_GL();
         context_release(context);
         surface->texture_name = 0;
-        surface->Flags &= ~SFLAG_CLIENT;
+        surface->flags &= ~SFLAG_CLIENT;
     }
-    if(surface->pow2Width != pPresentationParameters->BackBufferWidth ||
-       surface->pow2Height != pPresentationParameters->BackBufferHeight) {
-        surface->Flags |= SFLAG_NONPOW2;
-    } else  {
-        surface->Flags &= ~SFLAG_NONPOW2;
+    if (surface->pow2Width != pPresentationParameters->BackBufferWidth
+            || surface->pow2Height != pPresentationParameters->BackBufferHeight)
+    {
+        surface->flags |= SFLAG_NONPOW2;
+    }
+    else
+    {
+        surface->flags &= ~SFLAG_NONPOW2;
     }
     HeapFree(GetProcessHeap(), 0, surface->resource.heapMemory);
     surface->resource.allocatedMemory = NULL;
@@ -6371,7 +6460,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice *iface,
                 }
 
                 /* switch from windowed to fs */
-                swapchain_setup_fullscreen_window(swapchain, pPresentationParameters->BackBufferWidth,
+                IWineD3DDevice_SetupFullscreenWindow(iface, swapchain->device_window,
+                        pPresentationParameters->BackBufferWidth,
                         pPresentationParameters->BackBufferHeight);
             }
             else
@@ -6385,7 +6475,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice *iface,
         else if (!swapchain->presentParms.Windowed)
         {
             /* Fullscreen -> windowed switch */
-            swapchain_restore_fullscreen_window(swapchain);
+            IWineD3DDevice_RestoreFullscreenWindow(iface, swapchain->device_window);
             IWineD3DDevice_ReleaseFocusWindow(iface);
         }
         swapchain->presentParms.Windowed = pPresentationParameters->Windowed;
@@ -6401,7 +6491,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice *iface,
          */
         This->style = 0;
         This->exStyle = 0;
-        swapchain_setup_fullscreen_window(swapchain, pPresentationParameters->BackBufferWidth,
+        IWineD3DDevice_SetupFullscreenWindow(iface, swapchain->device_window,
+                pPresentationParameters->BackBufferWidth,
                 pPresentationParameters->BackBufferHeight);
         This->style = style;
         This->exStyle = exStyle;
@@ -6803,6 +6894,8 @@ static const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl =
     IWineD3DDeviceImpl_GetSurfaceFromDC,
     IWineD3DDeviceImpl_AcquireFocusWindow,
     IWineD3DDeviceImpl_ReleaseFocusWindow,
+    IWineD3DDeviceImpl_SetupFullscreenWindow,
+    IWineD3DDeviceImpl_RestoreFullscreenWindow,
 };
 
 HRESULT device_init(IWineD3DDeviceImpl *device, IWineD3DImpl *wined3d,

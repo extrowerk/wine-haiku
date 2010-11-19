@@ -197,7 +197,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_IsLost(IWineD3DSurface *iface) {
     TRACE("(%p)\n", This);
 
     /* D3D8 and 9 loose full devices, ddraw only surfaces */
-    return This->Flags & SFLAG_LOST ? WINED3DERR_DEVICELOST : WINED3D_OK;
+    return This->flags & SFLAG_LOST ? WINED3DERR_DEVICELOST : WINED3D_OK;
 }
 
 HRESULT WINAPI IWineD3DBaseSurfaceImpl_Restore(IWineD3DSurface *iface) {
@@ -205,7 +205,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_Restore(IWineD3DSurface *iface) {
     TRACE("(%p)\n", This);
 
     /* So far we don't lose anything :) */
-    This->Flags &= ~SFLAG_LOST;
+    This->flags &= ~SFLAG_LOST;
     return WINED3D_OK;
 }
 
@@ -221,14 +221,14 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_SetPalette(IWineD3DSurface *iface, IWineD
 
     if (This->palette)
         if (This->resource.usage & WINED3DUSAGE_RENDERTARGET)
-            This->palette->Flags &= ~WINEDDPCAPS_PRIMARYSURFACE;
+            This->palette->flags &= ~WINEDDPCAPS_PRIMARYSURFACE;
 
     This->palette = PalImpl;
 
     if (PalImpl)
     {
         if (This->resource.usage & WINED3DUSAGE_RENDERTARGET)
-            PalImpl->Flags |= WINEDDPCAPS_PRIMARYSURFACE;
+            PalImpl->flags |= WINEDDPCAPS_PRIMARYSURFACE;
 
         return IWineD3DSurface_RealizePalette(iface);
     }
@@ -308,7 +308,7 @@ DWORD WINAPI IWineD3DBaseSurfaceImpl_GetPitch(IWineD3DSurface *iface)
     DWORD ret;
     TRACE("(%p)\n", This);
 
-    if ((format->Flags & (WINED3DFMT_FLAG_COMPRESSED | WINED3DFMT_FLAG_BROKEN_PITCH)) == WINED3DFMT_FLAG_COMPRESSED)
+    if ((format->flags & (WINED3DFMT_FLAG_COMPRESSED | WINED3DFMT_FLAG_BROKEN_PITCH)) == WINED3DFMT_FLAG_COMPRESSED)
     {
         /* Since compressed formats are block based, pitch means the amount of
          * bytes to the next row of block rather than the next row of pixels. */
@@ -483,7 +483,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_SetFormat(IWineD3DSurface *iface, enum wi
     This->resource.size = wined3d_format_calculate_size(format, This->resource.device->surface_alignment,
             This->pow2Width, This->pow2Height);
 
-    This->Flags |= (WINED3DFMT_D16_LOCKABLE == format_id) ? SFLAG_LOCKABLE : 0;
+    This->flags |= (WINED3DFMT_D16_LOCKABLE == format_id) ? SFLAG_LOCKABLE : 0;
 
     This->resource.format = format;
 
@@ -503,7 +503,7 @@ HRESULT IWineD3DBaseSurfaceImpl_CreateDIBSection(IWineD3DSurface *iface)
     DWORD *masks;
     UINT usage;
 
-    if (!(format->Flags & WINED3DFMT_FLAG_GETDC))
+    if (!(format->flags & WINED3DFMT_FLAG_GETDC))
     {
         WARN("Cannot use GetDC on a %s surface\n", debug_d3dformat(format->id));
         return WINED3DERR_INVALIDCALL;
@@ -612,7 +612,7 @@ HRESULT IWineD3DBaseSurfaceImpl_CreateDIBSection(IWineD3DSurface *iface)
         memcpy(This->dib.bitmap_data, This->resource.allocatedMemory,  This->currentDesc.Height * IWineD3DSurface_GetPitch(iface));
     } else {
         /* This is to make LockRect read the gl Texture although memory is allocated */
-        This->Flags &= ~SFLAG_INSYSMEM;
+        This->flags &= ~SFLAG_INSYSMEM;
     }
     This->dib.bitmap_size = b_info->bmiHeader.biSizeImage;
 
@@ -626,7 +626,7 @@ HRESULT IWineD3DBaseSurfaceImpl_CreateDIBSection(IWineD3DSurface *iface)
                   This->palette ? This->palette->hpal : 0,
                   FALSE);
 
-    This->Flags |= SFLAG_DIBSECTION;
+    This->flags |= SFLAG_DIBSECTION;
 
     HeapFree(GetProcessHeap(), 0, This->resource.heapMemory);
     This->resource.heapMemory = NULL;
@@ -941,7 +941,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface, const RECT *D
             iface, wine_dbgstr_rect(DestRect), src_surface, wine_dbgstr_rect(SrcRect),
             Flags, DDBltFx, debug_d3dtexturefiltertype(Filter));
 
-    if ((This->Flags & SFLAG_LOCKED) || (src && (src->Flags & SFLAG_LOCKED)))
+    if ((This->flags & SFLAG_LOCKED) || (src && (src->flags & SFLAG_LOCKED)))
     {
         WARN(" Surface is busy, returning DDERR_SURFACEBUSY\n");
         return WINEDDERR_SURFACEBUSY;
@@ -1125,7 +1125,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface, const RECT *D
 
     if (!DDBltFx || !(DDBltFx->dwDDFX)) Flags &= ~WINEDDBLT_DDFX;
 
-    if (sEntry->Flags & dEntry->Flags & WINED3DFMT_FLAG_FOURCC)
+    if (sEntry->flags & dEntry->flags & WINED3DFMT_FLAG_FOURCC)
     {
         if (!DestRect || src == This)
         {
@@ -1571,7 +1571,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_BltFast(IWineD3DSurface *iface, DWORD dst
     TRACE("iface %p, dst_x %u, dst_y %u, src_surface %p, src_rect %s, flags %#x.\n",
             iface, dstx, dsty, src_surface, wine_dbgstr_rect(rsrc), trans);
 
-    if ((This->Flags & SFLAG_LOCKED) || (src->Flags & SFLAG_LOCKED))
+    if ((This->flags & SFLAG_LOCKED) || (src->flags & SFLAG_LOCKED))
     {
         WARN(" Surface is busy, returning DDERR_SURFACEBUSY\n");
         return WINEDDERR_SURFACEBUSY;
@@ -1657,7 +1657,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_BltFast(IWineD3DSurface *iface, DWORD dst
     }
 
     /* Handle compressed surfaces first... */
-    if (sEntry->Flags & dEntry->Flags & WINED3DFMT_FLAG_COMPRESSED)
+    if (sEntry->flags & dEntry->flags & WINED3DFMT_FLAG_COMPRESSED)
     {
         UINT row_block_count;
 
@@ -1683,7 +1683,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_BltFast(IWineD3DSurface *iface, DWORD dst
 
         goto error;
     }
-    if ((sEntry->Flags & WINED3DFMT_FLAG_COMPRESSED) && !(dEntry->Flags & WINED3DFMT_FLAG_COMPRESSED))
+    if ((sEntry->flags & WINED3DFMT_FLAG_COMPRESSED) && !(dEntry->flags & WINED3DFMT_FLAG_COMPRESSED))
     {
         /* TODO: Use the libtxc_dxtn.so shared library to do
          * software decompression
@@ -1840,7 +1840,7 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_Map(IWineD3DSurface *iface,
         TRACE("Lock Rect (%p) = l %d, t %d, r %d, b %d\n",
               pRect, pRect->left, pRect->top, pRect->right, pRect->bottom);
 
-        if ((format->Flags & (WINED3DFMT_FLAG_COMPRESSED | WINED3DFMT_FLAG_BROKEN_PITCH)) == WINED3DFMT_FLAG_COMPRESSED)
+        if ((format->flags & (WINED3DFMT_FLAG_COMPRESSED | WINED3DFMT_FLAG_BROKEN_PITCH)) == WINED3DFMT_FLAG_COMPRESSED)
         {
             /* Compressed textures are block based, so calculate the offset of
              * the block that contains the top-left pixel of the locked rectangle. */

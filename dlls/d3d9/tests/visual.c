@@ -346,14 +346,14 @@ static void lighting_test(IDirect3DDevice9 *device)
         ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %08x\n", hr);
     }
 
-    color = getPixelColor(device, 160, 360); /* lower left quad - unlit without normals */
-    ok(color == 0x00ff0000, "Unlit quad without normals has color %08x\n", color);
-    color = getPixelColor(device, 160, 120); /* upper left quad - lit without normals */
-    ok(color == 0x00000000, "Lit quad without normals has color %08x\n", color);
-    color = getPixelColor(device, 480, 360); /* lower left quad - unlit with normals */
-    ok(color == 0x000000ff, "Unlit quad with normals has color %08x\n", color);
-    color = getPixelColor(device, 480, 120); /* upper left quad - lit with normals */
-    ok(color == 0x00000000, "Lit quad with normals has color %08x\n", color);
+    color = getPixelColor(device, 160, 360); /* Lower left quad - unlit without normals */
+    ok(color == 0x00ff0000, "Unlit quad without normals has color 0x%08x, expected 0x00ff0000.\n", color);
+    color = getPixelColor(device, 160, 120); /* Upper left quad - lit without normals */
+    ok(color == 0x00000000, "Lit quad without normals has color 0x%08x, expected 0x00000000.\n", color);
+    color = getPixelColor(device, 480, 360); /* Lower left quad - unlit with normals */
+    ok(color == 0x000000ff, "Unlit quad with normals has color 0x%08x, expected 0x000000ff.\n", color);
+    color = getPixelColor(device, 480, 120); /* Upper left quad - lit with normals */
+    ok(color == 0x00000000, "Lit quad with normals has color 0x%08x, expected 0x00000000.\n", color);
 
     IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
 
@@ -10613,11 +10613,8 @@ static void depth_bounds_test(IDirect3DDevice9 *device)
 
     hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 32, 32,
             MAKEFOURCC('N','V','D','B'), D3DPOOL_DEFAULT, &offscreen_surface, NULL);
-    todo_wine ok(hr != D3D_OK, "Able to create surface, hr = %08x\n", hr);
-    if(offscreen_surface)
-    {
-        IDirect3DSurface9_Release(offscreen_surface);
-    }
+    ok(FAILED(hr), "Able to create surface, hr %#x.\n", hr);
+    if (offscreen_surface) IDirect3DSurface9_Release(offscreen_surface);
 
     hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xffffffff, 1.0, 0);
     ok(SUCCEEDED(hr), "Clear failed, hr %#x.\n", hr);

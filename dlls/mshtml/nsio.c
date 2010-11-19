@@ -63,8 +63,9 @@ struct  nsWineURI {
     NSContainer *container;
     windowref_t *window_ref;
     nsChannelBSC *channel_bsc;
-    LPWSTR wine_url;
+    BSTR wine_url;
     IUri *uri;
+    IUriBuilder *uri_builder;
     BOOL is_doc_uri;
 };
 
@@ -248,12 +249,12 @@ HRESULT set_wine_url(nsWineURI *This, LPCWSTR url)
     TRACE("(%p)->(%s)\n", This, debugstr_w(url));
 
     if(url) {
-        WCHAR *new_url;
+        BSTR new_url;
 
-        new_url = heap_strdupW(url);
+        new_url = SysAllocString(url);
         if(!new_url)
             return E_OUTOFMEMORY;
-        heap_free(This->wine_url);
+        SysFreeString(This->wine_url);
         This->wine_url = new_url;
     }else {
         heap_free(This->wine_url);
@@ -1529,17 +1530,72 @@ static const nsIHttpChannelInternalVtbl nsHttpChannelInternalVtbl = {
 
 static BOOL ensure_uri(nsWineURI *This)
 {
-    if(!This->uri) {
+    HRESULT hres;
+
+    if(This->uri)
+        return TRUE;
+
+    if(This->uri_builder) {
+        hres = IUriBuilder_CreateUriSimple(This->uri_builder, 0, 0, &This->uri);
+        if(FAILED(hres)) {
+            WARN("CreateUriSimple failed: %08x\n", hres);
+            return FALSE;
+        }
+
+        return TRUE;
+    }
+
+    hres = CreateUri(This->wine_url, 0, 0, &This->uri);
+    if(FAILED(hres)) {
+        WARN("CreateUri failed: %08x\n", hres);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static void invalidate_uri(nsWineURI *This)
+{
+    if(This->uri) {
+        IUri_Release(This->uri);
+        This->uri = NULL;
+    }
+}
+
+static BOOL ensure_uri_builder(nsWineURI *This)
+{
+    if(!This->uri_builder) {
         HRESULT hres;
 
-        hres = CreateUri(This->wine_url, 0, 0, &This->uri);
+        if(!ensure_uri(This))
+            return FALSE;
+
+        hres = CreateIUriBuilder(This->uri, 0, 0, &This->uri_builder);
         if(FAILED(hres)) {
-            WARN("CreateUri failed: %08x\n", hres);
+            WARN("CreateIUriBulder failed: %08x\n", hres);
             return FALSE;
         }
     }
 
+    invalidate_uri(This);
     return TRUE;
+}
+
+/* Temporary helper */
+static void sync_wine_url(nsWineURI *This)
+{
+    BSTR new_url;
+    HRESULT hres;
+
+    if(!ensure_uri(This))
+        return;
+
+    hres = IUri_GetDisplayUri(This->uri, &new_url);
+    if(FAILED(hres))
+        return;
+
+    SysFreeString(This->wine_url);
+    This->wine_url = new_url;
 }
 
 static nsresult get_uri_string(nsWineURI *This, Uri_PROPERTY prop, nsACString *ret)
@@ -1566,14 +1622,6 @@ static nsresult get_uri_string(nsWineURI *This, Uri_PROPERTY prop, nsACString *r
     nsACString_SetData(ret, vala);
     heap_free(vala);
     return NS_OK;
-}
-
-static void invalidate_uri(nsWineURI *This)
-{
-    if(This->uri) {
-        IUri_Release(This->uri);
-        This->uri = NULL;
-    }
 }
 
 #define NSURI_THIS(iface) DEFINE_THIS(nsWineURI, IURL, iface)
@@ -1635,7 +1683,7 @@ static nsrefcnt NSAPI nsURI_Release(nsIURL *iface)
             nsIURI_Release(This->nsuri);
         if(This->uri)
             IUri_Release(This->uri);
-        heap_free(This->wine_url);
+        SysFreeString(This->wine_url);
         heap_free(This);
     }
 
@@ -1645,13 +1693,10 @@ static nsrefcnt NSAPI nsURI_Release(nsIURL *iface)
 static nsresult NSAPI nsURI_GetSpec(nsIURL *iface, nsACString *aSpec)
 {
     nsWineURI *This = NSURI_THIS(iface);
-    char speca[INTERNET_MAX_URL_LENGTH];
 
     TRACE("(%p)->(%p)\n", This, aSpec);
 
-    WideCharToMultiByte(CP_ACP, 0, This->wine_url, -1, speca, sizeof(speca), NULL, NULL);
-    nsACString_SetData(aSpec, speca);
-    return NS_OK;
+    return get_uri_string(This, Uri_PROPERTY_DISPLAY_URI, aSpec);
 }
 
 static nsresult NSAPI nsURI_SetSpec(nsIURL *iface, const nsACString *aSpec)
@@ -1938,32 +1983,27 @@ static nsresult NSAPI nsURI_GetPath(nsIURL *iface, nsACString *aPath)
 static nsresult NSAPI nsURI_SetPath(nsIURL *iface, const nsACString *aPath)
 {
     nsWineURI *This = NSURI_THIS(iface);
-    const char *path;
+    const char *patha;
+    WCHAR *path;
+    HRESULT hres;
 
     TRACE("(%p)->(%s)\n", This, debugstr_nsacstr(aPath));
 
-    invalidate_uri(This);
+    if(!ensure_uri_builder(This))
+        return NS_ERROR_UNEXPECTED;
 
-    nsACString_GetData(aPath, &path);
-    if(This->wine_url) {
-        WCHAR new_url[INTERNET_MAX_URL_LENGTH];
-        DWORD size = sizeof(new_url)/sizeof(WCHAR);
-        LPWSTR pathw;
-        HRESULT hres;
+    nsACString_GetData(aPath, &patha);
+    path = heap_strdupAtoW(patha);
+    if(!path)
+        return NS_ERROR_OUT_OF_MEMORY;
 
-        pathw = heap_strdupAtoW(path);
-        hres = UrlCombineW(This->wine_url, pathw, new_url, &size, 0);
-        heap_free(pathw);
-        if(SUCCEEDED(hres))
-            set_wine_url(This, new_url);
-        else
-            WARN("UrlCombine failed: %08x\n", hres);
-    }
+    hres = IUriBuilder_SetPath(This->uri_builder, path);
+    heap_free(path);
+    if(FAILED(hres))
+        return NS_ERROR_UNEXPECTED;
 
-    if(!This->nsuri)
-        return NS_OK;
-
-    return nsIURI_SetPath(This->nsuri, aPath);
+    sync_wine_url(This);
+    return NS_OK;
 }
 
 static nsresult NSAPI nsURI_Equals(nsIURL *iface, nsIURI *other, PRBool *_retval)
@@ -2101,8 +2141,8 @@ static nsresult NSAPI nsURI_GetAsciiHost(nsIURL *iface, nsACString *aAsciiHost)
     if(This->nsuri)
         return nsIURI_GetAsciiHost(This->nsuri, aAsciiHost);
 
-    FIXME("default action not implemented\n");
-    return NS_ERROR_NOT_IMPLEMENTED;
+    FIXME("Use Uri_PUNYCODE_IDN_HOST flag\n");
+    return get_uri_string(This, Uri_PROPERTY_HOST, aAsciiHost);
 }
 
 static nsresult NSAPI nsURI_GetOriginCharset(nsIURL *iface, nsACString *aOriginCharset)
@@ -2189,55 +2229,26 @@ static nsresult NSAPI nsURL_GetQuery(nsIURL *iface, nsACString *aQuery)
 static nsresult NSAPI nsURL_SetQuery(nsIURL *iface, const nsACString *aQuery)
 {
     nsWineURI *This = NSURI_THIS(iface);
-    const WCHAR *ptr1, *ptr2;
-    const char *query;
-    WCHAR *new_url, *ptr;
-    DWORD len, size;
+    const char *querya;
+    WCHAR *query;
+    HRESULT hres;
 
     TRACE("(%p)->(%s)\n", This, debugstr_nsacstr(aQuery));
 
-    invalidate_uri(This);
+    if(!ensure_uri_builder(This))
+        return NS_ERROR_UNEXPECTED;
 
-    if(This->nsurl)
-        nsIURL_SetQuery(This->nsurl, aQuery);
+    nsACString_GetData(aQuery, &querya);
+    query = heap_strdupAtoW(querya);
+    if(!query)
+        return NS_ERROR_OUT_OF_MEMORY;
 
-    if(!This->wine_url)
-        return NS_OK;
+    hres = IUriBuilder_SetQuery(This->uri_builder, query);
+    heap_free(query);
+    if(FAILED(hres))
+        return NS_ERROR_UNEXPECTED;
 
-    nsACString_GetData(aQuery, &query);
-    size = len = MultiByteToWideChar(CP_ACP, 0, query, -1, NULL, 0);
-    ptr1 = strchrW(This->wine_url, '?');
-    if(ptr1) {
-        size += ptr1-This->wine_url;
-        ptr2 = strchrW(ptr1, '#');
-        if(ptr2)
-            size += strlenW(ptr2);
-    }else {
-        ptr1 = This->wine_url + strlenW(This->wine_url);
-        ptr2 = NULL;
-        size += strlenW(This->wine_url);
-    }
-
-    if(*query)
-        size++;
-
-    new_url = heap_alloc(size*sizeof(WCHAR));
-    memcpy(new_url, This->wine_url, (ptr1-This->wine_url)*sizeof(WCHAR));
-    ptr = new_url + (ptr1-This->wine_url);
-    if(*query) {
-        *ptr++ = '?';
-        MultiByteToWideChar(CP_ACP, 0, query, -1, ptr, len);
-        ptr += len-1;
-    }
-    if(ptr2)
-        strcpyW(ptr, ptr2);
-    else
-        *ptr = 0;
-
-    TRACE("setting %s\n", debugstr_w(new_url));
-
-    heap_free(This->wine_url);
-    This->wine_url = new_url;
+    sync_wine_url(This);
     return NS_OK;
 }
 

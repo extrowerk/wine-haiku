@@ -1601,9 +1601,22 @@ void HTMLElement_destructor(HTMLDOMNode *iface)
     HTMLDOMNode_destructor(&This->node);
 }
 
+HRESULT HTMLElement_clone(HTMLDOMNode *iface, nsIDOMNode *nsnode, HTMLDOMNode **ret)
+{
+    HTMLElement *This = HTMLELEM_NODE_THIS(iface);
+    HTMLElement *new_elem;
+
+    new_elem = HTMLElement_Create(This->node.doc, nsnode, FALSE);
+    IHTMLElement_AddRef(HTMLELEM(new_elem));
+
+    *ret = &new_elem->node;
+    return S_OK;
+}
+
 static const NodeImplVtbl HTMLElementImplVtbl = {
     HTMLElement_QI,
-    HTMLElement_destructor
+    HTMLElement_destructor,
+    HTMLElement_clone
 };
 
 static const tid_t HTMLElement_iface_tids[] = {
@@ -1664,6 +1677,7 @@ HTMLElement *HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL 
     static const WCHAR wszOPTION[]   = {'O','P','T','I','O','N',0};
     static const WCHAR wszSCRIPT[]   = {'S','C','R','I','P','T',0};
     static const WCHAR wszSELECT[]   = {'S','E','L','E','C','T',0};
+    static const WCHAR wszSTYLE[]    = {'S','T','Y','L','E',0};
     static const WCHAR wszTABLE[]    = {'T','A','B','L','E',0};
     static const WCHAR wszTR[]       = {'T','R',0};
     static const WCHAR wszTEXTAREA[] = {'T','E','X','T','A','R','E','A',0};
@@ -1701,6 +1715,8 @@ HTMLElement *HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL 
         ret = HTMLScriptElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszSELECT))
         ret = HTMLSelectElement_Create(doc, nselem);
+    else if(!strcmpW(class_name, wszSTYLE))
+        ret = HTMLStyleElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszTABLE))
         ret = HTMLTable_Create(doc, nselem);
     else if(!strcmpW(class_name, wszTR))

@@ -7,7 +7,7 @@
 @ stdcall D3DXCheckCubeTextureRequirements(ptr ptr ptr long ptr ptr)
 @ stdcall D3DXCheckTextureRequirements(ptr ptr ptr ptr long ptr ptr)
 @ stdcall D3DXCheckVersion(long long)
-@ stub D3DXCheckVolumeTextureRequirements
+@ stdcall D3DXCheckVolumeTextureRequirements(ptr ptr ptr ptr ptr long ptr ptr)
 @ stub D3DXCleanMesh
 @ stdcall D3DXColorAdjustContrast(ptr ptr float)
 @ stdcall D3DXColorAdjustSaturation(ptr ptr float)
@@ -106,7 +106,7 @@
 @ stub D3DXCreateTextureGutterHelper
 @ stub D3DXCreateTextureShader
 @ stub D3DXCreateTorus
-@ stub D3DXCreateVolumeTexture
+@ stdcall D3DXCreateVolumeTexture(ptr long long long long long long long ptr)
 @ stub D3DXCreateVolumeTextureFromFileA
 @ stub D3DXCreateVolumeTextureFromFileExA
 @ stub D3DXCreateVolumeTextureFromFileExW
@@ -122,11 +122,11 @@
 @ stub D3DXDisassembleEffect
 @ stub D3DXDisassembleShader
 @ stub D3DXFileCreate
-@ stub D3DXFillCubeTexture
+@ stdcall D3DXFillCubeTexture(ptr ptr ptr)
 @ stub D3DXFillCubeTextureTX
-@ stub D3DXFillTexture
+@ stdcall D3DXFillTexture(ptr ptr ptr)
 @ stub D3DXFillTextureTX
-@ stub D3DXFillVolumeTexture
+@ stdcall D3DXFillVolumeTexture(ptr ptr ptr)
 @ stub D3DXFillVolumeTextureTX
 @ stdcall D3DXFilterTexture(ptr ptr long long)
 @ stdcall D3DXFindShaderComment(ptr long ptr ptr)

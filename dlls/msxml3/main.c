@@ -40,6 +40,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
+HINSTANCE MSXML_hInstance = NULL;
+
 #ifdef HAVE_LIBXML2
 
 void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, va_list ap)
@@ -59,29 +61,35 @@ void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, 
             break;
     }
 
-    if (ap)
+    do
     {
-        do
-        {
-            heap_free(buf);
-            buf = heap_alloc(len);
-            needed = vsnprintf(buf, len, msg, ap);
-            if (needed == -1)
-                len *= 2;
-            else if (needed >= len)
-                len = needed + 1;
-            else
-                needed = 0;
-        }
-        while (needed);
-
-        wine_dbg_log(dbcl, &__wine_dbch_msxml, caller, buf);
         heap_free(buf);
+        buf = heap_alloc(len);
+        needed = vsnprintf(buf, len, msg, ap);
+        if (needed == -1)
+            len *= 2;
+        else if (needed >= len)
+            len = needed + 1;
+        else
+            needed = 0;
     }
-    else
+    while (needed);
+
+    wine_dbg_log(dbcl, &__wine_dbch_msxml, caller, "%s", buf);
+    heap_free(buf);
+}
+
+void wineXmlCallbackError(char const* caller, xmlErrorPtr err)
+{
+    enum __wine_debug_class dbcl;
+
+    switch (err->level)
     {
-        wine_dbg_log(dbcl, &__wine_dbch_msxml, caller, msg);
+    case XML_ERR_NONE:    dbcl = __WINE_DBCL_TRACE; break;
+    case XML_ERR_WARNING: dbcl = __WINE_DBCL_WARN; break;
+    default:              dbcl = __WINE_DBCL_ERR; break;
     }
+    wine_dbg_log(dbcl, &__wine_dbch_msxml, caller, "%s", err->message);
 }
 
 /* Support for loading xml files from a Wine Windows drive */
@@ -190,6 +198,8 @@ static void init_libxslt(void)
 
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 {
+    MSXML_hInstance = hInstDLL;
+
     switch(fdwReason)
     {
     case DLL_PROCESS_ATTACH:
@@ -206,6 +216,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
                             wineXmlReadCallback, wineXmlFileCloseCallback) == -1)
             WARN("Failed to register callbacks\n");
 
+        schemasInit();
 #endif
         init_libxslt();
         DisableThreadLibraryCalls(hInstDLL);
@@ -225,6 +236,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
         xmlRegisterDefaultInputCallbacks();
 
         xmlCleanupParser();
+        schemasCleanup();
 #endif
         release_typelib();
         break;

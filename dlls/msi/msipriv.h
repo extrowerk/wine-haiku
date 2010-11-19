@@ -32,6 +32,7 @@
 #include "msidefs.h"
 #include "objbase.h"
 #include "objidl.h"
+#include "fusion.h"
 #include "winnls.h"
 #include "winver.h"
 #include "wine/list.h"
@@ -332,6 +333,8 @@ typedef struct tagMSIPACKAGE
     LPWSTR ActionFormat;
     LPWSTR LastAction;
     HANDLE log_file;
+    IAssemblyCache *cache_net;
+    IAssemblyCache *cache_sxs;
 
     struct list classes;
     struct list extensions;
@@ -402,6 +405,17 @@ typedef struct tagMSIFEATURE
     struct list Components;
 } MSIFEATURE;
 
+typedef struct tagMSIASSEMBLY
+{
+    LPWSTR feature;
+    LPWSTR manifest;
+    LPWSTR application;
+    DWORD attributes;
+    LPWSTR display_name;
+    LPWSTR tempdir;
+    BOOL installed;
+} MSIASSEMBLY;
+
 typedef struct tagMSICOMPONENT
 {
     struct list entry;
@@ -420,6 +434,7 @@ typedef struct tagMSICOMPONENT
     INT  RefCount;
     LPWSTR FullKeypath;
     LPWSTR AdvertiseString;
+    MSIASSEMBLY *assembly;
 
     unsigned int anyAbsent:1;
     unsigned int hasAdvertiseFeature:1;
@@ -689,6 +704,8 @@ extern const WCHAR *msi_string_lookup_id( const string_table *st, UINT id );
 extern HRESULT msi_init_string_table( IStorage *stg );
 extern string_table *msi_load_string_table( IStorage *stg, UINT *bytes_per_strref );
 extern UINT msi_save_string_table( const string_table *st, IStorage *storage, UINT *bytes_per_strref );
+extern UINT msi_get_string_table_codepage( const string_table *st );
+extern UINT msi_set_string_table_codepage( string_table *st, UINT codepage );
 
 extern BOOL TABLE_Exists( MSIDATABASE *db, LPCWSTR name );
 extern MSICONDITION MSI_DatabaseIsTablePersistent( MSIDATABASE *db, LPCWSTR table );
@@ -908,6 +925,7 @@ extern UINT ACTION_UnregisterExtensionInfo(MSIPACKAGE *package);
 extern UINT ACTION_UnregisterFonts(MSIPACKAGE *package);
 extern UINT ACTION_UnregisterMIMEInfo(MSIPACKAGE *package);
 extern UINT ACTION_UnregisterProgIdInfo(MSIPACKAGE *package);
+extern UINT ACTION_MsiPublishAssemblies(MSIPACKAGE *package);
 
 /* Helpers */
 extern DWORD deformat_string(MSIPACKAGE *package, LPCWSTR ptr, WCHAR** data );
@@ -942,6 +960,8 @@ extern UINT msi_get_local_package_name(LPWSTR path, LPCWSTR suffix);
 extern UINT msi_set_sourcedir_props(MSIPACKAGE *package, BOOL replace);
 extern void msi_component_set_state(MSIPACKAGE *, MSICOMPONENT *, INSTALLSTATE);
 extern void msi_feature_set_state(MSIPACKAGE *, MSIFEATURE *, INSTALLSTATE);
+extern MSIASSEMBLY *load_assembly(MSIPACKAGE *, MSICOMPONENT *);
+extern UINT install_assembly(MSIPACKAGE *, MSICOMPONENT *);
 
 /* media */
 
@@ -1060,6 +1080,7 @@ static const WCHAR szWow6432NodeCLSID[] = {'W','o','w','6','4','3','2','N','o','
 static const WCHAR szWow6432Node[] = {'W','o','w','6','4','3','2','N','o','d','e',0};
 static const WCHAR szStreams[] = {'_','S','t','r','e','a','m','s',0};
 static const WCHAR szStorages[] = {'_','S','t','o','r','a','g','e','s',0};
+static const WCHAR szMsiPublishAssemblies[] = {'M','s','i','P','u','b','l','i','s','h','A','s','s','e','m','b','l','i','e','s',0};
 
 /* memory allocation macro functions */
 static void *msi_alloc( size_t len ) __WINE_ALLOC_SIZE(1);

@@ -39,6 +39,8 @@
 #define RAW_URI_FORCE_PORT_DISP     0x1
 #define RAW_URI_CONVERT_TO_DOS_PATH 0x2
 
+#define COMBINE_URI_FORCE_FLAG_USE  0x1
+
 WINE_DEFAULT_DEBUG_CHANNEL(urlmon);
 
 static const IID IID_IUriObj = {0x4b364760,0x9f51,0x11df,{0x98,0x1c,0x08,0x00,0x20,0x0c,0x9a,0x66}};
@@ -1552,8 +1554,11 @@ static BOOL parse_ipv4address(const WCHAR **ptr, parse_data *data, DWORD flags) 
 static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD flags, DWORD extras) {
     const BOOL has_start_bracket = **ptr == '[';
     const BOOL known_scheme = data->scheme_type != URL_SCHEME_UNKNOWN;
+    const BOOL is_res = data->scheme_type == URL_SCHEME_RES;
     BOOL inside_brackets = has_start_bracket;
-    BOOL ignore_col = extras & IGNORE_PORT_DELIMITER;
+
+    /* res URIs don't have ports. */
+    BOOL ignore_col = (extras & IGNORE_PORT_DELIMITER) || is_res;
 
     /* We have to be careful with file schemes. */
     if(data->scheme_type == URL_SCHEME_FILE) {
@@ -1575,7 +1580,11 @@ static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD flags, DWO
 
     data->host = *ptr;
 
-    while(!is_auth_delim(**ptr, known_scheme)) {
+    /* For res URIs, everything before the first '/' is
+     * considered the host.
+     */
+    while((!is_res && !is_auth_delim(**ptr, known_scheme)) ||
+          (is_res && **ptr && **ptr != '/')) {
         if(**ptr == ':' && !ignore_col) {
             /* We can ignore ':' if were inside brackets.*/
             if(!inside_brackets) {
@@ -1599,7 +1608,7 @@ static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD flags, DWO
                     break;
                 }
             }
-        } else if(**ptr == '%' && known_scheme) {
+        } else if(**ptr == '%' && (known_scheme && !is_res)) {
             /* Has to be a legit % encoded value. */
             if(!check_pct_encoded(ptr)) {
                 *ptr = data->host;
@@ -1607,6 +1616,10 @@ static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD flags, DWO
                 return FALSE;
             } else
                 continue;
+        } else if(is_res && is_forbidden_dos_path_char(**ptr)) {
+            *ptr = data->host;
+            data->host = NULL;
+            return FALSE;
         } else if(**ptr == ']')
             inside_brackets = FALSE;
         else if(**ptr == '[')
@@ -1631,7 +1644,7 @@ static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD flags, DWO
         data->host_len = *ptr - data->host;
 
     /* If the host is empty, then it's an unknown host type. */
-    if(data->host_len == 0)
+    if(data->host_len == 0 || is_res)
         data->host_type = Uri_HOST_UNKNOWN;
     else
         data->host_type = Uri_HOST_DNS;
@@ -2913,6 +2926,7 @@ static BOOL canonicalize_path_hierarchical(const parse_data *data, Uri *uri,
     const WCHAR *ptr;
     const BOOL known_scheme = data->scheme_type != URL_SCHEME_UNKNOWN;
     const BOOL is_file = data->scheme_type == URL_SCHEME_FILE;
+    const BOOL is_res = data->scheme_type == URL_SCHEME_RES;
 
     BOOL escape_pct = FALSE;
 
@@ -2961,7 +2975,9 @@ static BOOL canonicalize_path_hierarchical(const parse_data *data, Uri *uri,
     }
 
     for(; ptr < data->path+data->path_len; ++ptr) {
-        if(*ptr == '%') {
+        BOOL do_default_action = TRUE;
+
+        if(*ptr == '%' && !is_res) {
             const WCHAR *tmp = ptr;
             WCHAR val;
 
@@ -2974,6 +2990,7 @@ static BOOL canonicalize_path_hierarchical(const parse_data *data, Uri *uri,
                 if(!computeOnly)
                     pct_encode_val(*ptr, uri->canon_uri+uri->canon_len);
                 uri->canon_len += 3;
+                do_default_action = FALSE;
             } else if((is_unreserved(val) && known_scheme) ||
                       (is_file && (is_unreserved(val) || is_reserved(val) ||
                       (val && flags&Uri_CREATE_FILE_USE_DOS_PATH && !is_forbidden_dos_path_char(val))))) {
@@ -2983,41 +3000,33 @@ static BOOL canonicalize_path_hierarchical(const parse_data *data, Uri *uri,
 
                 ptr += 2;
                 continue;
-            } else {
-                if(!computeOnly)
-                    uri->canon_uri[uri->canon_len] = *ptr;
-                ++uri->canon_len;
             }
         } else if(*ptr == '/' && is_file && (flags & Uri_CREATE_FILE_USE_DOS_PATH)) {
             /* Convert the '/' back to a '\\'. */
             if(!computeOnly)
                 uri->canon_uri[uri->canon_len] = '\\';
             ++uri->canon_len;
+            do_default_action = FALSE;
         } else if(*ptr == '\\' && known_scheme) {
-            if(is_file && (flags & Uri_CREATE_FILE_USE_DOS_PATH)) {
-                /* Don't convert the '\\' to a '/'. */
-                if(!computeOnly)
-                    uri->canon_uri[uri->canon_len] = *ptr;
-                ++uri->canon_len;
-            } else {
+            if(!(is_file && (flags & Uri_CREATE_FILE_USE_DOS_PATH))) {
+                /* Convert '\\' into a '/'. */
                 if(!computeOnly)
                     uri->canon_uri[uri->canon_len] = '/';
                 ++uri->canon_len;
+                do_default_action = FALSE;
             }
-        } else if(known_scheme && !is_unreserved(*ptr) && !is_reserved(*ptr) &&
+        } else if(known_scheme && !is_res && !is_unreserved(*ptr) && !is_reserved(*ptr) &&
                   (!(flags & Uri_CREATE_NO_ENCODE_FORBIDDEN_CHARACTERS) || is_file)) {
-            if(is_file && (flags & Uri_CREATE_FILE_USE_DOS_PATH)) {
-                /* Don't escape the character. */
-                if(!computeOnly)
-                    uri->canon_uri[uri->canon_len] = *ptr;
-                ++uri->canon_len;
-            } else {
+            if(!(is_file && (flags & Uri_CREATE_FILE_USE_DOS_PATH))) {
                 /* Escape the forbidden character. */
                 if(!computeOnly)
                     pct_encode_val(*ptr, uri->canon_uri+uri->canon_len);
                 uri->canon_len += 3;
+                do_default_action = FALSE;
             }
-        } else {
+        }
+
+        if(do_default_action) {
             if(!computeOnly)
                 uri->canon_uri[uri->canon_len] = *ptr;
             ++uri->canon_len;
@@ -3095,6 +3104,8 @@ static BOOL canonicalize_path_opaque(const parse_data *data, Uri *uri, DWORD fla
     }
 
     for(ptr = data->path; ptr < data->path+data->path_len; ++ptr) {
+        BOOL do_default_action = TRUE;
+
         if(*ptr == '%' && known_scheme) {
             WCHAR val = decode_pct_val(ptr);
 
@@ -3105,47 +3116,31 @@ static BOOL canonicalize_path_opaque(const parse_data *data, Uri *uri, DWORD fla
 
                 ptr += 2;
                 continue;
-            } else {
-                if(!computeOnly)
-                    uri->canon_uri[uri->canon_len] = *ptr;
-                ++uri->canon_len;
             }
         } else if(*ptr == '/' && is_file && (flags & Uri_CREATE_FILE_USE_DOS_PATH)) {
             if(!computeOnly)
                 uri->canon_uri[uri->canon_len] = '\\';
             ++uri->canon_len;
-        } else if(*ptr == '\\' && is_file) {
-            if(!(flags & Uri_CREATE_FILE_USE_DOS_PATH)) {
+            do_default_action = FALSE;
+        } else if(*ptr == '\\') {
+            if(is_file && !(flags & Uri_CREATE_FILE_USE_DOS_PATH)) {
                 /* Convert to a '/'. */
                 if(!computeOnly)
                     uri->canon_uri[uri->canon_len] = '/';
                 ++uri->canon_len;
-            } else {
-                /* Just copy it over. */
-                if(!computeOnly)
-                    uri->canon_uri[uri->canon_len] = *ptr;
-                ++uri->canon_len;
+                do_default_action = FALSE;
             }
         } else if(known_scheme && !is_unreserved(*ptr) && !is_reserved(*ptr) &&
                   !(flags & Uri_CREATE_NO_ENCODE_FORBIDDEN_CHARACTERS)) {
-            if(is_file && (flags & Uri_CREATE_FILE_USE_DOS_PATH)) {
-                /* Forbidden characters aren't percent encoded for file schemes
-                 * with USE_DOS_PATH set.
-                 */
-                if(!computeOnly)
-                    uri->canon_uri[uri->canon_len] = *ptr;
-                ++uri->canon_len;
-            } else if(data->scheme_type == URL_SCHEME_MK && *ptr == '\\') {
-                /* MK URIs don't get '\\' percent encoded. */
-                if(!computeOnly)
-                    uri->canon_uri[uri->canon_len] = *ptr;
-                ++uri->canon_len;
-            } else {
+            if(!(is_file && (flags & Uri_CREATE_FILE_USE_DOS_PATH))) {
                 if(!computeOnly)
                     pct_encode_val(*ptr, uri->canon_uri+uri->canon_len);
                 uri->canon_len += 3;
+                do_default_action = FALSE;
             }
-        } else {
+        }
+
+        if(do_default_action) {
             if(!computeOnly)
                 uri->canon_uri[uri->canon_len] = *ptr;
             ++uri->canon_len;
@@ -4731,116 +4726,116 @@ static HRESULT WINAPI Uri_HasProperty(IUri *iface, Uri_PROPERTY uriProp, BOOL *p
 static HRESULT WINAPI Uri_GetAbsoluteUri(IUri *iface, BSTR *pstrAbsoluteUri)
 {
     TRACE("(%p)->(%p)\n", iface, pstrAbsoluteUri);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_ABSOLUTE_URI, pstrAbsoluteUri, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_ABSOLUTE_URI, pstrAbsoluteUri, 0);
 }
 
 static HRESULT WINAPI Uri_GetAuthority(IUri *iface, BSTR *pstrAuthority)
 {
     TRACE("(%p)->(%p)\n", iface, pstrAuthority);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_AUTHORITY, pstrAuthority, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_AUTHORITY, pstrAuthority, 0);
 }
 
 static HRESULT WINAPI Uri_GetDisplayUri(IUri *iface, BSTR *pstrDisplayUri)
 {
     TRACE("(%p)->(%p)\n", iface, pstrDisplayUri);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_DISPLAY_URI, pstrDisplayUri, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_DISPLAY_URI, pstrDisplayUri, 0);
 }
 
 static HRESULT WINAPI Uri_GetDomain(IUri *iface, BSTR *pstrDomain)
 {
     TRACE("(%p)->(%p)\n", iface, pstrDomain);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_DOMAIN, pstrDomain, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_DOMAIN, pstrDomain, 0);
 }
 
 static HRESULT WINAPI Uri_GetExtension(IUri *iface, BSTR *pstrExtension)
 {
     TRACE("(%p)->(%p)\n", iface, pstrExtension);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_EXTENSION, pstrExtension, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_EXTENSION, pstrExtension, 0);
 }
 
 static HRESULT WINAPI Uri_GetFragment(IUri *iface, BSTR *pstrFragment)
 {
     TRACE("(%p)->(%p)\n", iface, pstrFragment);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_FRAGMENT, pstrFragment, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_FRAGMENT, pstrFragment, 0);
 }
 
 static HRESULT WINAPI Uri_GetHost(IUri *iface, BSTR *pstrHost)
 {
     TRACE("(%p)->(%p)\n", iface, pstrHost);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_HOST, pstrHost, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_HOST, pstrHost, 0);
 }
 
 static HRESULT WINAPI Uri_GetPassword(IUri *iface, BSTR *pstrPassword)
 {
     TRACE("(%p)->(%p)\n", iface, pstrPassword);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_PASSWORD, pstrPassword, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_PASSWORD, pstrPassword, 0);
 }
 
 static HRESULT WINAPI Uri_GetPath(IUri *iface, BSTR *pstrPath)
 {
     TRACE("(%p)->(%p)\n", iface, pstrPath);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_PATH, pstrPath, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_PATH, pstrPath, 0);
 }
 
 static HRESULT WINAPI Uri_GetPathAndQuery(IUri *iface, BSTR *pstrPathAndQuery)
 {
     TRACE("(%p)->(%p)\n", iface, pstrPathAndQuery);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_PATH_AND_QUERY, pstrPathAndQuery, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_PATH_AND_QUERY, pstrPathAndQuery, 0);
 }
 
 static HRESULT WINAPI Uri_GetQuery(IUri *iface, BSTR *pstrQuery)
 {
     TRACE("(%p)->(%p)\n", iface, pstrQuery);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_QUERY, pstrQuery, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_QUERY, pstrQuery, 0);
 }
 
 static HRESULT WINAPI Uri_GetRawUri(IUri *iface, BSTR *pstrRawUri)
 {
     TRACE("(%p)->(%p)\n", iface, pstrRawUri);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_RAW_URI, pstrRawUri, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_RAW_URI, pstrRawUri, 0);
 }
 
 static HRESULT WINAPI Uri_GetSchemeName(IUri *iface, BSTR *pstrSchemeName)
 {
     TRACE("(%p)->(%p)\n", iface, pstrSchemeName);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_SCHEME_NAME, pstrSchemeName, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_SCHEME_NAME, pstrSchemeName, 0);
 }
 
 static HRESULT WINAPI Uri_GetUserInfo(IUri *iface, BSTR *pstrUserInfo)
 {
     TRACE("(%p)->(%p)\n", iface, pstrUserInfo);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_USER_INFO, pstrUserInfo, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_USER_INFO, pstrUserInfo, 0);
 }
 
 static HRESULT WINAPI Uri_GetUserName(IUri *iface, BSTR *pstrUserName)
 {
     TRACE("(%p)->(%p)\n", iface, pstrUserName);
-    return Uri_GetPropertyBSTR(iface, Uri_PROPERTY_USER_NAME, pstrUserName, 0);
+    return IUri_GetPropertyBSTR(iface, Uri_PROPERTY_USER_NAME, pstrUserName, 0);
 }
 
 static HRESULT WINAPI Uri_GetHostType(IUri *iface, DWORD *pdwHostType)
 {
     TRACE("(%p)->(%p)\n", iface, pdwHostType);
-    return Uri_GetPropertyDWORD(iface, Uri_PROPERTY_HOST_TYPE, pdwHostType, 0);
+    return IUri_GetPropertyDWORD(iface, Uri_PROPERTY_HOST_TYPE, pdwHostType, 0);
 }
 
 static HRESULT WINAPI Uri_GetPort(IUri *iface, DWORD *pdwPort)
 {
     TRACE("(%p)->(%p)\n", iface, pdwPort);
-    return Uri_GetPropertyDWORD(iface, Uri_PROPERTY_PORT, pdwPort, 0);
+    return IUri_GetPropertyDWORD(iface, Uri_PROPERTY_PORT, pdwPort, 0);
 }
 
 static HRESULT WINAPI Uri_GetScheme(IUri *iface, DWORD *pdwScheme)
 {
     Uri *This = URI_THIS(iface);
     TRACE("(%p)->(%p)\n", This, pdwScheme);
-    return Uri_GetPropertyDWORD(iface, Uri_PROPERTY_SCHEME, pdwScheme, 0);
+    return IUri_GetPropertyDWORD(iface, Uri_PROPERTY_SCHEME, pdwScheme, 0);
 }
 
 static HRESULT WINAPI Uri_GetZone(IUri *iface, DWORD *pdwZone)
 {
     TRACE("(%p)->(%p)\n", iface, pdwZone);
-    return Uri_GetPropertyDWORD(iface, Uri_PROPERTY_ZONE,pdwZone, 0);
+    return IUri_GetPropertyDWORD(iface, Uri_PROPERTY_ZONE,pdwZone, 0);
 }
 
 static HRESULT WINAPI Uri_GetProperties(IUri *iface, DWORD *pdwProperties)
@@ -5724,7 +5719,7 @@ static HRESULT merge_paths(parse_data *data, const WCHAR *base, DWORD base_len, 
     return S_OK;
 }
 
-static HRESULT combine_uri(Uri *base, Uri *relative, DWORD flags, IUri **result) {
+static HRESULT combine_uri(Uri *base, Uri *relative, DWORD flags, IUri **result, DWORD extras) {
     Uri *ret;
     HRESULT hr;
     parse_data data;
@@ -5751,8 +5746,15 @@ static HRESULT combine_uri(Uri *base, Uri *relative, DWORD flags, IUri **result)
             return E_OUTOFMEMORY;
         }
 
+        if(extras & COMBINE_URI_FORCE_FLAG_USE) {
+            if(flags & URL_DONT_SIMPLIFY)
+                create_flags |= Uri_CREATE_NO_CANONICALIZE;
+            if(flags & URL_DONT_UNESCAPE_EXTRA_INFO)
+                create_flags |= Uri_CREATE_NO_DECODE_EXTRA_INFO;
+        }
+
         ret->raw_uri = data.uri;
-        hr = canonicalize_uri(&data, ret, 0);
+        hr = canonicalize_uri(&data, ret, create_flags);
         if(FAILED(hr)) {
             IUri_Release(URI(ret));
             *result = NULL;
@@ -5978,6 +5980,7 @@ HRESULT WINAPI CoInternetCombineIUri(IUri *pBaseUri, IUri *pRelativeUri, DWORD d
                                      IUri **ppCombinedUri, DWORD_PTR dwReserved)
 {
     HRESULT hr;
+    IInternetProtocolInfo *info;
     Uri *relative, *base;
     TRACE("(%p %p %x %p %x)\n", pBaseUri, pRelativeUri, dwCombineFlags, ppCombinedUri, (DWORD)dwReserved);
 
@@ -5998,8 +6001,82 @@ HRESULT WINAPI CoInternetCombineIUri(IUri *pBaseUri, IUri *pRelativeUri, DWORD d
         return E_NOTIMPL;
     }
 
-    hr = combine_uri(base, relative, dwCombineFlags, ppCombinedUri);
-    if(hr == E_NOTIMPL)
-        FIXME("(%p %p %x %p %x): stub\n", pBaseUri, pRelativeUri, dwCombineFlags, ppCombinedUri, (DWORD)dwReserved);
+    info = get_protocol_info(base->canon_uri);
+    if(info) {
+        WCHAR result[INTERNET_MAX_URL_LENGTH+1];
+        DWORD result_len = 0;
+
+        hr = IInternetProtocolInfo_CombineUrl(info, base->canon_uri, relative->canon_uri, dwCombineFlags,
+                                              result, INTERNET_MAX_URL_LENGTH+1, &result_len, 0);
+        IInternetProtocolInfo_Release(info);
+        if(SUCCEEDED(hr)) {
+            hr = CreateUri(result, Uri_CREATE_ALLOW_RELATIVE, 0, ppCombinedUri);
+            if(SUCCEEDED(hr))
+                return hr;
+        }
+    }
+
+    return combine_uri(base, relative, dwCombineFlags, ppCombinedUri, 0);
+}
+
+/***********************************************************************
+ *           CoInternetCombineUrlEx (urlmon.@)
+ */
+HRESULT WINAPI CoInternetCombineUrlEx(IUri *pBaseUri, LPCWSTR pwzRelativeUrl, DWORD dwCombineFlags,
+                                      IUri **ppCombinedUri, DWORD_PTR dwReserved)
+{
+    IUri *relative;
+    Uri *base;
+    HRESULT hr;
+    IInternetProtocolInfo *info;
+
+    TRACE("(%p %s %x %p %x) stub\n", pBaseUri, debugstr_w(pwzRelativeUrl), dwCombineFlags,
+        ppCombinedUri, (DWORD)dwReserved);
+
+    if(!ppCombinedUri)
+        return E_POINTER;
+
+    if(!pwzRelativeUrl) {
+        *ppCombinedUri = NULL;
+        return E_UNEXPECTED;
+    }
+
+    if(!pBaseUri) {
+        *ppCombinedUri = NULL;
+        return E_INVALIDARG;
+    }
+
+    base = get_uri_obj(pBaseUri);
+    if(!base) {
+        *ppCombinedUri = NULL;
+        FIXME("(%p %s %x %p %x) Unknown IUri's not supported yet.\n", pBaseUri, debugstr_w(pwzRelativeUrl),
+            dwCombineFlags, ppCombinedUri, (DWORD)dwReserved);
+        return E_NOTIMPL;
+    }
+
+    info = get_protocol_info(base->canon_uri);
+    if(info) {
+        WCHAR result[INTERNET_MAX_URL_LENGTH+1];
+        DWORD result_len = 0;
+
+        hr = IInternetProtocolInfo_CombineUrl(info, base->canon_uri, pwzRelativeUrl, dwCombineFlags,
+                                              result, INTERNET_MAX_URL_LENGTH+1, &result_len, 0);
+        IInternetProtocolInfo_Release(info);
+        if(SUCCEEDED(hr)) {
+            hr = CreateUri(result, Uri_CREATE_ALLOW_RELATIVE, 0, ppCombinedUri);
+            if(SUCCEEDED(hr))
+                return hr;
+        }
+    }
+
+    hr = CreateUri(pwzRelativeUrl, Uri_CREATE_ALLOW_RELATIVE, 0, &relative);
+    if(FAILED(hr)) {
+        *ppCombinedUri = NULL;
+        return hr;
+    }
+
+    hr = combine_uri(base, get_uri_obj(relative), dwCombineFlags, ppCombinedUri, COMBINE_URI_FORCE_FLAG_USE);
+
+    IUri_Release(relative);
     return hr;
 }
